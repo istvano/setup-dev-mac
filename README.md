@@ -147,6 +147,10 @@ Atuin's local SQLite database by default: automatic sync, update checks, the
 background daemon and Atuin AI are disabled. Selected history entries are
 inserted for review rather than executed immediately.
 
+Atuin records command text and execution context. Continue to pass secrets
+through prompts, environment files or secret managers rather than command-line
+arguments.
+
 Import existing zsh history explicitly when ready:
 
 ```bash
