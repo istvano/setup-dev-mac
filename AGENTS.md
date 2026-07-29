@@ -26,6 +26,8 @@ These are deliberate defaults, not placeholders:
 - Default package profiles: core, dev, security and minimal productivity.
 - Cloud providers, Kubernetes, data clients, privileged security monitors and
   personal productivity applications are explicit opt-ins.
+- Optional browsers use isolated `personal` and `work` data roots; additional
+  lowercase profile names are created explicitly with `browser-profile`.
 - BetterDisplay Free Edition is a native productivity dependency.
 - Stateful services and repeatable scanners belong in containers.
 - Exploit development, malware analysis, GDB-centric workflows and untrusted

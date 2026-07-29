@@ -113,3 +113,15 @@ security monitors and personal productivity applications use explicit profile
 fragments. This prevents unrelated credentials, background components,
 permissions and update surfaces from entering the default trusted computing
 base while keeping reviewed specialist tools reproducible.
+
+## ADR-014: Isolate browser contexts with separate data roots
+
+**Status:** accepted
+
+When `productivity-extra` is selected, the workstation provisions `personal`
+and `work` data roots for both Chrome and Firefox Developer Edition. A
+repository-owned launcher passes the supported browser command-line options
+instead of editing browser-owned profile registries or preference databases.
+Additional contexts are explicit. Browser account sync remains a user decision
+because signing multiple contexts into the same sync account can weaken the
+intended separation.

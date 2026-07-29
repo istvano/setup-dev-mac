@@ -113,6 +113,20 @@ atuin import auto
 Continue to pass secrets through prompts, environment files or secret managers
 rather than command-line arguments.
 
+## Browser isolation
+
+Selecting `productivity-extra` provisions separate `personal` and `work` data
+roots for Chrome and Firefox Developer Edition. Launch them with:
+
+```bash
+browser-profile open chrome personal
+browser-profile open firefox work
+```
+
+Use `browser-profile add NAME` to create additional isolated contexts. See
+[Operations](docs/OPERATIONS.md#browser-profiles) for limitations and the full
+workflow.
+
 ## Repository layout
 
 ```text

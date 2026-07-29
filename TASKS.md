@@ -6,8 +6,6 @@ and hardening procedures are documented in `docs/OPERATIONS.md`.
 ## Workstation follow-up
 
 - [ ] Establish encrypted Time Machine and off-site backup.
-- [ ] Create separate browser profiles for personal, corporate, cloud admin and
-      security testing.
 - [ ] Define short-lived cloud credential workflows before running cloud scans.
 
 ## Repository improvements

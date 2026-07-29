@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-for test in shell-syntax render-brewfile yaml placement-policy idempotency agents; do bash "$ROOT/tests/$test.sh"; done
+for test in shell-syntax render-brewfile yaml placement-policy idempotency browser-profiles agents; do bash "$ROOT/tests/$test.sh"; done
 echo 'All repository tests passed.'

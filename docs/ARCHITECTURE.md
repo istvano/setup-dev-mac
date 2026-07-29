@@ -14,6 +14,10 @@ Owns native GUI, identity, system and frequently invoked tooling. Packages stay
 here only when they need macOS APIs, direct host interfaces, system extensions,
 interactive desktop use or low-latency access to the host filesystem.
 
+Browser identities remain host-local application state. Optional Chrome and
+Firefox installations use separate managed data roots rather than sharing
+cookies, extensions and local storage between personal and work contexts.
+
 ### Project-local MLX environments
 
 Each project that needs MLX owns it in a uv environment. This boundary preserves

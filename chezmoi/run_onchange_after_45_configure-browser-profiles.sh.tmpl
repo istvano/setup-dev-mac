@@ -1,0 +1,6 @@
+{{- if and (eq .chezmoi.os "darwin") (has "productivity-extra" .profiles) -}}
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# browser-profile: {{ output "shasum" "-a" "256" (joinPath .chezmoi.sourceDir "script/browser-profile") | trim }}
+{{ joinPath .chezmoi.sourceDir "script/browser-profile" | quote }} ensure-defaults
+{{- end }}

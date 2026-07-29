@@ -123,6 +123,47 @@ ambiguous.
 renders that exact Brewfile and checks it with Homebrew Bundle before running
 `chezmoi doctor`.
 
+## Browser profiles
+
+Selecting `productivity-extra` installs Chrome and Firefox Developer Edition.
+Chezmoi then creates private `personal` and `work` data roots for both browsers
+and installs the `browser-profile` command in `~/.local/bin`.
+
+List the available contexts:
+
+```bash
+browser-profile list
+```
+
+Launch a context:
+
+```bash
+browser-profile open chrome personal
+browser-profile open chrome work
+browser-profile open firefox personal
+browser-profile open firefox work
+```
+
+Add another lowercase context when a workflow needs stronger separation:
+
+```bash
+browser-profile add cloud-admin
+browser-profile add security-testing
+```
+
+The command accepts lowercase letters, numbers, dots, underscores and hyphens.
+It never removes profiles or edits browser-owned registries.
+
+Each Chrome context uses a distinct `--user-data-dir`. Firefox uses a distinct
+profile path with `-no-remote` so contexts can run concurrently. Firefox
+instances launched this way do not receive links opened by other applications;
+open or paste those links in the intended context manually.
+
+Treat browser sync as crossing the isolation boundary. Do not sign personal,
+work, administration and security-testing contexts into the same sync account
+unless that sharing is deliberate. Review extensions, downloads, password
+storage, client certificates and proxy settings independently in every context.
+
 ## Package reconciliation
 
 Removing an entry from a profile changes the declared state but does not
@@ -155,8 +196,8 @@ automation.
 
 - Enable FileVault manually and store its recovery key offline.
 - Maintain encrypted Time Machine and off-site backups.
-- Use separate browser profiles for personal, corporate, cloud-administration
-  and security-testing contexts.
+- Keep personal and work browser contexts separate; add cloud-administration
+  and security-testing contexts only when required.
 - Use short-lived, least-privilege cloud credentials.
 - Review privacy permissions and background/login items after installing or
   removing security and productivity applications.

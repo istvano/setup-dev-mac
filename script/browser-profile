@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+if [[ -z "${BROWSER_PROFILE_ROOT:-}" ]]; then
+  require_macos_arm64
+  BROWSER_PROFILE_ROOT="$HOME/Library/Application Support/security-ai-workstation/browser-profiles"
+fi
+
+BROWSERS=(chrome firefox)
+
+usage() {
+  cat <<'EOF'
+Usage:
+  browser-profile ensure-defaults
+  browser-profile add NAME
+  browser-profile list
+  browser-profile open chrome|firefox NAME
+
+Profile names use lowercase letters, numbers, dots, underscores and hyphens.
+EOF
+}
+
+validate_name() {
+  local name="$1"
+  [[ "$name" =~ ^[a-z0-9][a-z0-9._-]*$ ]] ||
+    die "Invalid profile name: $name"
+}
+
+profile_path() {
+  local browser="$1" name="$2"
+  printf '%s/%s/%s\n' "$BROWSER_PROFILE_ROOT" "$browser" "$name"
+}
+
+ensure_profile() {
+  local name="$1" browser path
+  validate_name "$name"
+  umask 077
+  for browser in "${BROWSERS[@]}"; do
+    path="$(profile_path "$browser" "$name")"
+    [[ ! -L "$path" ]] || die "Refusing symlinked browser profile path: $path"
+    mkdir -p "$path"
+    chmod 700 "$path"
+  done
+}
+
+ensure_defaults() {
+  ensure_profile personal
+  ensure_profile work
+  success "Browser profiles personal and work are ready."
+}
+
+add_profile() {
+  local name="$1"
+  ensure_profile "$name"
+  success "Browser profile $name is ready for Chrome and Firefox."
+}
+
+list_profiles() {
+  local browser path
+  for browser in "${BROWSERS[@]}"; do
+    for path in "$BROWSER_PROFILE_ROOT/$browser"/*; do
+      [[ -d "$path" && ! -L "$path" ]] || continue
+      printf '%-8s %s\n' "$browser" "$(basename "$path")"
+    done
+  done
+}
+
+open_profile() {
+  local browser="$1" name="$2" path
+  validate_name "$name"
+  path="$(profile_path "$browser" "$name")"
+
+  case "$browser" in
+    chrome)
+      [[ -d "/Applications/Google Chrome.app" || -d "$HOME/Applications/Google Chrome.app" ]] ||
+        die "Google Chrome is not installed; select the productivity-extra profile."
+      ensure_profile "$name"
+      open -na "Google Chrome" --args "--user-data-dir=$path"
+      ;;
+    firefox)
+      [[ -d "/Applications/Firefox Developer Edition.app" || -d "$HOME/Applications/Firefox Developer Edition.app" ]] ||
+        die "Firefox Developer Edition is not installed; select the productivity-extra profile."
+      ensure_profile "$name"
+      open -na "Firefox Developer Edition" --args -no-remote -profile "$path"
+      ;;
+    *)
+      die "Unknown browser: $browser"
+      ;;
+  esac
+}
+
+main() {
+  local command="${1:-list}"
+  [[ $# -gt 0 ]] && shift
+
+  case "$command" in
+    ensure-defaults)
+      [[ $# -eq 0 ]] || die "ensure-defaults takes no arguments."
+      ensure_defaults
+      ;;
+    add)
+      [[ $# -eq 1 ]] || die "add requires one profile name."
+      add_profile "$1"
+      ;;
+    list)
+      [[ $# -eq 0 ]] || die "list takes no arguments."
+      list_profiles
+      ;;
+    open)
+      [[ $# -eq 2 ]] || die "open requires a browser and profile name."
+      open_profile "$1" "$2"
+      ;;
+    help|-h|--help)
+      usage
+      ;;
+    *)
+      usage >&2
+      die "Unknown command: $command"
+      ;;
+  esac
+}
+
+main "$@"
