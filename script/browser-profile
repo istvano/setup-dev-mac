@@ -114,7 +114,7 @@ main() {
       [[ $# -eq 2 ]] || die "open requires a browser and profile name."
       open_profile "$1" "$2"
       ;;
-    help|-h|--help)
+    help | -h | --help)
       usage
       ;;
     *)

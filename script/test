@@ -1,5 +1,23 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-for test in shell-syntax render-brewfile yaml placement-policy idempotency browser-profiles agents; do bash "$ROOT/tests/$test.sh"; done
+
+# tests/lib.sh holds shared assertions and is sourced, not run.
+TESTS=(
+  shell-syntax
+  format
+  render-brewfile
+  profiles
+  chezmoi-templates
+  yaml
+  placement-policy
+  idempotency
+  browser-profiles
+  agents
+)
+
+for test in "${TESTS[@]}"; do
+  bash "$ROOT/tests/$test.sh"
+done
+
 echo 'All repository tests passed.'

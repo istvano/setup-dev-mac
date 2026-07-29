@@ -1,0 +1,40 @@
+{{- if eq .chezmoi.os "darwin" -}}
+#!/usr/bin/env bash
+# Create the age identity that SOPS uses, if one does not already exist.
+#
+# sops and age are installed by the security profile but had no key-management
+# story, so encrypted project files could not actually be created. The private
+# key is written to ~/.config/age/keys.txt with mode 0600 and is never placed
+# in this repository.
+#
+# For a hardware-backed identity instead, install security-extra and use
+# age-plugin-yubikey; this script leaves an existing key untouched.
+set -Eeuo pipefail
+
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
+KEY_DIR="{{ joinPath .chezmoi.homeDir ".config/age" }}"
+KEY_FILE="$KEY_DIR/keys.txt"
+
+command -v age-keygen >/dev/null 2>&1 || {
+  echo "[WARN] age is not installed; skipping age identity creation." >&2
+  exit 0
+}
+
+if [[ -f "$KEY_FILE" ]]; then
+  echo "[OK] An age identity already exists at $KEY_FILE."
+  exit 0
+fi
+
+umask 077
+mkdir -p "$KEY_DIR"
+age-keygen -o "$KEY_FILE" 2>/dev/null
+chmod 600 "$KEY_FILE"
+
+echo "[OK] Created an age identity at $KEY_FILE."
+echo "     Public key (use this as an age recipient in .sops.yaml):"
+age-keygen -y "$KEY_FILE"
+echo "     Back this key up now: losing it makes every SOPS-encrypted file unrecoverable."
+{{- end }}

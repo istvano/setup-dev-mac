@@ -10,11 +10,17 @@ required_agents=(
 )
 
 for file in "${required_agents[@]}"; do
-  [[ -s "$file" ]] || { echo "Missing or empty $file" >&2; exit 1; }
+  [[ -s "$file" ]] || {
+    echo "Missing or empty $file" >&2
+    exit 1
+  }
 done
 
-root_size="$(wc -c < "$ROOT/AGENTS.md" | tr -d ' ')"
-(( root_size < 32768 )) || { echo "Root AGENTS.md exceeds 32 KiB" >&2; exit 1; }
+root_size="$(wc -c <"$ROOT/AGENTS.md" | tr -d ' ')"
+((root_size < 32768)) || {
+  echo "Root AGENTS.md exceeds 32 KiB" >&2
+  exit 1
+}
 
 while IFS= read -r skill; do
   head -n 1 "$skill" | grep -qx -- '---'

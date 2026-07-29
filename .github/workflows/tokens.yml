@@ -1,0 +1,20 @@
+name: homebrew-tokens
+# Homebrew renames and deprecates formulae and casks continuously. Two tokens in
+# the default security profile had already gone stale (mitmproxy moved from a
+# formula to a cask; wireshark became wireshark-app), which would have failed a
+# first install on a real machine.
+#
+# This lives in its own workflow so an upstream API outage cannot block
+# validate.yml, which must stay offline and deterministic.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tokens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: ./script/check-tokens

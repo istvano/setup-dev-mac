@@ -1,0 +1,8 @@
+# .editorconfig declares LF endings; this enforces them in the repository.
+* text=auto eol=lf
+
+# Brewfile fragments are plain text regardless of extension.
+*.Brewfile text
+
+# Generated or vendored content should not skew language statistics.
+docs/** linguist-documentation

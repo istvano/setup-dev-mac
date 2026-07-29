@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=tests/lib.sh
+source "$ROOT/tests/lib.sh"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=script/lib/profiles.sh
 source "$ROOT/script/lib/profiles.sh"
 "$ROOT/script/render-brewfile" --output "$TMP/Brewfile"
@@ -28,18 +32,21 @@ grep -q 'cask "zed"' "$TMP/Brewfile"
 grep -q 'cask "rancher"' "$TMP/Brewfile"
 grep -q 'cask "bitwarden"' "$TMP/Brewfile"
 grep -q 'cask "lulu"' "$TMP/Brewfile"
-! grep -q 'cask "1password"' "$TMP/Brewfile"
-! grep -E -q '^(brew|cask) "(bun|httpie|mas|procs|rectangle|wireguard-tools)"' "$TMP/Brewfile"
-! grep -E -q '^(brew|cask) "(awscli|azure-cli|burp-suite|dbeaver-community|gcloud-cli|kubectl|obsidian)"' "$TMP/Brewfile"
+refute_match 'cask "1password"' "$TMP/Brewfile"
+refute_match '^(brew|cask) "(bun|httpie|mas|procs|rectangle|wireguard-tools)"' "$TMP/Brewfile"
+refute_match '^(brew|cask) "(awscli|azure-cli|burp-suite|dbeaver-community|gcloud-cli|kubernetes-cli)"' "$TMP/Brewfile"
 
+# A deliberate ceiling on the default trusted computing base (ADR-013). Raising
+# it is a reviewed decision, not routine maintenance: every entry is software
+# that runs on the host by default.
 default_count="$(grep -E -c '^(brew|cask) "' "$TMP/Brewfile")"
-(( default_count <= 50 )) || {
-  echo "Default Brewfile exceeds 50 entries: $default_count" >&2
+((default_count <= 70)) || {
+  echo "Default Brewfile exceeds 70 entries: $default_count" >&2
   exit 1
 }
 
 "$ROOT/script/render-brewfile" \
-  --profiles core,dev,security,security-extra,cloud,cloud-aws,cloud-azure,cloud-gcp,kubernetes,data,productivity,productivity-extra,paid \
+  --profiles core,dev,security,security-extra,security-scan,backup,cloud,cloud-aws,cloud-azure,cloud-gcp,kubernetes,data,productivity,productivity-extra,paid \
   --runtime orbstack \
   --password-manager 1password \
   --firewall little-snitch \
@@ -47,18 +54,19 @@ default_count="$(grep -E -c '^(brew|cask) "' "$TMP/Brewfile")"
 grep -q 'brew "awscli"' "$TMP/optional.Brewfile"
 grep -q 'brew "azure-cli"' "$TMP/optional.Brewfile"
 grep -q 'cask "gcloud-cli"' "$TMP/optional.Brewfile"
-grep -q 'brew "kubectl"' "$TMP/optional.Brewfile"
+grep -q 'brew "kubernetes-cli"' "$TMP/optional.Brewfile"
 grep -q 'cask "burp-suite"' "$TMP/optional.Brewfile"
 grep -q 'cask "dbeaver-community"' "$TMP/optional.Brewfile"
 grep -q 'cask "obsidian"' "$TMP/optional.Brewfile"
 grep -q 'cask "orbstack"' "$TMP/optional.Brewfile"
 grep -q 'cask "1password"' "$TMP/optional.Brewfile"
 grep -q 'cask "little-snitch"' "$TMP/optional.Brewfile"
+grep -q 'brew "restic"' "$TMP/optional.Brewfile"
+grep -q 'brew "trivy"' "$TMP/optional.Brewfile"
+grep -q 'brew "granted"' "$TMP/optional.Brewfile"
 
-if "$ROOT/script/render-brewfile" --profiles core,core --output "$TMP/duplicate.Brewfile" >/dev/null 2>&1; then
-  echo 'Duplicate profiles were unexpectedly accepted.' >&2
-  exit 1
-fi
+refute_command 'Duplicate profiles were unexpectedly accepted.' \
+  "$ROOT/script/render-brewfile" --profiles core,core --output "$TMP/duplicate.Brewfile"
 
 [[ "$DEFAULT_PROFILES" == "core,dev,security,productivity" ]]
 grep -q '(list "core" "dev" "security" "productivity")' "$ROOT/chezmoi/.chezmoi.toml.tmpl"

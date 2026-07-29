@@ -1,6 +1,13 @@
+{{- /* This gate must name every profile that declares a browser cask. A browser
+       installed by a profile missing from this list would get no isolated data
+       roots and no browser-profile command, defeating ADR-014 silently.
+       tests/browser-profiles.sh derives the required set from profiles/ and
+       fails if a browser is moved without updating this line. */ -}}
 {{- if and (eq .chezmoi.os "darwin") (has "productivity-extra" .profiles) -}}
+{{- /* Repository scripts live one level above .chezmoi.sourceDir; see .chezmoiroot. */ -}}
+{{- $repo := dir .chezmoi.sourceDir -}}
 #!/usr/bin/env bash
 set -Eeuo pipefail
-# browser-profile: {{ output "shasum" "-a" "256" (joinPath .chezmoi.sourceDir "script/browser-profile") | trim }}
-{{ joinPath .chezmoi.sourceDir "script/browser-profile" | quote }} ensure-defaults
+# browser-profile: {{ output "shasum" "-a" "256" (joinPath $repo "script/browser-profile") | trim }}
+{{ joinPath $repo "script/browser-profile" | quote }} ensure-defaults
 {{- end }}

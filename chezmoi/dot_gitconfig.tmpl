@@ -1,21 +1,88 @@
 [user]
   name = {{ .gitName | quote }}
   email = {{ .gitEmail | quote }}
+{{- if and .gitSigningKey (ne .gitSigningMethod "none") }}
+  signingkey = {{ .gitSigningKey | quote }}
+{{- end }}
 [init]
   defaultBranch = main
 [core]
+{{- if lookPath "nvim" }}
+  editor = nvim
+{{- else }}
   editor = code --wait
+{{- end }}
   pager = delta
+  excludesfile = {{ joinPath .chezmoi.homeDir ".config/git/ignore" | quote }}
 [interactive]
   diffFilter = delta --color-only
 [delta]
   navigate = true
   line-numbers = true
+[diff]
+  algorithm = histogram
+  colorMoved = default
 [merge]
   conflictstyle = zdiff3
+[rerere]
+  enabled = true
 [pull]
   ff = only
 [fetch]
   prune = true
 [push]
   autoSetupRemote = true
+  followTags = true
+[submodule]
+  recurse = true
+[column]
+  ui = auto
+[branch]
+  sort = -committerdate
+
+# Reject malformed objects instead of writing them into the object store. This
+# is cheap and blocks a class of repository-delivered attacks.
+[transfer]
+  fsckObjects = true
+[receive]
+  fsckObjects = true
+{{- $signing := and .gitSigningKey (ne .gitSigningMethod "none") }}
+{{- if $signing }}
+{{- if eq .gitSigningMethod "gpg" }}
+
+# OpenPGP commit signing. `user.signingkey` above is the key ID; find it with
+#   gpg --list-secret-keys --keyid-format=long
+# gpg-agent handles the passphrase through pinentry-mac and can cache it in the
+# Keychain, so signing does not prompt on every commit.
+[gpg]
+  format = openpgp
+{{- if lookPath "gpg" }}
+  # Absolute path so GUI Git clients, which do not inherit the shell PATH, can
+  # still find the Homebrew gpg rather than falling back to a system binary.
+  program = {{ lookPath "gpg" | quote }}
+{{- end }}
+{{- else }}
+
+# SSH-based commit signing. In every intended configuration the private key
+# stays off disk: 1Password's agent, Secretive's Secure Enclave agent, or a
+# YubiKey resident key holds it.
+[gpg]
+  format = ssh
+[gpg "ssh"]
+  allowedSignersFile = {{ joinPath .chezmoi.homeDir ".config/git/allowed_signers" | quote }}
+{{- if eq .passwordManager "1password" }}
+  program = "/Applications/1Password.app/Contents/MacOS/op-ssh-sign"
+{{- end }}
+{{- end }}
+[commit]
+  gpgsign = true
+[tag]
+  gpgsign = true
+{{- end }}
+{{- if .workGitEmail }}
+
+# Work repositories use a separate identity, mirroring the personal/work split
+# the browser profiles already enforce. Keep work repositories under this path.
+[includeIf {{ printf "gitdir:%s/" .workGitDir | quote }}]
+  path = {{ joinPath .chezmoi.homeDir ".config/git/config-work" | quote }}
+{{- end }}

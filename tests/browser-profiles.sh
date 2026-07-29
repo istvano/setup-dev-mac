@@ -37,6 +37,23 @@ if "$ROOT/script/browser-profile" add linked >/dev/null 2>&1; then
   exit 1
 fi
 
-grep -q 'has "productivity-extra" .profiles' \
-  "$ROOT/chezmoi/run_onchange_after_45_configure-browser-profiles.sh.tmpl"
+# Provisioning must fire for every profile that can install a browser. The
+# required set is derived from profiles/ rather than hardcoded, so moving a
+# browser cask between profiles cannot leave it installed without its isolated
+# data roots and without the browser-profile command.
+gate="$ROOT/chezmoi/run_onchange_after_45_configure-browser-profiles.sh.tmpl"
+browser_profiles=0
+for fragment in "$ROOT"/profiles/*.Brewfile; do
+  grep -qE '^[[:space:]]*cask "(google-chrome|firefox@developer-edition)"' "$fragment" || continue
+  name="$(basename "$fragment" .Brewfile)"
+  browser_profiles=$((browser_profiles + 1))
+  grep -q "has \"$name\" .profiles" "$gate" || {
+    echo "profiles/$name.Brewfile declares a browser but is not in the provisioning gate." >&2
+    exit 1
+  }
+done
+((browser_profiles > 0)) || {
+  echo 'No profile declares a browser cask; the detection is broken.' >&2
+  exit 1
+}
 echo 'Browser profile management: OK'

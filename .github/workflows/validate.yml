@@ -2,19 +2,38 @@ name: validate
 on: [push, pull_request]
 permissions:
   contents: read
+env:
+  # A missing linter must fail the job rather than silently skip its check.
+  REQUIRE_LINTERS: "1"
+  REQUIRE_CHEZMOI: "1"
 jobs:
   linux-static:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y shellcheck python3-yaml
-      - run: find . -type f \( -name '*.sh' -o -name bootstrap \) -print0 | xargs -0 shellcheck -x
+      # Actions are pinned to commit SHAs so CI honours the immutable-reference
+      # rule this repository already applies to container images (ADR-006).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck python3-yaml
+          # shfmt, actionlint, gitleaks and chezmoi are not available in a
+          # current-enough form from apt.
+          go install mvdan.cc/sh/v3/cmd/shfmt@latest
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          go install github.com/zricethezav/gitleaks/v8@latest
+          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
+          echo "$HOME/go/bin" >>"$GITHUB_PATH"
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+      # script/test discovers shell scripts by shebang via script/shell-files,
+      # so the previously skipped extensionless scripts under script/ are now
+      # linted. CI no longer maintains its own duplicate file selector.
       - run: ./script/test
+
   macos-render:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: brew install shellcheck yamllint
-      - run: find . -type f \( -name '*.sh' -o -name bootstrap \) -print0 | xargs -0 shellcheck -x
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: brew install shellcheck shfmt actionlint gitleaks yamllint chezmoi
       - run: ./script/test
       - run: ./bootstrap plan

@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Record the workstation's installed software and applied macOS defaults.
+#
+# The repository declares intent; this records what is actually present. Keeping
+# dated snapshots makes it possible to answer "what changed on this machine, and
+# when" after an incident, which the declared state alone cannot.
+#
+# Snapshots are written outside the repository by default because they describe
+# one machine. Pass --output to place one somewhere else deliberately.
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+require_macos_arm64
+command_exists brew || die "brew is required."
+
+STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation/snapshots"
+OUTPUT=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output)
+      [[ $# -ge 2 ]] || die "--output requires a path."
+      OUTPUT="$2"
+      shift 2
+      ;;
+    --help | -h)
+      echo 'Usage: script/snapshot [--output PATH]'
+      exit 0
+      ;;
+    *) die "Unknown option: $1" ;;
+  esac
+done
+
+if [[ -z "$OUTPUT" ]]; then
+  mkdir -p "$STATE_DIR"
+  OUTPUT="$STATE_DIR/$(date +%Y%m%d-%H%M%S).txt"
+fi
+
+{
+  printf '# Workstation snapshot %s\n' "$(date)"
+  printf '# macOS %s (%s)\n\n' "$(sw_vers -productVersion)" "$(uname -m)"
+
+  echo '== Installed formulae =='
+  brew list --formula --versions
+
+  echo
+  echo '== Installed casks =='
+  brew list --cask --versions
+
+  echo
+  echo '== Taps =='
+  brew tap
+
+  echo
+  echo '== Declared macOS defaults =='
+  "$ROOT/script/macos-defaults" --diff 2>&1 || true
+} >"$OUTPUT"
+
+chmod 600 "$OUTPUT"
+success "Wrote $OUTPUT"

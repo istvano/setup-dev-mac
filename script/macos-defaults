@@ -1,10 +1,400 @@
 #!/usr/bin/env bash
+# Declarative, verifiable macOS defaults.
+#
+# macOS silently ignores keys it no longer honours: `defaults write` succeeds,
+# the value is stored, and nothing changes. A write-only script therefore cannot
+# tell you whether it worked. Every setting here is declared once in a table
+# that drives both application and read-back, so --verify can report exactly
+# which keys this macOS version accepted and which it ignored.
+#
+#   macos-defaults [apply]   write the declared values (default)
+#   macos-defaults --dry-run print the commands that would run, change nothing
+#   macos-defaults --diff    show current versus declared values
+#   macos-defaults --verify  read values back and report drift; non-zero on drift
+#
+# Deliberately out of scope, per ADR-012 and the repository's security
+# invariants: Gatekeeper quarantine (LSQuarantine), automatic FileVault,
+# Rosetta, and the pmset standby keys that are no-ops on Apple Silicon.
 set -Eeuo pipefail
-[[ "$(uname -s)" == Darwin ]] || exit 0
-defaults write NSGlobalDomain AppleShowAllExtensions -bool true
-defaults write NSGlobalDomain NSNavPanelExpandedStateForSaveMode -bool true
-defaults write NSGlobalDomain NSNavPanelExpandedStateForSaveMode2 -bool true
-defaults write com.apple.finder FXDefaultSearchScope -string SCcf
-defaults write com.apple.finder ShowPathbar -bool true
-defaults write com.apple.finder ShowStatusBar -bool true
-killall Finder >/dev/null 2>&1 || true
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation"
+
+# section|scope|domain|key|type|value
+#
+# scope:  user    per-user domain
+#         host    per-user, per-host domain (defaults -currentHost)
+#         system  system-wide plist, requires sudo
+#         tcc     per-user domain protected by TCC; needs Full Disk Access, and
+#                 is reported rather than treated as a hard failure
+SETTINGS=(
+  # --- Security and privacy -------------------------------------------------
+  "security|system|/Library/Preferences/com.apple.SoftwareUpdate|AutomaticCheckEnabled|bool|true"
+  "security|system|/Library/Preferences/com.apple.SoftwareUpdate|AutomaticDownload|bool|true"
+  "security|system|/Library/Preferences/com.apple.SoftwareUpdate|CriticalUpdateInstall|bool|true"
+  "security|system|/Library/Preferences/com.apple.SoftwareUpdate|ConfigDataInstall|bool|true"
+  "security|user|com.apple.screensaver|askForPassword|bool|true"
+  "security|user|com.apple.screensaver|askForPasswordDelay|int|0"
+  "security|host|com.apple.screensaver|idleTime|int|300"
+  "security|user|com.apple.AdLib|allowApplePersonalizedAdvertising|bool|false"
+  "security|user|com.apple.assistant.support|Assistant Enabled|bool|false"
+  "security|user|com.apple.lookup.shared|LookupSuggestionsDisabled|bool|true"
+  "security|tcc|com.apple.Safari|UniversalSearchEnabled|bool|false"
+  "security|tcc|com.apple.Safari|AutoOpenSafeDownloads|bool|false"
+  "security|tcc|com.apple.Safari|ShowFullURLInSmartSearchField|bool|true"
+  # Disk-image verification stays on; declared so it cannot drift silently.
+  "security|user|com.apple.frameworks.diskimages|skip-verify|bool|false"
+
+  # --- Data hygiene ---------------------------------------------------------
+  "hygiene|user|com.apple.desktopservices|DSDontWriteNetworkStores|bool|true"
+  "hygiene|user|com.apple.desktopservices|DSDontWriteUSBStores|bool|true"
+
+  # --- Developer ergonomics -------------------------------------------------
+  "dev|user|NSGlobalDomain|NSAutomaticQuoteSubstitutionEnabled|bool|false"
+  "dev|user|NSGlobalDomain|NSAutomaticDashSubstitutionEnabled|bool|false"
+  "dev|user|NSGlobalDomain|NSAutomaticCapitalizationEnabled|bool|false"
+  "dev|user|NSGlobalDomain|NSAutomaticSpellingCorrectionEnabled|bool|false"
+  "dev|user|NSGlobalDomain|NSAutomaticPeriodSubstitutionEnabled|bool|false"
+  "dev|user|NSGlobalDomain|ApplePressAndHoldEnabled|bool|false"
+  "dev|user|NSGlobalDomain|KeyRepeat|int|2"
+  "dev|user|NSGlobalDomain|InitialKeyRepeat|int|15"
+  "dev|user|NSGlobalDomain|AppleKeyboardUIMode|int|3"
+  "dev|user|NSGlobalDomain|NSDocumentSaveNewDocumentsToCloud|bool|false"
+  "dev|user|NSGlobalDomain|AppleShowAllExtensions|bool|true"
+  "dev|user|NSGlobalDomain|NSNavPanelExpandedStateForSaveMode|bool|true"
+  "dev|user|NSGlobalDomain|NSNavPanelExpandedStateForSaveMode2|bool|true"
+
+  # --- Finder ---------------------------------------------------------------
+  "finder|user|com.apple.finder|FXDefaultSearchScope|string|SCcf"
+  "finder|user|com.apple.finder|FXPreferredViewStyle|string|Nlsv"
+  "finder|user|com.apple.finder|ShowPathbar|bool|true"
+  "finder|user|com.apple.finder|ShowStatusBar|bool|true"
+  "finder|user|com.apple.finder|_FXSortFoldersFirst|bool|true"
+  "finder|user|com.apple.finder|FXEnableExtensionChangeWarning|bool|false"
+  "finder|user|com.apple.finder|NewWindowTarget|string|PfHm"
+
+  # --- Dock and Spaces ------------------------------------------------------
+  "dock|user|com.apple.dock|autohide|bool|true"
+  "dock|user|com.apple.dock|autohide-delay|float|0"
+  "dock|user|com.apple.dock|autohide-time-modifier|float|0.15"
+  "dock|user|com.apple.dock|show-recents|bool|false"
+  "dock|user|com.apple.dock|mru-spaces|bool|false"
+  "dock|user|com.apple.dock|tilesize|int|44"
+
+  # --- Screenshots ----------------------------------------------------------
+  "screenshots|user|com.apple.screencapture|location|string|@HOME@/Pictures/Screenshots"
+  "screenshots|user|com.apple.screencapture|type|string|png"
+  "screenshots|user|com.apple.screencapture|disable-shadow|bool|true"
+  "screenshots|user|com.apple.screencapture|show-thumbnail|bool|false"
+
+  # --- Miscellaneous --------------------------------------------------------
+  "misc|user|com.apple.print.PrintingPrefs|Quit When Finished|bool|true"
+  "misc|user|com.apple.TimeMachine|DoNotOfferNewDisksForBackup|bool|true"
+  "misc|user|com.apple.ActivityMonitor|ShowCategory|int|100"
+  "misc|user|com.apple.ActivityMonitor|SortColumn|string|CPUUsage"
+)
+
+# Applications restarted after a successful apply so the changes take effect.
+RESTART_APPS=(Finder Dock SystemUIServer)
+
+MODE="apply"
+SECTION_FILTER=""
+
+usage() {
+  cat <<'EOF'
+Usage: script/macos-defaults [apply|--dry-run|--diff|--verify] [--section NAME]
+
+  apply       write the declared values (default)
+  --dry-run   print the commands that would run, change nothing
+  --diff      show current versus declared values
+  --verify    read values back; non-zero when a value did not take effect
+
+  --section   restrict to one section: security, hygiene, dev, finder, dock,
+              screenshots, misc
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      apply) MODE="apply" ;;
+      --dry-run) MODE="dry-run" ;;
+      --diff) MODE="diff" ;;
+      --verify) MODE="verify" ;;
+      --section)
+        [[ $# -ge 2 ]] || die "--section requires a name."
+        SECTION_FILTER="$2"
+        shift
+        ;;
+      --help | -h)
+        usage
+        exit 0
+        ;;
+      *) die "Unknown argument: $1" ;;
+    esac
+    shift
+  done
+}
+
+expand_value() {
+  printf '%s' "${1//@HOME@/$HOME}"
+}
+
+# `defaults read` reports booleans as 1/0, so declared values are normalised to
+# the same representation before any comparison.
+normalise() {
+  local type="$1" value="$2"
+  case "$type" in
+    bool)
+      case "$value" in
+        true | 1 | YES) printf '1' ;;
+        *) printf '0' ;;
+      esac
+      ;;
+    float)
+      python3 -c 'import sys; print(float(sys.argv[1]))' "$value" 2>/dev/null ||
+        printf '%s' "$value"
+      ;;
+    *) printf '%s' "$value" ;;
+  esac
+}
+
+selected() {
+  [[ -z "$SECTION_FILTER" || "$1" == "$SECTION_FILTER" ]]
+}
+
+read_setting() {
+  local scope="$1" domain="$2" key="$3"
+  case "$scope" in
+    host) defaults -currentHost read "$domain" "$key" 2>/dev/null ;;
+    system) sudo defaults read "$domain" "$key" 2>/dev/null ;;
+    *) defaults read "$domain" "$key" 2>/dev/null ;;
+  esac
+}
+
+write_command() {
+  local scope="$1" domain="$2" key="$3" type="$4" value="$5"
+  case "$scope" in
+    host) printf 'defaults -currentHost write %q %q -%s %q' "$domain" "$key" "$type" "$value" ;;
+    system) printf 'sudo defaults write %q %q -%s %q' "$domain" "$key" "$type" "$value" ;;
+    *) printf 'defaults write %q %q -%s %q' "$domain" "$key" "$type" "$value" ;;
+  esac
+}
+
+write_setting() {
+  local scope="$1" domain="$2" key="$3" type="$4" value="$5"
+  case "$scope" in
+    host) defaults -currentHost write "$domain" "$key" "-$type" "$value" ;;
+    system) sudo defaults write "$domain" "$key" "-$type" "$value" ;;
+    *) defaults write "$domain" "$key" "-$type" "$value" ;;
+  esac
+}
+
+snapshot() {
+  local file
+  mkdir -p "$STATE_DIR"
+  file="$STATE_DIR/macos-defaults-before.$(date +%Y%m%d-%H%M%S).txt"
+  {
+    printf '# Values recorded before script/macos-defaults apply on %s\n' "$(date)"
+    local entry section scope domain key type value current
+    for entry in "${SETTINGS[@]}"; do
+      IFS='|' read -r section scope domain key type value <<<"$entry"
+      current="$(read_setting "$scope" "$domain" "$key" || true)"
+      printf '%s|%s|%s|%s|%s\n' "$section" "$scope" "$domain" "$key" "${current:-<unset>}"
+    done
+  } >"$file"
+  chmod 600 "$file"
+  log "Recorded previous values in $file"
+}
+
+# --- Actions that are not `defaults` writes ----------------------------------
+
+action_screenshot_dir_describe() { printf 'mkdir -p %q' "$HOME/Pictures/Screenshots"; }
+action_screenshot_dir_apply() { mkdir -p "$HOME/Pictures/Screenshots"; }
+action_screenshot_dir_verify() { [[ -d "$HOME/Pictures/Screenshots" ]]; }
+
+action_firewall_logging_describe() { printf 'sudo socketfilterfw --setloggingmode on'; }
+action_firewall_logging_apply() {
+  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setloggingmode on >/dev/null
+}
+action_firewall_logging_verify() {
+  /usr/libexec/ApplicationFirewall/socketfilterfw --getloggingmode 2>/dev/null |
+    grep -qi 'enabled'
+}
+
+action_guest_account_describe() { printf 'sudo sysadminctl -guestAccount off'; }
+action_guest_account_apply() { sudo sysadminctl -guestAccount off 2>/dev/null; }
+action_guest_account_verify() {
+  sysadminctl -guestAccount status 2>&1 | grep -qi 'disabled'
+}
+
+# name|section|needs_sudo
+ACTIONS=(
+  "screenshot_dir|screenshots|no"
+  "firewall_logging|security|yes"
+  "guest_account|security|yes"
+)
+
+# --- Modes -------------------------------------------------------------------
+
+sudo_commands() {
+  local entry section scope domain key type value name needs_sudo
+  for entry in "${SETTINGS[@]}"; do
+    IFS='|' read -r section scope domain key type value <<<"$entry"
+    selected "$section" || continue
+    [[ "$scope" == system ]] || continue
+    write_command "$scope" "$domain" "$key" "$type" "$(expand_value "$value")"
+    printf '\n'
+  done
+  for entry in "${ACTIONS[@]}"; do
+    IFS='|' read -r name section needs_sudo <<<"$entry"
+    selected "$section" || continue
+    [[ "$needs_sudo" == yes ]] || continue
+    "action_${name}_describe"
+    printf '\n'
+  done
+}
+
+do_dry_run() {
+  local entry section scope domain key type value name needs_sudo
+  for entry in "${SETTINGS[@]}"; do
+    IFS='|' read -r section scope domain key type value <<<"$entry"
+    selected "$section" || continue
+    write_command "$scope" "$domain" "$key" "$type" "$(expand_value "$value")"
+    printf '\n'
+  done
+  for entry in "${ACTIONS[@]}"; do
+    IFS='|' read -r name section needs_sudo <<<"$entry"
+    selected "$section" || continue
+    "action_${name}_describe"
+    printf '\n'
+  done
+}
+
+do_diff() {
+  local entry section scope domain key type value current expected changed=0
+  printf '%-12s %-46s %-22s %-22s\n' SECTION KEY CURRENT DECLARED
+  for entry in "${SETTINGS[@]}"; do
+    IFS='|' read -r section scope domain key type value <<<"$entry"
+    selected "$section" || continue
+    expected="$(normalise "$type" "$(expand_value "$value")")"
+    current="$(read_setting "$scope" "$domain" "$key" || true)"
+    current="${current:-<unset>}"
+    if [[ "$(normalise "$type" "$current")" != "$expected" ]]; then
+      printf '%-12s %-46s %-22s %-22s\n' "$section" "$domain.$key" "$current" "$expected"
+      changed=$((changed + 1))
+    fi
+  done
+  if ((changed == 0)); then
+    success "All declared settings already match."
+  else
+    log "$changed setting(s) differ from the declared state."
+  fi
+}
+
+do_apply() {
+  local entry section scope domain key type value expanded name needs_sudo app
+  local sudo_list
+
+  sudo_list="$(sudo_commands)"
+  if [[ -n "$sudo_list" ]]; then
+    printf 'These commands require sudo:\n%s\n' "$sudo_list"
+    confirm "Run the privileged commands listed above?" || die "Cancelled."
+  fi
+
+  snapshot
+
+  for entry in "${SETTINGS[@]}"; do
+    IFS='|' read -r section scope domain key type value <<<"$entry"
+    selected "$section" || continue
+    expanded="$(expand_value "$value")"
+    if ! write_setting "$scope" "$domain" "$key" "$type" "$expanded"; then
+      if [[ "$scope" == tcc ]]; then
+        warn "$domain.$key needs Full Disk Access for this terminal; skipped."
+      else
+        warn "Failed to write $domain.$key."
+      fi
+    fi
+  done
+
+  for entry in "${ACTIONS[@]}"; do
+    IFS='|' read -r name section needs_sudo <<<"$entry"
+    selected "$section" || continue
+    "action_${name}_apply" || warn "Action $name failed."
+  done
+
+  for app in "${RESTART_APPS[@]}"; do
+    killall "$app" >/dev/null 2>&1 || true
+  done
+
+  success "Applied declared macOS defaults. Run --verify to confirm they took effect."
+}
+
+do_verify() {
+  local entry section scope domain key type value expected current
+  local ignored=0 missing=0 tcc_skipped=0 name needs_sudo
+
+  for entry in "${SETTINGS[@]}"; do
+    IFS='|' read -r section scope domain key type value <<<"$entry"
+    selected "$section" || continue
+    expected="$(normalise "$type" "$(expand_value "$value")")"
+    current="$(read_setting "$scope" "$domain" "$key" || true)"
+
+    if [[ -z "$current" ]]; then
+      if [[ "$scope" == tcc ]]; then
+        warn "$domain.$key is unreadable; this terminal likely lacks Full Disk Access."
+        tcc_skipped=$((tcc_skipped + 1))
+      else
+        warn "$domain.$key is unset."
+        missing=$((missing + 1))
+      fi
+      continue
+    fi
+
+    if [[ "$(normalise "$type" "$current")" != "$expected" ]]; then
+      warn "$domain.$key reads '$current' but '$expected' was declared; this macOS version appears to ignore it."
+      ignored=$((ignored + 1))
+    fi
+  done
+
+  for entry in "${ACTIONS[@]}"; do
+    IFS='|' read -r name section needs_sudo <<<"$entry"
+    selected "$section" || continue
+    if ! "action_${name}_verify"; then
+      warn "Action $name is not in the declared state."
+      ignored=$((ignored + 1))
+    fi
+  done
+
+  if ((ignored == 0 && missing == 0)); then
+    if ((tcc_skipped > 0)); then
+      success "All readable settings match ($tcc_skipped TCC-protected key(s) not readable)."
+    else
+      success "All declared macOS defaults are in effect."
+    fi
+    return 0
+  fi
+
+  die "$missing unset and $ignored mismatched setting(s). Record any key this macOS version ignores in TASKS.md."
+}
+
+main() {
+  parse_args "$@"
+
+  # --dry-run is useful off-Darwin for reviewing exactly what would change.
+  if [[ "$MODE" != "dry-run" ]]; then
+    [[ "$(uname -s)" == Darwin ]] || die "macOS is required for this mode."
+  fi
+
+  case "$MODE" in
+    apply) do_apply ;;
+    dry-run) do_dry_run ;;
+    diff) do_diff ;;
+    verify) do_verify ;;
+  esac
+}
+
+main "$@"

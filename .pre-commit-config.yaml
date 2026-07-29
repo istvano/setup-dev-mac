@@ -1,0 +1,29 @@
+# Local enforcement of the checks CI runs. Hooks call the repository's own
+# scripts so there is exactly one definition of each check and of which files
+# count as shell scripts.
+#
+# Install with: just hooks
+repos:
+  - repo: local
+    hooks:
+      - id: shell-lint
+        name: shell syntax and shellcheck
+        entry: tests/shell-syntax.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: format
+        name: shfmt, actionlint and gitleaks
+        entry: tests/format.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: repository-tests
+        name: full repository test suite
+        entry: script/test
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

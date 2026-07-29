@@ -1,0 +1,47 @@
+{{- /* private_ so chezmoi applies 0600; ssh refuses a group-readable config. */ -}}
+# SSH client configuration.
+#
+# Algorithm lists are allowlists rather than exclusions, so a future weak
+# default cannot be silently negotiated.
+
+Host *
+  # Keys are added to the agent on first use and unlocked from the Keychain.
+  AddKeysToAgent yes
+  UseKeychain yes
+
+  # Only offer the key configured for a host. Without this, ssh walks every key
+  # in the agent and leaks which identities exist to any server it contacts.
+  IdentitiesOnly yes
+
+  HashKnownHosts yes
+  StrictHostKeyChecking ask
+  VerifyHostKeyDNS no
+
+  KexAlgorithms sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256
+  HostKeyAlgorithms ssh-ed25519,ssh-ed25519-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,rsa-sha2-512,rsa-sha2-256
+  Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
+  MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
+  PubkeyAcceptedAlgorithms ssh-ed25519,ssh-ed25519-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,rsa-sha2-512,rsa-sha2-256
+
+  # Agent and X11 forwarding expose the client to a compromised server. Enable
+  # them per host, deliberately, never globally.
+  ForwardAgent no
+  ForwardX11 no
+
+  ServerAliveInterval 60
+  ServerAliveCountMax 3
+
+{{ if eq .passwordManager "1password" -}}
+  # 1Password holds the private keys; the local agent socket exposes only the
+  # items you have explicitly authorised.
+  IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+{{- else -}}
+  # Secretive keeps keys in the Secure Enclave so they cannot be exported. It is
+  # not installed by any profile at present; add `cask "secretive"` to
+  # security-extra first, then uncomment this after creating a key.
+  # IdentityAgent "~/Library/Containers/com.maxgoedjen.Secretive.SecretAgent/Data/socket.ssh"
+{{- end }}
+
+# Per-host overrides belong in ~/.ssh/config.d and are not managed here, so
+# machine-specific hostnames never reach the repository.
+Include ~/.ssh/config.d/*

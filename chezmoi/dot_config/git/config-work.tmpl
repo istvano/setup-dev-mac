@@ -1,0 +1,5 @@
+{{- /* Included by ~/.gitconfig only for repositories under .workGitDir. */ -}}
+{{- if .workGitEmail }}
+[user]
+  email = {{ .workGitEmail | quote }}
+{{- end }}

@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Verify every Homebrew token in profiles/ still exists upstream and is neither
+# deprecated nor disabled.
+#
+# This is the only check in the repository that requires network access, so it
+# is deliberately not part of ./script/test. It runs on a schedule from
+# .github/workflows/tokens.yml and can be run by hand before an install.
+#
+# It exists because two tokens in the default security profile had already gone
+# stale: mitmproxy moved from a formula to a cask, and wireshark was renamed to
+# wireshark-app. Both would have failed `brew bundle` on a real machine.
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+command_exists curl || die "curl is required."
+command_exists python3 || die "python3 is required."
+
+API="https://formulae.brew.sh/api"
+failures=0
+checked=0
+
+describe() {
+  local body="$1"
+  python3 -c '
+import json
+import sys
+
+try:
+    data = json.load(sys.stdin)
+except json.JSONDecodeError:
+    print("unparsable response")
+    raise SystemExit(0)
+
+for field in ("disabled", "deprecated"):
+    if data.get(field):
+        reason = data.get(f"{field}_reason") or data.get("disable_reason") or ""
+        print(f"{field}: {reason}".strip(": "))
+        raise SystemExit(0)
+print("")
+' <<<"$body"
+}
+
+while IFS=' ' read -r kind token; do
+  [[ -n "$kind" && -n "$token" ]] || continue
+  checked=$((checked + 1))
+
+  case "$kind" in
+    brew) url="$API/formula/$token.json" ;;
+    cask) url="$API/cask/$token.json" ;;
+    *) die "Unknown entry type: $kind" ;;
+  esac
+
+  body="$(curl -fsS --max-time 30 "$url" 2>/dev/null)" || {
+    warn "$kind \"$token\" is not a current Homebrew token ($url)."
+    failures=$((failures + 1))
+    continue
+  }
+
+  state="$(describe "$body")"
+  if [[ -n "$state" ]]; then
+    warn "$kind \"$token\" is $state."
+    failures=$((failures + 1))
+  fi
+done < <(
+  grep -rhoE '^[[:space:]]*(brew|cask) "[^"]+"' "$ROOT"/profiles/*.Brewfile |
+    sed -E 's/^[[:space:]]*//; s/"//g' |
+    sort -u
+)
+
+((checked > 0)) || die "No Homebrew tokens found; the extraction is broken."
+
+if ((failures > 0)); then
+  die "$failures of $checked Homebrew tokens need attention."
+fi
+
+success "All $checked Homebrew tokens are current."

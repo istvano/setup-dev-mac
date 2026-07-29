@@ -1,7 +1,25 @@
 {{- if and (eq .chezmoi.os "darwin") (has "dev" .profiles) -}}
 #!/usr/bin/env bash
 set -Eeuo pipefail
-mise install
-RUSTUP="$(brew --prefix rustup 2>/dev/null)/bin/rustup"
-[[ -x "$RUSTUP" ]] && "$RUSTUP" default stable
+
+# Vendor-generated shell initialisation. Chezmoi run scripts do not inherit an
+# interactive shell's PATH, so Homebrew must be located explicitly.
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
+if command -v mise >/dev/null 2>&1; then
+  mise install
+else
+  echo "[WARN] mise is not installed; skipping runtime installation." >&2
+fi
+
+# brew --prefix fails when the formula is absent, so the lookup is guarded
+# rather than substituted directly into an assignment under set -e.
+if rustup_prefix="$(brew --prefix rustup 2>/dev/null)" &&
+  [[ -x "$rustup_prefix/bin/rustup" ]]; then
+  "$rustup_prefix/bin/rustup" default stable
+else
+  echo "[WARN] rustup is not installed; skipping Rust toolchain selection." >&2
+fi
 {{- end }}

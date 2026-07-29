@@ -1,10 +1,106 @@
+# Interactive zsh configuration.
+#
+# Every activation stays guarded by `command -v` so a partially installed
+# workstation still gets a usable shell.
+
+# --- PATH --------------------------------------------------------------------
+
 [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] || export PATH="$HOME/.local/bin:$PATH"
 if [[ -x /opt/homebrew/bin/brew ]]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi
+[[ -d /opt/homebrew/opt/rustup/bin ]] && export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
+
+# --- Completion --------------------------------------------------------------
+
+if command -v brew >/dev/null 2>&1; then
+  FPATH="$(brew --prefix)/share/zsh/site-functions:$FPATH"
+fi
+autoload -Uz compinit compaudit
+# compinit prompts interactively when it finds group- or world-writable
+# completion directories, which can hang a non-interactive login. Report them
+# instead, so an unsafe directory is noticed rather than silently trusted.
+if compaudit >/dev/null 2>&1; then
+  compinit
+else
+  print -u2 'zsh: insecure completion directories found; run compaudit to review them'
+  compinit -i
+fi
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
+
+# --- History -----------------------------------------------------------------
+
+# Atuin is the primary history store, but zsh keeps its own file as well and it
+# is read by anything that does not know about Atuin.
+HISTFILE="$HOME/.zsh_history"
+HISTSIZE=50000
+SAVEHIST=50000
+setopt HIST_IGNORE_SPACE     # a leading space keeps a command out of history
+setopt HIST_IGNORE_ALL_DUPS
+setopt HIST_REDUCE_BLANKS
+setopt HIST_VERIFY           # expand a history reference for review, do not run it
+setopt SHARE_HISTORY
+setopt EXTENDED_HISTORY
+
+# --- Tool activation ---------------------------------------------------------
+
 command -v mise >/dev/null 2>&1 && eval "$(mise activate zsh)"
 command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
 command -v starship >/dev/null 2>&1 && eval "$(starship init zsh)"
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
 command -v atuin >/dev/null 2>&1 && eval "$(atuin init zsh --disable-ai)"
-[[ -d /opt/homebrew/opt/rustup/bin ]] && export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
-export EDITOR="code --wait"
+command -v fzf >/dev/null 2>&1 && eval "$(fzf --zsh)"
+
+# fzf uses fd so results honour .gitignore and skip .git.
+if command -v fd >/dev/null 2>&1; then
+  export FZF_DEFAULT_COMMAND='fd --type f --hidden --exclude .git'
+  export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+  export FZF_ALT_C_COMMAND='fd --type d --hidden --exclude .git'
+fi
+export FZF_DEFAULT_OPTS='--height 40% --layout=reverse --border'
+
+# --- Editor ------------------------------------------------------------------
+
+# Prefer a terminal editor: `code --wait` is unusable over SSH or in recovery.
+if command -v nvim >/dev/null 2>&1; then
+  export EDITOR="nvim"
+elif command -v vim >/dev/null 2>&1; then
+  export EDITOR="vim"
+else
+  export EDITOR="code --wait"
+fi
 export VISUAL="$EDITOR"
+
+# --- Aliases -----------------------------------------------------------------
+
+if command -v eza >/dev/null 2>&1; then
+  alias ls='eza --group-directories-first'
+  alias ll='eza -l --git --group-directories-first'
+  alias la='eza -la --git --group-directories-first'
+  alias lt='eza --tree --level=2 --group-directories-first'
+fi
+command -v bat >/dev/null 2>&1 && alias cat='bat --paging=never'
+command -v trash >/dev/null 2>&1 && alias rm='trash'
+command -v difft >/dev/null 2>&1 && alias gdt='GIT_EXTERNAL_DIFF=difft git diff'
+
+# --- Environment -------------------------------------------------------------
+
+export GPG_TTY="$TTY"
+export LESS='-R'
+
+# A stricter umask is deliberately not set here: Homebrew fails to build several
+# formulae under umask 077. Rely on FileVault and per-file modes instead.
+
+# --- Plugins -----------------------------------------------------------------
+
+# Syntax highlighting must be sourced last; it wraps the widgets everything
+# else has already registered. The prefix is resolved at shell start rather than
+# at chezmoi apply time so no machine-specific path is baked into the file.
+if command -v brew >/dev/null 2>&1; then
+  __brew_prefix="$(brew --prefix)"
+  for __plugin in \
+    "$__brew_prefix/share/zsh-autosuggestions/zsh-autosuggestions.zsh" \
+    "$__brew_prefix/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"; do
+    [[ -r "$__plugin" ]] && source "$__plugin"
+  done
+  unset __brew_prefix __plugin
+fi

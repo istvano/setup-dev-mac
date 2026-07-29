@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Report what a package update would change, without changing anything.
+#
+# `brew bundle install` and `brew upgrade` are the point at which new code
+# arrives on the host. This produces a reviewable list first, so upgrades are a
+# decision rather than a side effect of running an update command.
+#
+# This script never installs, upgrades, cleans up or removes anything.
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+require_macos_arm64
+for command in brew chezmoi jq; do
+  command_exists "$command" || die "$command is required."
+done
+
+selection="$(chezmoi data)"
+profiles="$(jq -er '.profiles | join(",")' <<<"$selection")"
+runtime="$(jq -er '.runtime' <<<"$selection")"
+password_manager="$(jq -er '.passwordManager' <<<"$selection")"
+firewall="$(jq -er '.firewall' <<<"$selection")"
+
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/workstation-update.XXXXXX")"
+trap 'rm -rf "$tmp_dir"' EXIT
+brewfile="$tmp_dir/Brewfile"
+
+"$ROOT/script/render-brewfile" \
+  --profiles "$profiles" \
+  --runtime "$runtime" \
+  --password-manager "$password_manager" \
+  --firewall "$firewall" \
+  --output "$brewfile" >/dev/null
+
+echo '== Declared but not installed =='
+if brew bundle check --verbose --file="$brewfile" >"$tmp_dir/check" 2>&1; then
+  success 'Every declared package is installed.'
+else
+  grep -E '^(Formula|Cask|Tap|Homebrew Bundle)' "$tmp_dir/check" || cat "$tmp_dir/check"
+fi
+
+echo
+echo '== Outdated packages =='
+log 'Refreshing Homebrew metadata (no packages are changed).'
+brew update >/dev/null
+
+brew outdated --greedy --json=v2 >"$tmp_dir/outdated.json"
+python3 - "$tmp_dir/outdated.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as handle:
+    data = json.load(handle)
+
+formulae = data.get("formulae", [])
+casks = data.get("casks", [])
+
+for item in formulae:
+    installed = ", ".join(item.get("installed_versions", []))
+    print(f"  formula  {item['name']}: {installed} -> {item.get('current_version')}")
+
+for item in casks:
+    installed = ", ".join(item.get("installed_versions", []))
+    print(f"  cask     {item['name']}: {installed} -> {item.get('current_version')}")
+
+total = len(formulae) + len(casks)
+print()
+print(f"{total} package(s) have updates available.")
+if total:
+    print("Review each one, then upgrade deliberately:")
+    print("  brew upgrade <name>")
+    print("Casks with system extensions or kernel components deserve extra scrutiny.")
+PY
+
+echo
+echo '== Cleanup candidates =='
+warn 'Listed only. Removing a package is never automatic; see docs/OPERATIONS.md.'
+brew bundle cleanup --file="$brewfile" || true

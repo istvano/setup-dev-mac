@@ -8,3 +8,4 @@ brew "shfmt"              # Deterministic formatter for repository shell scripts
 brew "actionlint"         # Native static validation for local GitHub Actions editing.
 brew "yamllint"           # Local YAML syntax and style validation for repository work.
 brew "mkcert"             # Host-integrated development certificates using the macOS trust store.
+brew "pre-commit"         # Runs this repository's lint and test gates before a commit lands.

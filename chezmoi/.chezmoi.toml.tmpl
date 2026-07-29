@@ -1,12 +1,18 @@
 {{- $gitName := promptStringOnce . "gitName" "Git user.name" -}}
 {{- $gitEmail := promptStringOnce . "gitEmail" "Git user.email" -}}
-{{- $profileChoices := list "core" "dev" "security" "security-extra" "cloud" "cloud-aws" "cloud-azure" "cloud-gcp" "kubernetes" "data" "productivity" "productivity-extra" "paid" -}}
+{{- $gitSigningMethod := promptChoiceOnce . "gitSigningMethod" "Commit signing method" (list "gpg" "ssh" "none") "gpg" -}}
+{{- $gitSigningKey := promptStringOnce . "gitSigningKey" "Signing key: GPG key ID, or SSH public key for the ssh method (empty to disable)" "" -}}
+{{- $workGitDir := promptStringOnce . "workGitDir" "Directory holding work repositories" "~/work" -}}
+{{- $workGitEmail := promptStringOnce . "workGitEmail" "Git user.email inside that directory (empty to disable the split)" "" -}}
+{{- $profileChoices := list "core" "dev" "security" "security-extra" "security-scan" "backup" "cloud" "cloud-aws" "cloud-azure" "cloud-gcp" "kubernetes" "data" "productivity" "productivity-extra" "paid" -}}
 {{- $profiles := promptMultichoiceOnce . "profiles" "Workstation profiles" $profileChoices (list "core" "dev" "security" "productivity") -}}
 {{- $runtime := promptChoiceOnce . "runtime" "Container runtime" (list "rancher" "orbstack" "colima" "none") "rancher" -}}
 {{- $passwordManager := promptChoiceOnce . "passwordManager" "Password manager" (list "bitwarden" "1password" "none") "bitwarden" -}}
 {{- $firewall := promptChoiceOnce . "firewall" "Outbound firewall" (list "lulu" "little-snitch" "none") "lulu" -}}
 {{- $applyMacOSDefaults := promptBoolOnce . "applyMacOSDefaults" "Apply conservative macOS defaults" false -}}
-sourceDir = {{ .chezmoi.sourceDir | quote }}
+{{- /* .chezmoiroot resolves .chezmoi.sourceDir to <repo>/chezmoi. Record the
+       repository root so this file agrees with what ./bootstrap writes. */ -}}
+sourceDir = {{ dir .chezmoi.sourceDir | quote }}
 [git]
 autoCommit = false
 autoPush = false
@@ -16,6 +22,10 @@ pager = "delta"
 [data]
 gitName = {{ $gitName | quote }}
 gitEmail = {{ $gitEmail | quote }}
+gitSigningMethod = {{ $gitSigningMethod | quote }}
+gitSigningKey = {{ $gitSigningKey | quote }}
+workGitDir = {{ $workGitDir | quote }}
+workGitEmail = {{ $workGitEmail | quote }}
 profiles = {{ $profiles | toToml }}
 runtime = {{ $runtime | quote }}
 passwordManager = {{ $passwordManager | quote }}

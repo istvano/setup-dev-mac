@@ -2,12 +2,16 @@
 
 # Shared shell-side profile catalogue. Chezmoi's Go template keeps a matching
 # list because it cannot source shell data.
+# Consumed by sourcing scripts (bootstrap, script/render-brewfile, tests).
+# shellcheck disable=SC2034
 DEFAULT_PROFILES="core,dev,security,productivity"
 VALID_PROFILES=(
   core
   dev
   security
   security-extra
+  security-scan
+  backup
   cloud
   cloud-aws
   cloud-azure

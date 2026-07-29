@@ -1,0 +1,8 @@
+{{- /* SSH signing only. With the gpg method, trust comes from the OpenPGP web
+       of trust and this file is not consulted by git. */ -}}
+{{- if and .gitSigningKey (eq .gitSigningMethod "ssh") }}
+{{ .gitEmail }} {{ .gitSigningKey }}
+{{- if .workGitEmail }}
+{{ .workGitEmail }} {{ .gitSigningKey }}
+{{- end }}
+{{- end }}

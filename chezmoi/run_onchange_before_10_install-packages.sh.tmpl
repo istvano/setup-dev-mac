@@ -1,9 +1,19 @@
 {{- if eq .chezmoi.os "darwin" -}}
+{{- /* .chezmoiroot points chezmoi at <repo>/chezmoi, so .chezmoi.sourceDir is
+       the chezmoi subdirectory. Repository scripts live one level above it. */ -}}
+{{- $repo := dir .chezmoi.sourceDir -}}
 #!/usr/bin/env bash
 set -Eeuo pipefail
 # Any profile-fragment change invalidates this run_onchange script.
-# profile digest: {{ output (joinPath .chezmoi.sourceDir "script/profile-digest") | trim }}
-SOURCE={{ .chezmoi.sourceDir | quote }}
+# profile digest: {{ output (joinPath $repo "script/profile-digest") | trim }}
+
+# Vendor-generated shell initialisation. Chezmoi run scripts do not inherit an
+# interactive shell's PATH, so Homebrew must be located explicitly.
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
+SOURCE={{ $repo | quote }}
 OUTPUT={{ joinPath .chezmoi.homeDir ".config/security-ai-workstation/Brewfile" | quote }}
 "$SOURCE/script/render-brewfile" --profiles {{ join "," .profiles | quote }} --runtime {{ .runtime | quote }} --password-manager {{ .passwordManager | quote }} --firewall {{ .firewall | quote }} --output "$OUTPUT"
 export HOMEBREW_BUNDLE_NO_UPGRADE=1

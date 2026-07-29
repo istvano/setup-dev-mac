@@ -13,11 +13,26 @@ FIREWALL="lulu"
 OUTPUT="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation/Brewfile"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --profiles) PROFILES="$2"; shift 2 ;;
-    --runtime) RUNTIME="$2"; shift 2 ;;
-    --password-manager) PASSWORD_MANAGER="$2"; shift 2 ;;
-    --firewall) FIREWALL="$2"; shift 2 ;;
-    --output) OUTPUT="$2"; shift 2 ;;
+    --profiles)
+      PROFILES="$2"
+      shift 2
+      ;;
+    --runtime)
+      RUNTIME="$2"
+      shift 2
+      ;;
+    --password-manager)
+      PASSWORD_MANAGER="$2"
+      shift 2
+      ;;
+    --firewall)
+      FIREWALL="$2"
+      shift 2
+      ;;
+    --output)
+      OUTPUT="$2"
+      shift 2
+      ;;
     *) die "Unknown option: $1" ;;
   esac
 done
@@ -38,6 +53,10 @@ for fragment in "${fragments[@]}"; do [[ -f "$fragment" ]] || die "Missing fragm
   printf '# Generated from reviewed profile fragments. Do not edit directly.\n'
   printf '# Profiles: %s\n' "$PROFILES"
   printf '# Runtime: %s; password manager: %s; firewall: %s\n\n' "$RUNTIME" "$PASSWORD_MANAGER" "$FIREWALL"
-  for fragment in "${fragments[@]}"; do printf '# ---- %s ----\n' "$(basename "$fragment")"; cat "$fragment"; printf '\n'; done
+  for fragment in "${fragments[@]}"; do
+    printf '# ---- %s ----\n' "$(basename "$fragment")"
+    cat "$fragment"
+    printf '\n'
+  done
 } | atomic_write "$OUTPUT"
 success "Rendered $OUTPUT"

@@ -1,0 +1,27 @@
+# Global gitignore, referenced by core.excludesfile.
+#
+# These belong to the machine, not to any repository, so they are excluded once
+# here rather than repeated in every project's .gitignore.
+
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+.idea/
+.vscode/settings.local.json
+*.swp
+*.swo
+
+.direnv/
+.venv/
+__pycache__/
+
+# Local secrets must never be staged by accident.
+.env
+.env.*
+!.env.example
+*.pem
+*.key

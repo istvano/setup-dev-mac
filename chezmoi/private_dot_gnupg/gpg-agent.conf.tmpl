@@ -1,0 +1,23 @@
+# gpg-agent configuration.
+{{ if lookPath "pinentry-mac" -}}
+# pinentry-mac gives a native passphrase prompt and offers to store the
+# passphrase in the macOS Keychain, so signing does not prompt on every commit.
+pinentry-program {{ lookPath "pinentry-mac" }}
+{{- else -}}
+# pinentry-mac is not installed. Add it to profiles/core.Brewfile, or gpg will
+# fall back to a terminal prompt that GUI Git clients cannot answer.
+{{- end }}
+
+# Cache the passphrase for 30 minutes of inactivity, 8 hours maximum. Long
+# enough for a working session, short enough that an unattended unlocked machine
+# does not stay able to sign indefinitely.
+default-cache-ttl 1800
+max-cache-ttl 28800
+
+# Same bounds for keys held on a smartcard or hardware token.
+default-cache-ttl-ssh 1800
+max-cache-ttl-ssh 28800
+
+# SSH keys are not served by gpg-agent here. ~/.ssh/config uses either the
+# macOS agent or the password manager's agent; running two SSH agents makes it
+# ambiguous which key answers a request.

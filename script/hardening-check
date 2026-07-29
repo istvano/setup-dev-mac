@@ -1,16 +1,158 @@
 #!/usr/bin/env bash
+# Audit host security state.
+#
+# Previously this printed a few values and always exited 0, so it could not gate
+# anything. Each check now reports pass, fail or review, and --strict exits
+# non-zero when any check fails, so it can be run before granting a machine
+# access to credentials or customer systems.
+#
+# Checks that genuinely require human judgement (privacy permissions, recovery
+# key custody) are reported as review items and never silently pass.
 set -Eeuo pipefail
-[[ "$(uname -s)" == Darwin ]] || { echo "macOS only"; exit 1; }
-printf 'FileVault: '; fdesetup status || true
-printf 'Firewall: '; /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate || true
-printf 'Stealth mode: '; /usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode || true
-printf 'Remote Login: '; systemsetup -getremotelogin 2>/dev/null || echo 'requires Full Disk Access or sudo to inspect'
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+[[ "$(uname -s)" == Darwin ]] || die "macOS is required."
+
+STRICT=false
+[[ "${1:-}" == "--strict" ]] && STRICT=true
+
+failures=0
+
+pass() { printf '%s[PASS]%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
+review() { printf '%s[REVIEW]%s %s\n' "$C_YELLOW" "$C_RESET" "$*"; }
+fail() {
+  printf '%s[FAIL]%s %s\n' "$C_RED" "$C_RESET" "$*"
+  failures=$((failures + 1))
+}
+
+# check DESCRIPTION EXPECTED_REGEX COMMAND...
+check() {
+  local description="$1" expected="$2"
+  shift 2
+  local output
+  if ! output="$("$@" 2>&1)"; then
+    fail "$description: command failed (${output:-no output})"
+    return
+  fi
+  if grep -qiE "$expected" <<<"$output"; then
+    pass "$description: $(head -n 1 <<<"$output")"
+  else
+    fail "$description: $(head -n 1 <<<"$output")"
+  fi
+}
+
+echo '== Disk and boot =='
+check 'FileVault' 'On' fdesetup status
+check 'System Integrity Protection' 'enabled' csrutil status
+check 'Gatekeeper' 'assessments enabled' spctl --status
+
+if secure_boot="$(system_profiler SPiBridgeDataType 2>/dev/null)"; then
+  if grep -qi 'Full Security' <<<"$secure_boot"; then
+    pass 'Secure Boot: Full Security'
+  else
+    review 'Secure Boot: not reported as Full Security; confirm the boot policy.'
+  fi
+else
+  review 'Secure Boot: could not read the boot policy.'
+fi
+
+echo
+echo '== Network =='
+check 'Application firewall' 'enabled|state = 1' \
+  /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
+check 'Firewall stealth mode' 'enabled|on' \
+  /usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode
+check 'Firewall logging' 'enabled|on' \
+  /usr/libexec/ApplicationFirewall/socketfilterfw --getloggingmode
+
+if remote_login="$(systemsetup -getremotelogin 2>/dev/null)"; then
+  if grep -qi 'Off' <<<"$remote_login"; then
+    pass "$remote_login"
+  else
+    fail "$remote_login"
+  fi
+else
+  review 'Remote Login: requires sudo or Full Disk Access to inspect.'
+fi
+
+echo
+echo '== Accounts and updates =='
+if guest="$(sysadminctl -guestAccount status 2>&1)"; then
+  if grep -qi 'disabled' <<<"$guest"; then
+    pass 'Guest account: disabled'
+  else
+    fail "Guest account: $(head -n 1 <<<"$guest")"
+  fi
+else
+  review 'Guest account: could not read the current state.'
+fi
+
+for key in AutomaticCheckEnabled AutomaticDownload CriticalUpdateInstall ConfigDataInstall; do
+  value="$(defaults read /Library/Preferences/com.apple.SoftwareUpdate "$key" 2>/dev/null || echo unset)"
+  if [[ "$value" == "1" ]]; then
+    pass "SoftwareUpdate $key: enabled"
+  else
+    fail "SoftwareUpdate $key: $value"
+  fi
+done
+
+echo
+echo '== Loaded extensions =='
+if extensions="$(systemextensionsctl list 2>/dev/null)"; then
+  active="$(grep -ci 'activated enabled' <<<"$extensions" || true)"
+  review "System extensions active: $active (LuLu or Little Snitch and the container runtime are expected; review anything else)"
+else
+  review 'System extensions: could not enumerate.'
+fi
+
+if kexts="$(kmutil showloaded --no-kernel-components 2>/dev/null)"; then
+  third_party="$(grep -cvE 'com\.apple\.|^\s*Index|^\s*$' <<<"$kexts" || true)"
+  if ((third_party == 0)); then
+    pass 'No third-party kernel extensions loaded.'
+  else
+    review "Third-party kernel extensions loaded: $third_party (review each one)"
+  fi
+fi
+
+if pgrep -q oahd 2>/dev/null; then
+  review 'Rosetta is running; confirm it is still required.'
+else
+  pass 'Rosetta is not running.'
+fi
+
+echo
+echo '== Declared macOS defaults =='
+if "$ROOT/script/macos-defaults" --verify; then
+  pass 'Declared macOS defaults are in effect.'
+else
+  fail 'Declared macOS defaults have drifted; see the warnings above.'
+fi
+
+echo
 cat <<'EOF'
-Manual review:
-  - FileVault enabled; recovery key stored offline
-  - Remote Login, Remote Management and sharing disabled unless required
-  - two hardware security keys registered
-  - Accessibility, Full Disk Access and Screen Recording reviewed
+== Manual review ==
+  - FileVault recovery key stored offline and its restore path tested
+  - encrypted Time Machine plus an off-site restic repository, restore drilled
+  - two hardware security keys registered with every critical account
+  - Accessibility, Full Disk Access, Screen Recording and Input Monitoring
+    contain only reviewed applications
+  - Login Items and background items reviewed after every install
   - BetterDisplay permissions limited to required features
-  - no unreviewed MCP servers or editor extensions
+  - no unreviewed MCP servers, editor extensions or coding-agent tools
+  - browser contexts not signed into a shared sync account
 EOF
+
+echo
+if ((failures == 0)); then
+  success 'All automated hardening checks passed.'
+  exit 0
+fi
+
+if [[ "$STRICT" == true ]]; then
+  die "$failures automated hardening check(s) failed."
+fi
+
+warn "$failures automated hardening check(s) failed. Re-run with --strict to fail the command."

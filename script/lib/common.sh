@@ -3,6 +3,9 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
+# C_BOLD is part of the palette this library publishes to sourcing scripts even
+# though nothing in this file uses it.
+# shellcheck disable=SC2034
 if [[ -t 1 ]]; then
   C_RESET=$'\033[0m'
   C_BLUE=$'\033[34m'
@@ -22,7 +25,10 @@ fi
 log() { printf '%s[INFO]%s %s\n' "$C_BLUE" "$C_RESET" "$*"; }
 success() { printf '%s[OK]%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
 warn() { printf '%s[WARN]%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
-die() { printf '%s[ERROR]%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+die() {
+  printf '%s[ERROR]%s %s\n' "$C_RED" "$C_RESET" "$*" >&2
+  exit 1
+}
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
 require_macos_arm64() {
@@ -44,7 +50,8 @@ confirm() {
 backup_file() {
   local path="$1"
   [[ -e "$path" || -L "$path" ]] || return 0
-  local backup="${path}.backup.$(date +%Y%m%d-%H%M%S)"
+  local backup
+  backup="${path}.backup.$(date +%Y%m%d-%H%M%S)"
   cp -R "$path" "$backup"
   log "Backed up $path to $backup"
 }

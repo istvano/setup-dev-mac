@@ -1,5 +1,7 @@
 {{- if and (eq .chezmoi.os "darwin") .applyMacOSDefaults -}}
+{{- /* Repository scripts live one level above .chezmoi.sourceDir; see .chezmoiroot. */ -}}
+{{- $repo := dir .chezmoi.sourceDir -}}
 #!/usr/bin/env bash
 set -Eeuo pipefail
-{{ .chezmoi.sourceDir | quote }}/script/macos-defaults
+{{ joinPath $repo "script/macos-defaults" | quote }} apply
 {{- end }}

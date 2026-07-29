@@ -84,6 +84,9 @@ While editing:
   absolute paths in tracked files.
 - Do not add automatic major macOS upgrades, automatic FileVault enablement,
   automatic Rosetta installation or automatic network-service enablement.
+- Templates must never build repository paths from `.chezmoi.sourceDir`
+  directly. `.chezmoiroot` resolves it to `<repo>/chezmoi`; use
+  `dir .chezmoi.sourceDir`. `tests/chezmoi-templates.sh` enforces this.
 - Do not add unreviewed remote-script execution beyond the documented
   Homebrew bootstrap trust boundary.
 
@@ -104,8 +107,12 @@ After editing:
 ./script/test
 ./script/render-brewfile --output /tmp/workstation.Brewfile
 ./tests/render-brewfile.sh
+./script/check-tokens          # needs network; not part of ./script/test
 ./script/verify
-./script/hardening-check
+./script/update-report
+./script/snapshot
+./script/macos-defaults --diff
+./script/hardening-check --strict
 chezmoi diff
 ```
 
@@ -122,12 +129,20 @@ just render
 
 The minimum validation gate is `./script/test`. It covers:
 
-- shell syntax
+- shell syntax and shellcheck, over every file with a shell shebang
+- shfmt formatting, actionlint and gitleaks
 - Brewfile rendering and restricted entry syntax
+- profile-catalogue consistency across the four places that declare it
+- chezmoi template execution, including the macOS-only branches
 - YAML syntax
 - host/project-boundary placement invariants
 - rendering idempotency
 - Codex instruction and skill structure
+
+Shell scripts are discovered by shebang via `script/shell-files`, never by
+filename extension. Selecting by extension previously skipped every
+extensionless script in `script/`, which hid three install-breaking defects.
+Do not reintroduce a separate file selector in tests or CI.
 
 When changing Homebrew tokens, render the Brewfile and verify current tokens on
 macOS. Project repositories own their own Compose validation. Linux CI is static

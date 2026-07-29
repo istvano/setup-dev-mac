@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Print every shell script in the repository, one per line.
+#
+# Selection is by shebang rather than by filename extension. Selecting by
+# extension silently skipped every extensionless script in script/, which is
+# how three install-breaking defects reached main without being linted.
+#
+# Chezmoi templates are excluded: they are Go templates that only become valid
+# shell after chezmoi executes them. tests/chezmoi-templates.sh covers those.
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+count=0
+while IFS= read -r file; do
+  case "$file" in
+    *[[:space:]]*)
+      printf 'Shell script path contains whitespace, which callers do not support: %s\n' \
+        "$file" >&2
+      exit 1
+      ;;
+  esac
+  printf '%s\n' "$file"
+  count=$((count + 1))
+done < <(
+  find "$ROOT" -type f \
+    -not -path '*/.git/*' \
+    -not -name '*.tmpl' \
+    -not -name '*.backup.*' \
+    -exec sh -c 'head -n 1 "$1" | grep -qE "^#!.*(bash|/sh)([[:space:]]|$)"' _ {} \; \
+    -print | sort
+)
+
+# A selector that matches nothing must fail loudly rather than let every
+# downstream check pass vacuously.
+if ((count == 0)); then
+  printf 'No shell scripts discovered under %s; the selector is broken.\n' "$ROOT" >&2
+  exit 1
+fi

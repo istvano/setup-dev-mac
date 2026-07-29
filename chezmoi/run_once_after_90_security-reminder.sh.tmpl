@@ -1,5 +1,6 @@
 {{- if eq .chezmoi.os "darwin" -}}
 #!/usr/bin/env bash
+set -Eeuo pipefail
 cat <<'EOF'
 Manual security work remains: FileVault, offline recovery key, remote service review,
 hardware security keys, privacy permissions, BetterDisplay permissions and browser isolation.
