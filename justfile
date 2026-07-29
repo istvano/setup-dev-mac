@@ -15,6 +15,6 @@ verify:
 test:
   ./script/test
 
-render profiles="core,dev,ai,security,cloud,data,productivity" runtime="rancher" password_manager="bitwarden" firewall="lulu":
-  ./script/render-brewfile --profiles "{{profiles}}" --runtime "{{runtime}}" --password-manager "{{password_manager}}" --firewall "{{firewall}}" --output /tmp/workstation.Brewfile
+render:
+  ./script/render-brewfile --output /tmp/workstation.Brewfile
   cat /tmp/workstation.Brewfile

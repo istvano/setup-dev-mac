@@ -1,30 +1,23 @@
 # Contributing
 
-## Principles
+Before changing this security-sensitive workstation baseline:
 
-- Keep the macOS host minimal.
-- Keep MLX and related Python packages in project-local uv environments.
-- Do not add overlapping package managers or container runtimes.
-- Prefer small idempotent scripts over a monolithic installer.
-- Every package entry needs a comment explaining its purpose and placement.
-- Every new container must bind to loopback by default unless documented.
+1. Read `AGENTS.md`, the nearest nested `AGENTS.md`, and the applicable
+   architecture, decision and operations documents.
+2. Keep the macOS host minimal and preserve the documented host, project,
+   container and VM boundaries.
+3. Give every package a concrete use case, placement reason, profile, conflict
+   analysis and licence classification.
+4. Keep scripts small and idempotent; keep `justfile` recipes as command aliases.
+5. Update behaviour, documentation and tests in the same patch.
+6. Run:
 
-## Validation
+   ```bash
+   ./script/test
+   ```
 
-```bash
-./script/test
-```
+7. On macOS, also render the selected Brewfile, verify current package tokens
+   and inspect `chezmoi diff`.
 
-On macOS also run:
-
-```bash
-./script/render-brewfile --output /tmp/Brewfile
-./tests/render-brewfile.sh
-chezmoi diff
-```
-
-## Agent instructions
-
-Read the root `AGENTS.md` and any nested `AGENTS.md` that applies to files you
-change. For broad changes, use the repo-local `$workstation-maintainer` skill.
-For package/tool decisions, use `$add-workstation-tool`.
+Broad repository work uses the repo-local `$workstation-maintainer` skill.
+Package decisions use `$add-workstation-tool`.

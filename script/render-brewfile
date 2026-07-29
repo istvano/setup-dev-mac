@@ -4,7 +4,9 @@ IFS=$'\n\t'
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=script/lib/common.sh
 source "$ROOT/script/lib/common.sh"
-PROFILES="core,dev,ai,security,cloud,data,productivity"
+# shellcheck source=script/lib/profiles.sh
+source "$ROOT/script/lib/profiles.sh"
+PROFILES="$DEFAULT_PROFILES"
 RUNTIME="rancher"
 PASSWORD_MANAGER="bitwarden"
 FIREWALL="lulu"
@@ -22,10 +24,10 @@ done
 [[ "$RUNTIME" =~ ^(rancher|orbstack|colima|none)$ ]] || die "Invalid runtime"
 [[ "$PASSWORD_MANAGER" =~ ^(bitwarden|1password|none)$ ]] || die "Invalid password manager"
 [[ "$FIREWALL" =~ ^(lulu|little-snitch|none)$ ]] || die "Invalid firewall"
+validate_profiles "$PROFILES"
 fragments=()
 IFS=',' read -r -a requested_profiles <<<"$PROFILES"
 for profile in "${requested_profiles[@]}"; do
-  [[ "$profile" =~ ^(core|dev|ai|security|cloud|data|productivity|paid)$ ]] || die "Unknown profile: $profile"
   fragments+=("$ROOT/profiles/$profile.Brewfile")
 done
 [[ "$RUNTIME" != none ]] && fragments+=("$ROOT/profiles/runtime-$RUNTIME.Brewfile")

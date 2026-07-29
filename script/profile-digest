@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Hash every fragment so additions, removals and alternative-profile changes
+# all invalidate the package-install apply hook.
+shasum -a 256 "$ROOT"/profiles/*.Brewfile | shasum -a 256 | awk '{print $1}'

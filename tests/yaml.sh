@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if command -v yamllint >/dev/null 2>&1; then
+  yamllint -d '{extends: relaxed, rules: {line-length: disable}}' \
+    "$ROOT/.github/dependabot.yml" "$ROOT/.github/workflows/validate.yml"
+  echo 'YAML syntax: OK'
+  exit 0
+fi
+
+# CI and pre-bootstrap environments may provide PyYAML without yamllint.
 python3 - "$ROOT" <<'PY'
 from pathlib import Path
 import sys, yaml

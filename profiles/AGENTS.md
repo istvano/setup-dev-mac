@@ -11,6 +11,8 @@ These files define software installed directly on macOS.
   - container runtimes
   - password managers
   - outbound firewalls
+- Keep cloud providers, Kubernetes, privileged security tools and personal
+  productivity applications in explicit opt-in fragments.
 - Do not add Ollama, llama.cpp, PyTorch or Open WebUI to the initial baseline.
 - Do not add native databases, vector stores or automated scanners when a
   container provides equivalent functionality without material degradation.

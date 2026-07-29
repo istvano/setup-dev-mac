@@ -92,3 +92,24 @@ entry syntax using Python, which is already required by the validation suite.
 Homebrew Bundle may use Homebrew's own bundled Ruby internally; that is an
 implementation detail of the selected host package manager, not a repository
 runtime dependency.
+
+## ADR-012: Keep hazardous and stateful capabilities out of the baseline
+
+**Status:** accepted
+
+The initial workstation does not run multiple container runtimes
+simultaneously, install native PostgreSQL, Redis or Qdrant daemons, enable
+FileVault automatically, export recovery keys or install Rosetta automatically.
+These exclusions preserve explicit trust and execution boundaries and therefore
+belong in the decision record rather than the operational backlog.
+
+## ADR-013: Keep the default profile small and specialist capabilities opt-in
+
+**Status:** accepted
+
+The default installation selects only `core`, `dev`, `security` and the minimal
+`productivity` profile. Cloud providers, Kubernetes, data clients, privileged
+security monitors and personal productivity applications use explicit profile
+fragments. This prevents unrelated credentials, background components,
+permissions and update surfaces from entering the default trusted computing
+base while keeping reviewed specialist tools reproducible.

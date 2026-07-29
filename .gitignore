@@ -7,11 +7,6 @@
 .env.*
 !.env.example
 
-# Generated local state
-containers/images.lock.env
-containers/reports/
-containers/secrets/
-
 # Python
 .venv/
 __pycache__/

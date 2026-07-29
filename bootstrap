@@ -5,9 +5,11 @@ IFS=$'\n\t'
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=script/lib/common.sh
 source "$ROOT/script/lib/common.sh"
+# shellcheck source=script/lib/profiles.sh
+source "$ROOT/script/lib/profiles.sh"
 
 COMMAND="plan"
-PROFILES="core,dev,ai,security,cloud,data,productivity"
+PROFILES="$DEFAULT_PROFILES"
 RUNTIME="rancher"
 PASSWORD_MANAGER="bitwarden"
 FIREWALL="lulu"
@@ -56,6 +58,7 @@ parse_args() {
 
 validate_choices() {
   [[ "$COMMAND" =~ ^(plan|install|help)$ ]] || die "Unknown command: $COMMAND"
+  validate_profiles "$PROFILES"
   [[ "$RUNTIME" =~ ^(rancher|orbstack|colima|none)$ ]] || die "Invalid runtime"
   [[ "$PASSWORD_MANAGER" =~ ^(bitwarden|1password|none)$ ]] || die "Invalid password manager"
   [[ "$FIREWALL" =~ ^(lulu|little-snitch|none)$ ]] || die "Invalid firewall"
@@ -156,7 +159,6 @@ runtime = $(toml_quote "$RUNTIME")
 passwordManager = $(toml_quote "$PASSWORD_MANAGER")
 firewall = $(toml_quote "$FIREWALL")
 applyMacOSDefaults = $APPLY_MACOS_DEFAULTS
-pythonVersion = "3.13"
 EOF
   chmod 600 "$config"
 }

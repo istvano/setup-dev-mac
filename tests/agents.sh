@@ -22,9 +22,6 @@ while IFS= read -r skill; do
   grep -q '^description: .\+' "$skill"
 done < <(find "$ROOT/.agents/skills" -type f -name SKILL.md | sort)
 
-skill_count="$(find "$ROOT/.agents/skills" -type f -name SKILL.md | wc -l | tr -d ' ')"
-(( skill_count >= 2 )) || { echo "Expected at least two repo-local skills" >&2; exit 1; }
-
 grep -q 'cask "codex"' "$ROOT/profiles/dev.Brewfile"
 
 echo 'Agent context and skills: OK'

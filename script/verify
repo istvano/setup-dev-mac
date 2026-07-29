@@ -1,7 +1,31 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-check_cmd() { command -v "$1" >/dev/null 2>&1 && printf '[OK]      %-20s %s\n' "$1" "$(command -v "$1")" || printf '[MISSING] %-20s\n' "$1"; }
-check_app() { [[ -d "/Applications/$1.app" || -d "$HOME/Applications/$1.app" ]] && printf '[OK]      %s.app\n' "$1" || printf '[MISSING] %s.app\n' "$1"; }
-for command in brew git gh chezmoi mise uv direnv tmux rg fd fzf jq yq docker kubectl helm k9s aws az gcloud tofu ansible nmap mitmproxy age sops; do check_cmd "$command"; done
-for app in Ghostty 'Visual Studio Code' Zed Wireshark 'Burp Suite Community Edition' DBeaver Bruno BetterDisplay; do check_app "$app"; done
-command -v chezmoi >/dev/null 2>&1 && chezmoi doctor || true
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+require_macos_arm64
+for command in brew chezmoi jq; do
+  command_exists "$command" || die "$command is required for verification."
+done
+
+selection="$(chezmoi data)"
+profiles="$(jq -er '.profiles | join(",")' <<<"$selection")"
+runtime="$(jq -er '.runtime' <<<"$selection")"
+password_manager="$(jq -er '.passwordManager' <<<"$selection")"
+firewall="$(jq -er '.firewall' <<<"$selection")"
+
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/workstation-verify.XXXXXX")"
+trap 'rm -rf "$tmp_dir"' EXIT
+brewfile="$tmp_dir/Brewfile"
+"$ROOT/script/render-brewfile" \
+  --profiles "$profiles" \
+  --runtime "$runtime" \
+  --password-manager "$password_manager" \
+  --firewall "$firewall" \
+  --output "$brewfile"
+
+brew bundle check --verbose --file="$brewfile"
+chezmoi doctor
+success "Selected workstation state is installed and chezmoi is healthy."

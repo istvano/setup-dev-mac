@@ -10,14 +10,9 @@ that Linux containers cannot provide.
 
 ### macOS host
 
-Owns native GUI, identity, system and high-frequency tooling:
-
-- Homebrew, chezmoi, mise, uv and core CLI
-- editors and Codex CLI
-- BetterDisplay
-- Burp Desktop, Wireshark, Nmap and interactive mitmproxy
-- password manager, Yubico Authenticator, Tailscale and outbound firewall
-- cloud/Kubernetes control-plane CLIs
+Owns native GUI, identity, system and frequently invoked tooling. Packages stay
+here only when they need macOS APIs, direct host interfaces, system extensions,
+interactive desktop use or low-latency access to the host filesystem.
 
 ### Project-local MLX environments
 
@@ -65,3 +60,5 @@ bootstrap
   be pinned and reviewed within the owning project.
 - Chezmoi apply scripts can execute commands as the user and therefore require
   review through `chezmoi diff` and repository review.
+
+Operational procedures for these boundaries are defined in `OPERATIONS.md`.

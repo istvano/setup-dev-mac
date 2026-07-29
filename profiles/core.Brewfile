@@ -1,5 +1,4 @@
 # Bootstrap and configuration
-brew "mas"       # Command-line client for installing Mac App Store applications.
 brew "mise"      # Project-local runtime and tool-version manager.
 brew "uv"        # Fast Python package, environment and version manager.
 brew "direnv"    # Per-directory environment activation with explicit approval.
@@ -22,30 +21,14 @@ brew "atuin"     # Local SQLite-backed shell history with contextual search.
 brew "jq"        # Command-line JSON query and transformation tool.
 brew "yq"        # Command-line YAML, JSON and XML processor.
 brew "git-delta" # Syntax-highlighted pager for Git diffs.
-brew "btop"      # Interactive host resource and process monitor.
-brew "dust"      # Visual disk-usage analyser for the local filesystem.
-brew "sd"        # Simple command-line find-and-replace tool.
-brew "hyperfine" # Statistical command-line benchmarking tool.
-brew "tealdeer"  # Fast client for concise tldr command examples.
+brew "htop"      # Interactive viewer for frequently inspecting host processes.
+brew "btop"      # Interactive dashboard for host CPU, memory, disk and network resources.
 brew "tree"      # Hierarchical directory listing utility.
-brew "watch"     # Repeatedly run a command and display its output.
-brew "wget"      # Scriptable HTTP, HTTPS and FTP downloader.
-brew "httpie"    # Human-friendly command-line HTTP client.
 brew "xh"        # Fast HTTP client compatible with common HTTPie workflows.
-brew "duf"       # Human-friendly filesystem capacity viewer.
-brew "procs"     # Modern process-listing utility.
 brew "just"      # Thin command runner for repository workflows.
-brew "watchexec" # Re-run commands when watched files change.
 
-# Quality and version control
-brew "shellcheck" # Static analysis for shell scripts.
-brew "shfmt"      # Deterministic shell-script formatter.
-brew "actionlint" # Static validation for GitHub Actions workflows.
-brew "hadolint"   # Dockerfile linter with security and style checks.
-brew "yamllint"   # YAML syntax and style linter.
-brew "git"        # Distributed version-control command-line client.
-brew "git-lfs"    # Git extension for versioning large binary assets.
-brew "gh"         # GitHub command-line client for repository workflows.
-brew "lazygit"    # Terminal UI for interactive Git operations.
-brew "pre-commit" # Repository-managed hooks for repeatable local checks.
-brew "gitleaks"   # Fast native scanner for secrets in source and Git history.
+# Version control and security baseline
+brew "git"      # Distributed version-control command-line client.
+brew "gh"       # GitHub command-line client for repository workflows.
+brew "age"      # Small file-encryption CLI retained as part of the bootstrap trust set.
+brew "gitleaks" # Fast native scanner for secrets in source and Git history.

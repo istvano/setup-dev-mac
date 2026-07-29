@@ -23,6 +23,9 @@ These are deliberate defaults, not placeholders:
 - Default free container runtime: Rancher Desktop configured with Moby.
 - Default free password manager: Bitwarden.
 - Default free outbound firewall: LuLu.
+- Default package profiles: core, dev, security and minimal productivity.
+- Cloud providers, Kubernetes, data clients, privileged security monitors and
+  personal productivity applications are explicit opt-ins.
 - BetterDisplay Free Edition is a native productivity dependency.
 - Stateful services and repeatable scanners belong in containers.
 - Exploit development, malware analysis, GDB-centric workflows and untrusted
@@ -50,8 +53,10 @@ Homebrew formula exists.
 - `profiles/*.Brewfile`: host packages and native GUI applications.
 - `chezmoi/`: user configuration and idempotent apply hooks.
 - `script/`: orchestration, validation and maintenance commands.
+- `docs/ARCHITECTURE.md`: current boundaries and configuration flow.
 - `docs/DECISIONS.md`: durable architectural decisions.
-- `TASKS.md`: current backlog and explicit non-goals.
+- `docs/OPERATIONS.md`: installation, update, verification and recovery runbook.
+- `TASKS.md`: unfinished work only.
 
 ## Change workflow
 
@@ -176,9 +181,10 @@ Do not weaken these without explicit user approval and a documented decision:
 Update documentation in the same patch when behaviour, defaults, commands,
 package placement or security assumptions change.
 
-Use `docs/DECISIONS.md` for architectural decisions that future maintainers
-might otherwise reverse accidentally. Use `TASKS.md` for unfinished work, not
-for permanent architecture.
+Keep `README.md` as the concise entry point, `docs/ARCHITECTURE.md` as the
+current-state design, `docs/DECISIONS.md` as durable rationale and
+`docs/OPERATIONS.md` as the operator runbook. Use `TASKS.md` for unfinished work
+only, not permanent architecture or recurring procedures.
 
 ## Codex-specific guidance
 

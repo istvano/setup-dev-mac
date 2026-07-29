@@ -1,15 +1,8 @@
 {{- if eq .chezmoi.os "darwin" -}}
 #!/usr/bin/env bash
 set -Eeuo pipefail
-# Profile hashes make package changes trigger reruns.
-# core: {{ output "shasum" "-a" "256" (joinPath .chezmoi.sourceDir "profiles/core.Brewfile") | trim }}
-# dev: {{ output "shasum" "-a" "256" (joinPath .chezmoi.sourceDir "profiles/dev.Brewfile") | trim }}
-# ai: {{ output "shasum" "-a" "256" (joinPath .chezmoi.sourceDir "profiles/ai.Brewfile") | trim }}
-# security: {{ output "shasum" "-a" "256" (joinPath .chezmoi.sourceDir "profiles/security.Brewfile") | trim }}
-# cloud: {{ output "shasum" "-a" "256" (joinPath .chezmoi.sourceDir "profiles/cloud.Brewfile") | trim }}
-# data: {{ output "shasum" "-a" "256" (joinPath .chezmoi.sourceDir "profiles/data.Brewfile") | trim }}
-# productivity: {{ output "shasum" "-a" "256" (joinPath .chezmoi.sourceDir "profiles/productivity.Brewfile") | trim }}
-# paid: {{ output "shasum" "-a" "256" (joinPath .chezmoi.sourceDir "profiles/paid.Brewfile") | trim }}
+# Any profile-fragment change invalidates this run_onchange script.
+# profile digest: {{ output (joinPath .chezmoi.sourceDir "script/profile-digest") | trim }}
 SOURCE={{ .chezmoi.sourceDir | quote }}
 OUTPUT={{ joinPath .chezmoi.homeDir ".config/security-ai-workstation/Brewfile" | quote }}
 "$SOURCE/script/render-brewfile" --profiles {{ join "," .profiles | quote }} --runtime {{ .runtime | quote }} --password-manager {{ .passwordManager | quote }} --firewall {{ .firewall | quote }} --output "$OUTPUT"
