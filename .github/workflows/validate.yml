@@ -1,0 +1,19 @@
+name: validate
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  linux-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck ruby python3-yaml
+      - run: find . -type f \( -name '*.sh' -o -name bootstrap -o -name executable_mlxctl -o -name executable_wsctl \) -print0 | xargs -0 shellcheck -x
+      - run: ./script/test
+  macos-render:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./script/render-brewfile --output /tmp/Brewfile
+      - run: ruby -c /tmp/Brewfile
+      - run: ./bootstrap plan

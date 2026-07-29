@@ -1,0 +1,6 @@
+{{- if and (eq .chezmoi.os "darwin") (has "ai" .profiles) .syncNativeAi -}}
+#!/usr/bin/env bash
+set -Eeuo pipefail
+AI_ROOT={{ joinPath .chezmoi.homeDir ".config/security-ai-workstation/native-ai" | quote }}
+"$AI_ROOT/bin/mlxctl" sync
+{{- end }}

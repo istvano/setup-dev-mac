@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+PROFILES="core,dev,ai,security,cloud,data,productivity"
+RUNTIME="rancher"
+PASSWORD_MANAGER="bitwarden"
+FIREWALL="lulu"
+OUTPUT="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation/Brewfile"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profiles) PROFILES="$2"; shift 2 ;;
+    --runtime) RUNTIME="$2"; shift 2 ;;
+    --password-manager) PASSWORD_MANAGER="$2"; shift 2 ;;
+    --firewall) FIREWALL="$2"; shift 2 ;;
+    --output) OUTPUT="$2"; shift 2 ;;
+    *) die "Unknown option: $1" ;;
+  esac
+done
+[[ "$RUNTIME" =~ ^(rancher|orbstack|colima|none)$ ]] || die "Invalid runtime"
+[[ "$PASSWORD_MANAGER" =~ ^(bitwarden|1password|none)$ ]] || die "Invalid password manager"
+[[ "$FIREWALL" =~ ^(lulu|little-snitch|none)$ ]] || die "Invalid firewall"
+fragments=()
+IFS=',' read -r -a requested_profiles <<<"$PROFILES"
+for profile in "${requested_profiles[@]}"; do
+  [[ "$profile" =~ ^(core|dev|ai|security|cloud|data|productivity|paid)$ ]] || die "Unknown profile: $profile"
+  fragments+=("$ROOT/profiles/$profile.Brewfile")
+done
+[[ "$RUNTIME" != none ]] && fragments+=("$ROOT/profiles/runtime-$RUNTIME.Brewfile")
+[[ "$PASSWORD_MANAGER" != none ]] && fragments+=("$ROOT/profiles/password-$PASSWORD_MANAGER.Brewfile")
+[[ "$FIREWALL" != none ]] && fragments+=("$ROOT/profiles/firewall-$FIREWALL.Brewfile")
+for fragment in "${fragments[@]}"; do [[ -f "$fragment" ]] || die "Missing fragment: $fragment"; done
+{
+  printf '# Generated from reviewed profile fragments. Do not edit directly.\n'
+  printf '# Profiles: %s\n' "$PROFILES"
+  printf '# Runtime: %s; password manager: %s; firewall: %s\n\n' "$RUNTIME" "$PASSWORD_MANAGER" "$FIREWALL"
+  for fragment in "${fragments[@]}"; do printf '# ---- %s ----\n' "$(basename "$fragment")"; cat "$fragment"; printf '\n'; done
+} | atomic_write "$OUTPUT"
+success "Rendered $OUTPUT"

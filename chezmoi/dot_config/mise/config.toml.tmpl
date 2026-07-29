@@ -1,0 +1,9 @@
+[settings]
+experimental = true
+idiomatic_version_file_enable_tools = ["node", "python", "java", "go"]
+{{- if has "dev" .profiles }}
+[tools]
+node = "lts"
+go = "latest"
+java = "temurin-21"
+{{- end }}

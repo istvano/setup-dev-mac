@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/script/lib/common.sh"
+command_exists chezmoi || die "chezmoi is not installed; run ./bootstrap install"
+chezmoi diff || true
+confirm "Apply chezmoi source state?" || die "Cancelled."
+chezmoi apply --source "$ROOT"

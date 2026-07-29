@@ -1,0 +1,27 @@
+{{- $gitName := promptStringOnce . "gitName" "Git user.name" -}}
+{{- $gitEmail := promptStringOnce . "gitEmail" "Git user.email" -}}
+{{- $profileChoices := list "core" "dev" "ai" "security" "cloud" "data" "productivity" "paid" -}}
+{{- $profiles := promptMultichoiceOnce . "profiles" "Workstation profiles" $profileChoices (list "core" "dev" "ai" "security" "cloud" "data" "productivity") -}}
+{{- $runtime := promptChoiceOnce . "runtime" "Container runtime" (list "rancher" "orbstack" "colima" "none") "rancher" -}}
+{{- $passwordManager := promptChoiceOnce . "passwordManager" "Password manager" (list "bitwarden" "1password" "none") "bitwarden" -}}
+{{- $firewall := promptChoiceOnce . "firewall" "Outbound firewall" (list "lulu" "little-snitch" "none") "lulu" -}}
+{{- $syncNativeAi := promptBoolOnce . "syncNativeAi" "Synchronise native MLX environment now" false -}}
+{{- $applyMacOSDefaults := promptBoolOnce . "applyMacOSDefaults" "Apply conservative macOS defaults" false -}}
+{{- $pythonVersion := promptStringOnce . "pythonVersion" "Native MLX Python version" "3.13" -}}
+sourceDir = {{ .chezmoi.sourceDir | quote }}
+[git]
+autoCommit = false
+autoPush = false
+[diff]
+command = "delta"
+pager = "delta"
+[data]
+gitName = {{ $gitName | quote }}
+gitEmail = {{ $gitEmail | quote }}
+profiles = {{ $profiles | toToml }}
+runtime = {{ $runtime | quote }}
+passwordManager = {{ $passwordManager | quote }}
+firewall = {{ $firewall | quote }}
+syncNativeAi = {{ $syncNativeAi }}
+applyMacOSDefaults = {{ $applyMacOSDefaults }}
+pythonVersion = {{ $pythonVersion | quote }}

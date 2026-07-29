@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# Strap-inspired trust bootstrap. The full workstation is managed by chezmoi.
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+COMMAND="plan"
+PROFILES="core,dev,ai,security,cloud,data,productivity"
+RUNTIME="rancher"
+PASSWORD_MANAGER="bitwarden"
+FIREWALL="lulu"
+GIT_NAME="${GIT_AUTHOR_NAME:-}"
+GIT_EMAIL="${GIT_AUTHOR_EMAIL:-}"
+SYNC_NATIVE_AI=false
+APPLY_MACOS_DEFAULTS=false
+WITH_HARDENING=false
+INSTALL_UPDATES=false
+ASSUME_YES=0
+
+usage() {
+  cat <<'EOF'
+Usage: ./bootstrap plan|install [options]
+  --profiles LIST
+  --runtime rancher|orbstack|colima|none
+  --password-manager bitwarden|1password|none
+  --firewall lulu|little-snitch|none
+  --git-name VALUE
+  --git-email VALUE
+  --sync-native-ai
+  --with-macos-defaults
+  --with-hardening
+  --install-updates
+  --yes
+EOF
+}
+
+parse_args() {
+  if [[ $# -gt 0 && "$1" != -* ]]; then COMMAND="$1"; shift; fi
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --profiles) PROFILES="$2"; shift 2 ;;
+      --runtime) RUNTIME="$2"; shift 2 ;;
+      --password-manager) PASSWORD_MANAGER="$2"; shift 2 ;;
+      --firewall) FIREWALL="$2"; shift 2 ;;
+      --git-name) GIT_NAME="$2"; shift 2 ;;
+      --git-email) GIT_EMAIL="$2"; shift 2 ;;
+      --sync-native-ai) SYNC_NATIVE_AI=true; shift ;;
+      --with-macos-defaults) APPLY_MACOS_DEFAULTS=true; shift ;;
+      --with-hardening) WITH_HARDENING=true; shift ;;
+      --install-updates) INSTALL_UPDATES=true; shift ;;
+      --yes|-y) ASSUME_YES=1; export ASSUME_YES; shift ;;
+      --help|-h) COMMAND=help; shift ;;
+      *) die "Unknown option: $1" ;;
+    esac
+  done
+}
+
+validate_choices() {
+  [[ "$COMMAND" =~ ^(plan|install|help)$ ]] || die "Unknown command: $COMMAND"
+  [[ "$RUNTIME" =~ ^(rancher|orbstack|colima|none)$ ]] || die "Invalid runtime"
+  [[ "$PASSWORD_MANAGER" =~ ^(bitwarden|1password|none)$ ]] || die "Invalid password manager"
+  [[ "$FIREWALL" =~ ^(lulu|little-snitch|none)$ ]] || die "Invalid firewall"
+}
+
+print_plan() {
+  cat <<EOF
+Workstation bootstrap plan
+  source repository:    $ROOT
+  profiles:             $PROFILES
+  container runtime:    $RUNTIME
+  password manager:     $PASSWORD_MANAGER
+  outbound firewall:    $FIREWALL
+  Git user.name:        ${GIT_NAME:-<prompt during install>}
+  Git user.email:       ${GIT_EMAIL:-<prompt during install>}
+  sync native MLX:      $SYNC_NATIVE_AI
+  macOS defaults:       $APPLY_MACOS_DEFAULTS
+  security hardening:   $WITH_HARDENING
+  recommended updates:  $INSTALL_UPDATES
+
+Bootstrap trust set:
+  Xcode Command Line Tools, Homebrew, Git, GitHub CLI, age and chezmoi
+EOF
+}
+
+ensure_xcode_clt() {
+  if xcode-select -p >/dev/null 2>&1; then success "Xcode Command Line Tools are installed."; return; fi
+  log "Starting the Apple Xcode Command Line Tools installer."
+  xcode-select --install >/dev/null 2>&1 || true
+  die "Complete the Apple installer, then rerun ./bootstrap install."
+}
+
+ensure_homebrew() {
+  if [[ -x /opt/homebrew/bin/brew ]]; then eval "$(/opt/homebrew/bin/brew shellenv)"; success "Homebrew is installed."; return; fi
+  confirm "Install Homebrew from brew.sh?" || die "Homebrew is required."
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+}
+
+install_bootstrap_packages() { brew install git gh age chezmoi; }
+
+apply_strap_inspired_security() {
+  defaults write com.apple.screensaver askForPassword -int 1
+  defaults write com.apple.screensaver askForPasswordDelay -int 0
+  if [[ "$WITH_HARDENING" == true ]]; then
+    sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on
+    sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setstealthmode on
+  fi
+  fdesetup status 2>/dev/null || true
+  warn "FileVault is not enabled automatically. Enable it manually and store the recovery key offline."
+  warn "No network service is enabled by this repository."
+}
+
+install_macos_updates_if_requested() {
+  [[ "$INSTALL_UPDATES" == true ]] || return 0
+  confirm "Install currently recommended macOS updates now?" || return 0
+  sudo softwareupdate --install --recommended
+}
+
+prompt_identity() {
+  [[ -n "$GIT_NAME" ]] || read -r -p "Git user.name: " GIT_NAME
+  [[ -n "$GIT_EMAIL" ]] || read -r -p "Git user.email: " GIT_EMAIL
+  [[ -n "$GIT_NAME" && -n "$GIT_EMAIL" ]] || die "Git name and email are required."
+}
+
+toml_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '"%s"' "$value"
+}
+
+write_chezmoi_config() {
+  local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/chezmoi" config="$config_dir/chezmoi.toml" profiles_toml="" profile
+  IFS=',' read -r -a profile_array <<<"$PROFILES"
+  for profile in "${profile_array[@]}"; do [[ -n "$profiles_toml" ]] && profiles_toml+=", "; profiles_toml+="$(toml_quote "$profile")"; done
+  mkdir -p "$config_dir"
+  [[ -e "$config" ]] && backup_file "$config"
+  umask 077
+  cat >"$config" <<EOF
+sourceDir = $(toml_quote "$ROOT")
+
+[git]
+autoCommit = false
+autoPush = false
+
+[diff]
+command = "delta"
+pager = "delta"
+
+[data]
+gitName = $(toml_quote "$GIT_NAME")
+gitEmail = $(toml_quote "$GIT_EMAIL")
+profiles = [$profiles_toml]
+runtime = $(toml_quote "$RUNTIME")
+passwordManager = $(toml_quote "$PASSWORD_MANAGER")
+firewall = $(toml_quote "$FIREWALL")
+syncNativeAi = $SYNC_NATIVE_AI
+applyMacOSDefaults = $APPLY_MACOS_DEFAULTS
+pythonVersion = "3.13"
+EOF
+  chmod 600 "$config"
+}
+
+main() {
+  parse_args "$@"; validate_choices
+  [[ "$COMMAND" == help ]] && { usage; exit 0; }
+  print_plan
+  [[ "$COMMAND" == plan ]] && exit 0
+  require_macos_arm64
+  confirm "Proceed with bootstrap and chezmoi apply?" || die "Cancelled."
+  ensure_xcode_clt; ensure_homebrew; install_bootstrap_packages; prompt_identity
+  apply_strap_inspired_security; install_macos_updates_if_requested; write_chezmoi_config
+  chezmoi init --source "$ROOT" --apply
+  success "Bootstrap completed."
+}
+
+main "$@"

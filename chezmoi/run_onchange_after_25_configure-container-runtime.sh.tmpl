@@ -1,0 +1,32 @@
+{{- if and (eq .chezmoi.os "darwin") (eq .runtime "rancher") -}}
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Rancher Desktop can use containerd or Moby. The repository's Compose and
+# Testcontainers workflows require the Docker API, so select Moby and disable
+# Kubernetes until it is explicitly needed.
+open -gj -a "Rancher Desktop" || true
+
+find_rdctl() {
+  local candidate
+  for candidate in \
+    "$HOME/.rd/bin/rdctl" \
+    "/Applications/Rancher Desktop.app/Contents/Resources/resources/darwin/bin/rdctl"
+  do
+    [[ -x "$candidate" ]] && { printf '%s\n' "$candidate"; return 0; }
+  done
+  command -v rdctl 2>/dev/null || return 1
+}
+
+for _ in $(seq 1 60); do
+  RDCTL="$(find_rdctl || true)"
+  if [[ -n "$RDCTL" ]] && "$RDCTL" list-settings >/dev/null 2>&1; then
+    "$RDCTL" set --container-engine.name=moby --kubernetes-enabled=false
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "[WARN] Rancher Desktop was installed but could not be configured automatically." >&2
+echo "       Select Moby/Docker and disable Kubernetes in Preferences." >&2
+{{- end }}

@@ -1,0 +1,22 @@
+.DS_Store
+*.log
+*.tmp
+*.swp
+*.swo
+.env
+.env.*
+!.env.example
+
+# Generated local state
+containers/images.lock.env
+containers/reports/
+containers/secrets/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# macOS and IDE
+.idea/
+.vscode/settings.local.json

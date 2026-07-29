@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ "$(uname -s)" == Darwin ]] || { echo "macOS only"; exit 1; }
+printf 'FileVault: '; fdesetup status || true
+printf 'Firewall: '; /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate || true
+printf 'Stealth mode: '; /usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode || true
+printf 'Remote Login: '; systemsetup -getremotelogin 2>/dev/null || echo 'requires Full Disk Access or sudo to inspect'
+cat <<'EOF'
+Manual review:
+  - FileVault enabled; recovery key stored offline
+  - Remote Login, Remote Management and sharing disabled unless required
+  - two hardware security keys registered
+  - Accessibility, Full Disk Access and Screen Recording reviewed
+  - BetterDisplay permissions limited to required features
+  - no unreviewed MCP servers or editor extensions
+EOF

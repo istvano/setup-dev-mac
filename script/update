@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/script/lib/common.sh"
+git -C "$ROOT" pull --ff-only
+chezmoi diff || true
+confirm "Apply updated workstation state?" || die "Cancelled."
+chezmoi apply --source "$ROOT"

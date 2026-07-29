@@ -1,0 +1,11 @@
+cask "firefox@developer-edition"
+cask "google-chrome"
+cask "yubico-authenticator"
+cask "tailscale-app"
+cask "obsidian"
+cask "zotero"
+cask "rectangle"
+cask "betterdisplay" # Free native display manager: HiDPI, DDC and monitor control.
+cask "stats"
+cask "iina"
+cask "keka"

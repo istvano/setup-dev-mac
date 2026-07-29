@@ -1,0 +1,10 @@
+{{- if and (eq .chezmoi.os "darwin") (has "dev" .profiles) -}}
+#!/usr/bin/env bash
+set -Eeuo pipefail
+mise install
+uv python install {{ .pythonVersion | quote }}
+git lfs install
+mise exec -- corepack enable || true
+RUSTUP="$(brew --prefix rustup 2>/dev/null)/bin/rustup"
+[[ -x "$RUSTUP" ]] && "$RUSTUP" default stable
+{{- end }}
