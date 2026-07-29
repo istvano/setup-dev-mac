@@ -1,1 +1,1 @@
-cask "orbstack" # Paid polished Docker/Linux runtime.
+cask "orbstack" # Paid native Docker and Linux runtime for project containers.

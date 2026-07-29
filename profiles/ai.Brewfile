@@ -1,2 +1,3 @@
-# MLX and MLX-LM are isolated in a uv project. No host AI formula is installed.
-# Ollama, llama.cpp and PyTorch are deliberately omitted initially.
+# MLX is a Python library, not a host application, so no global AI package is
+# installed. Add it to each Apple-Silicon project with `uv add mlx`.
+# Add MLX-LM or other model tooling only in projects whose workload needs it.

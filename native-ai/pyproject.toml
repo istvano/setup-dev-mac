@@ -1,8 +1,0 @@
-[project]
-name = "mac-native-mlx"
-version = "0.1.0"
-description = "Minimal native Apple Silicon MLX and MLX-LM environment"
-requires-python = ">=3.13,<3.14"
-dependencies = ["mlx", "mlx-lm", "huggingface-hub", "jupyterlab", "ipykernel"]
-[tool.uv]
-package = false

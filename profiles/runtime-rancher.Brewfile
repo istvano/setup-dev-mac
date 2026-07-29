@@ -1,1 +1,1 @@
-cask "rancher" # Free Docker-compatible desktop runtime; configure Moby.
+cask "rancher" # Free desktop runtime providing Moby for project containers.

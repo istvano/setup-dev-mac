@@ -4,8 +4,4 @@ check_cmd() { command -v "$1" >/dev/null 2>&1 && printf '[OK]      %-20s %s\n' "
 check_app() { [[ -d "/Applications/$1.app" || -d "$HOME/Applications/$1.app" ]] && printf '[OK]      %s.app\n' "$1" || printf '[MISSING] %s.app\n' "$1"; }
 for command in brew git gh chezmoi mise uv direnv tmux rg fd fzf jq yq docker kubectl helm k9s aws az gcloud tofu ansible nmap mitmproxy age sops; do check_cmd "$command"; done
 for app in Ghostty 'Visual Studio Code' Zed Wireshark 'Burp Suite Community Edition' DBeaver Bruno BetterDisplay; do check_app "$app"; done
-MLXCTL="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation/native-ai/bin/mlxctl"
-[[ -x "$MLXCTL" ]] && "$MLXCTL" verify || true
-WSCTL="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation/containers/bin/wsctl"
-command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && [[ -x "$WSCTL" ]] && "$WSCTL" status || true
 command -v chezmoi >/dev/null 2>&1 && chezmoi doctor || true

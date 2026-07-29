@@ -1,7 +1,7 @@
 # mac-security-ai-workstation
 
-A secure, container-first and reproducible Apple Silicon workstation baseline
-for software engineering, security engineering and MLX-based local AI.
+A secure and reproducible Apple Silicon workstation baseline for software
+engineering, security engineering and project-local MLX workloads.
 
 Target machine:
 
@@ -17,12 +17,13 @@ The repository deliberately separates four execution domains:
 | Domain | Responsibility |
 |---|---|
 | macOS host | GUI applications, Keychain/Touch ID integration, display/network/system tools and low-latency CLI use |
-| Native MLX environment | MLX and MLX-LM workloads that need Apple unified memory and Metal-backed execution |
-| Linux containers | Databases, vector stores, observability and repeatable batch scanners |
+| Project-local uv environment | MLX workloads that need Apple unified memory and Metal-backed execution |
+| Project containers | Project-owned services, scanners and CI-equivalent dependencies |
 | Isolated Linux VM | Exploit development, GDB workflows, untrusted binaries, malware analysis and x86-specific work |
 
-The initial AI baseline contains **MLX and MLX-LM only**. It intentionally omits
-Ollama, llama.cpp and PyTorch until a concrete workload justifies them.
+MLX is installed as a Python dependency of each project that needs it. MLX-LM
+and other model tooling are also project decisions rather than global
+workstation dependencies.
 
 BetterDisplay Free Edition is installed natively because display discovery,
 HiDPI scaling, DDC/brightness control and macOS display APIs cannot be delegated
@@ -32,20 +33,18 @@ to a Linux container.
 
 ```text
 .
+├── AGENTS.md                     # Repository-wide Codex instructions
+├── TASKS.md                      # Current operational backlog
+├── .agents/skills/               # Repo-local Codex workflows
 ├── bootstrap                     # Strap-inspired trust bootstrap
 ├── .chezmoiroot                  # Makes chezmoi/ the source-state root
 ├── chezmoi/                      # Dotfiles, generated user config and apply scripts
 ├── profiles/                     # Composable host Brewfile fragments
-├── native-ai/                    # Source copy of the native MLX environment
-├── containers/                   # Source copy of Compose and scanner tooling
 ├── script/                       # Small idempotent operations
 ├── tests/                        # Static and idempotency checks
+├── docs/                         # Architecture and durable decisions
 └── .github/workflows/            # CI validation
 ```
-
-The top-level `native-ai/` and `containers/` directories are canonical. Thin
-chezmoi templates copy their contents into `~/.config/security-ai-workstation/`,
-so runtime files have one source of truth.
 
 ## Secure bootstrap
 
@@ -94,7 +93,6 @@ Example with explicit choices:
   --firewall lulu \
   --git-name "Your Name" \
   --git-email "you@example.com" \
-  --sync-native-ai \
   --with-hardening
 ```
 
@@ -132,7 +130,7 @@ Profiles are explicit Brewfile fragments:
 
 - `core`: shell, Git, dotfiles and core CLI
 - `dev`: editors and language tooling
-- `ai`: no global package dump; MLX lives in a `uv` project
+- `ai`: no global package; documents project-local MLX placement
 - `security`: native interactive and host-integrated security tooling
 - `cloud`: cloud/Kubernetes/IaC control-plane CLIs
 - `data`: embedded SQL CLIs and native database/API clients
@@ -142,63 +140,39 @@ Profiles are explicit Brewfile fragments:
 Runtime, password-manager and outbound-firewall alternatives are separate
 fragments so mutually exclusive products are not installed together.
 
-## Native MLX
+## Shell history
 
-After apply:
+The core profile installs Atuin and initialises it for zsh. History stays in
+Atuin's local SQLite database by default: automatic sync, update checks, the
+background daemon and Atuin AI are disabled. Selected history entries are
+inserted for review rather than executed immediately.
 
-```bash
-~/.config/security-ai-workstation/native-ai/bin/mlxctl sync
-~/.config/security-ai-workstation/native-ai/bin/mlxctl verify
-```
-
-Run a model:
+Import existing zsh history explicitly when ready:
 
 ```bash
-~/.config/security-ai-workstation/native-ai/bin/mlxctl generate \
-  mlx-community/Mistral-7B-Instruct-v0.3-4bit \
-  "Explain passkeys."
+atuin import auto
 ```
 
-Start the loopback-only development API:
+## Project-local MLX
+
+MLX is distributed as a Python package rather than a standalone host
+application. Add it to each Apple-Silicon project's uv environment:
 
 ```bash
-~/.config/security-ai-workstation/native-ai/bin/mlxctl serve \
-  mlx-community/Mistral-7B-Instruct-v0.3-4bit 8080
+uv add mlx
 ```
 
-`mlx_lm.server` is a local development server, not a production gateway.
+Add `mlx-lm`, Hugging Face tooling, notebooks and model-serving dependencies
+only when that project's workload requires them. This keeps versions and model
+tooling isolated while still using Metal and unified memory natively.
 
-## Containers
+## Project containers
 
-Launch the selected Docker-compatible runtime, then:
-
-```bash
-~/.config/security-ai-workstation/containers/bin/wsctl pin-images
-~/.config/security-ai-workstation/containers/bin/wsctl up all
-~/.config/security-ai-workstation/containers/bin/wsctl status
-```
-
-For Rancher Desktop, chezmoi selects the Moby engine and disables Kubernetes by default because Compose and Testcontainers require the Docker API.
-
-Services:
-
-- PostgreSQL with pgvector
-- Redis
-- Qdrant
-- MLflow
-
-Scanner wrappers:
-
-- ZAP baseline scan
-- Semgrep
-- Trivy
-- Syft
-- Grype
-- Checkov
-- Prowler using explicitly exported short-lived AWS credentials
-
-Mutable source tags are resolved to immutable repository digests before Compose
-or wrappers use them.
+The workstation provides a Docker-compatible runtime but no global Compose
+stack. Each project owns its services, scanners, image versions, volumes and
+teardown policy. For Rancher Desktop, chezmoi selects the Moby engine and
+disables Kubernetes by default because Compose and Testcontainers require the
+Docker API.
 
 ## Verification
 
@@ -215,6 +189,18 @@ or wrappers use them.
 
 The tests validate shell syntax, Brewfile rendering, YAML syntax, forbidden host
 packages, placement invariants and render idempotency.
+
+## Continue with Codex CLI
+
+The development profile installs Codex CLI. Repository-wide and directory-specific
+instructions are defined in `AGENTS.md` files, and reusable workflows live under
+`.agents/skills/`.
+
+Start Codex directly from the repository root:
+
+```bash
+codex
+```
 
 ## Publishing to GitHub
 
@@ -240,6 +226,6 @@ cd ~/.local/share/chezmoi
 
 ## Trust model
 
-Read every profile and every script before use. Homebrew casks, container images,
-VS Code extensions, MCP servers and coding agents all extend the trusted
-computing base.
+Read every profile and every script before use. Homebrew casks, project
+container images, VS Code extensions, MCP servers and coding agents all extend
+the trusted computing base.

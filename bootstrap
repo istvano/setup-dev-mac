@@ -13,7 +13,6 @@ PASSWORD_MANAGER="bitwarden"
 FIREWALL="lulu"
 GIT_NAME="${GIT_AUTHOR_NAME:-}"
 GIT_EMAIL="${GIT_AUTHOR_EMAIL:-}"
-SYNC_NATIVE_AI=false
 APPLY_MACOS_DEFAULTS=false
 WITH_HARDENING=false
 INSTALL_UPDATES=false
@@ -28,7 +27,6 @@ Usage: ./bootstrap plan|install [options]
   --firewall lulu|little-snitch|none
   --git-name VALUE
   --git-email VALUE
-  --sync-native-ai
   --with-macos-defaults
   --with-hardening
   --install-updates
@@ -46,7 +44,6 @@ parse_args() {
       --firewall) FIREWALL="$2"; shift 2 ;;
       --git-name) GIT_NAME="$2"; shift 2 ;;
       --git-email) GIT_EMAIL="$2"; shift 2 ;;
-      --sync-native-ai) SYNC_NATIVE_AI=true; shift ;;
       --with-macos-defaults) APPLY_MACOS_DEFAULTS=true; shift ;;
       --with-hardening) WITH_HARDENING=true; shift ;;
       --install-updates) INSTALL_UPDATES=true; shift ;;
@@ -74,7 +71,6 @@ Workstation bootstrap plan
   outbound firewall:    $FIREWALL
   Git user.name:        ${GIT_NAME:-<prompt during install>}
   Git user.email:       ${GIT_EMAIL:-<prompt during install>}
-  sync native MLX:      $SYNC_NATIVE_AI
   macOS defaults:       $APPLY_MACOS_DEFAULTS
   security hardening:   $WITH_HARDENING
   recommended updates:  $INSTALL_UPDATES
@@ -159,7 +155,6 @@ profiles = [$profiles_toml]
 runtime = $(toml_quote "$RUNTIME")
 passwordManager = $(toml_quote "$PASSWORD_MANAGER")
 firewall = $(toml_quote "$FIREWALL")
-syncNativeAi = $SYNC_NATIVE_AI
 applyMacOSDefaults = $APPLY_MACOS_DEFAULTS
 pythonVersion = "3.13"
 EOF
