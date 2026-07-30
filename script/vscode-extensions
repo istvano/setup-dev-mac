@@ -1,0 +1,255 @@
+#!/usr/bin/env bash
+# Install and verify the declared VS Code extensions.
+#
+# vscode/extensions.list is the declared state. Every entry is pinned to an exact
+# version, because an extension is unreviewed third-party code with the editor's
+# filesystem access (ADR-032).
+#
+#   vscode-extensions [apply]   install the declared versions (default)
+#   vscode-extensions --dry-run print what would run, change nothing
+#   vscode-extensions --diff    installed versus declared
+#   vscode-extensions --verify  non-zero when the installed set has drifted
+#
+# Nothing here uninstalls anything. An extension installed by hand is reported by
+# --diff as undeclared and left alone: removing it is a decision, and it may well
+# be a deliberate experiment.
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+DECLARED="$ROOT/vscode/extensions.list"
+MODE="apply"
+
+usage() {
+  cat <<'EOF'
+Usage: script/vscode-extensions [apply|--dry-run|--diff|--verify]
+
+  apply       install every declared extension at its declared version (default)
+  --dry-run   print the commands that would run, change nothing
+  --diff      show the installed set against the declared one
+  --verify    non-zero when the installed set differs from the declared one
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    apply) MODE="apply" ;;
+    --dry-run) MODE="dry-run" ;;
+    --diff) MODE="diff" ;;
+    --verify) MODE="verify" ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    *) die "Unknown option: $1" ;;
+  esac
+  shift
+done
+
+[[ -f "$DECLARED" ]] || die "Missing declared extension list: $DECLARED"
+
+# Strips comments and blank lines. A trailing `# purpose` comment is required by
+# tests/vscode-extensions.sh, so it has to be removed before the id is used.
+read_declared() {
+  sed -E 's/[[:space:]]*#.*$//; s/[[:space:]]+$//' "$DECLARED" | grep -v '^$'
+}
+
+require_code() {
+  command_exists code || die "The 'code' command is not available. The
+visual-studio-code cask in the dev profile installs it as \$(brew --prefix)/bin/code."
+}
+
+# `--list-extensions --show-versions` prints publisher.name@version, the same
+# shape as the declared file, so both sides can be compared as plain text.
+#
+# LC_ALL=C on every sort, because comm compares byte by byte. Under a UTF-8
+# locale, sort's collation ignores punctuation weight, so `ms-vscode-remote.x` and
+# `ms-vscode.y` order differently than comm expects. comm then warns on stderr but
+# still prints a result — and the result was wrong in both directions at once,
+# listing the same extension as missing AND undeclared.
+installed_list() {
+  code --list-extensions --show-versions 2>/dev/null | LC_ALL=C sort
+}
+
+declared_list() {
+  read_declared | LC_ALL=C sort
+}
+
+# VS Code updates extensions on its own by default, which would silently move
+# every pin. Report it rather than editing the user's settings.json.
+warn_if_autoupdate_enabled() {
+  local settings="$HOME/Library/Application Support/Code/User/settings.json"
+  [[ -f "$settings" ]] || return 0
+  command_exists python3 || return 0
+  # Reads the setting rather than grepping, so a commented or nested occurrence
+  # cannot be mistaken for the effective value. VS Code settings.json permits
+  # comments and trailing commas, which json.load rejects, so a parse failure is
+  # not treated as an answer.
+  python3 - "$settings" <<'PY' || true
+import json
+import sys
+
+try:
+    with open(sys.argv[1]) as handle:
+        settings = json.load(handle)
+except (OSError, json.JSONDecodeError):
+    print(
+        "[WARN] Could not parse VS Code settings.json; "
+        "confirm extensions.autoUpdate is false by hand.",
+        file=sys.stderr,
+    )
+    raise SystemExit(0)
+
+if settings.get("extensions.autoUpdate", True) is not False:
+    print(
+        '[WARN] "extensions.autoUpdate" is not false in settings.json, so VS Code '
+        "will move the pinned versions on its own.\n"
+        '       Set "extensions.autoUpdate": false to keep the pins meaningful.',
+        file=sys.stderr,
+    )
+PY
+}
+
+apply_extensions() {
+  require_code
+  warn_if_autoupdate_enabled
+  local entry count=0
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    log "Installing $entry"
+    # --force skips the prompt. Installing an already-present version is a no-op,
+    # which is what makes repeated applies cheap and idempotent.
+    code --install-extension "$entry" --force
+    count=$((count + 1))
+  done < <(read_declared)
+  ((count > 0)) || die "No extensions are declared; the list parser is broken."
+  success "Applied $count declared extension(s)."
+}
+
+dry_run_extensions() {
+  local entry count=0
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    printf 'code --install-extension %q --force\n' "$entry"
+    count=$((count + 1))
+  done < <(read_declared)
+  ((count > 0)) || die "No extensions are declared; the list parser is broken."
+  log "$count extension(s) would be installed. Nothing was changed."
+}
+
+# Children of a declared extension pack or dependency, resolved from the
+# extensions actually on disk.
+#
+# Only roots are declared, so without this every pack child is reported as
+# undeclared: ms-python.python alone brings three, ms-toolsai.jupyter four. A
+# noisy diff is a diff nobody reads, which defeats the point of having one.
+#
+# Resolution is local, from each installed extension's own package.json, so it
+# needs no marketplace call and cannot go stale against a hand-maintained table.
+# VSCODE_EXTENSIONS_DIR overrides the location, mirroring `code --extensions-dir`.
+declared_children() {
+  local declared_file="$1"
+  local extensions_dir="${VSCODE_EXTENSIONS_DIR:-$HOME/.vscode/extensions}"
+  [[ -d "$extensions_dir" ]] || return 0
+  # Both paths go through argv. A heredoc already occupies stdin for the program
+  # itself, so piping the roots in as well would silently feed python nothing and
+  # SIGPIPE the writer.
+  python3 - "$declared_file" "$extensions_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    roots = {
+        line.strip().rsplit("@", 1)[0].lower() for line in handle if line.strip()
+    }
+directory = Path(sys.argv[2])
+
+# One directory per installed extension, named <publisher>.<name>-<version>.
+manifests = {}
+for manifest in directory.glob("*/package.json"):
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        continue
+    publisher, name = data.get("publisher"), data.get("name")
+    if publisher and name:
+        manifests[f"{publisher}.{name}".lower()] = data
+
+# Transitive: a pack may contain an extension that itself declares dependencies.
+children: set[str] = set()
+pending = list(roots)
+while pending:
+    data = manifests.get(pending.pop())
+    if not data:
+        continue
+    for key in ("extensionPack", "extensionDependencies"):
+        for child in data.get(key) or []:
+            child = child.lower()
+            if child not in roots and child not in children:
+                children.add(child)
+                pending.append(child)
+
+for child in sorted(children):
+    print(child)
+PY
+}
+
+diff_extensions() {
+  require_code
+  local tmp
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/vscode-ext.XXXXXX")"
+  trap 'rm -rf "$tmp"' RETURN
+  declared_list >"$tmp/declared"
+  installed_list >"$tmp/installed"
+  # Sorted the same way, since it is matched against comm's byte-wise output.
+  declared_children "$tmp/declared" | LC_ALL=C sort >"$tmp/children"
+
+  echo '== Declared but not installed at the declared version =='
+  comm -23 "$tmp/declared" "$tmp/installed" || true
+
+  echo
+  echo '== Installed but not declared =='
+  echo '(pack and dependency children of declared extensions are excluded)'
+  # Strip the version before matching a child, because the child's version is
+  # whatever the pack installed and is not pinned here.
+  comm -13 "$tmp/declared" "$tmp/installed" |
+    while IFS= read -r entry; do
+      [[ -n "$entry" ]] || continue
+      id="$(sed -E 's/@[^@]*$//' <<<"$entry" | tr '[:upper:]' '[:lower:]')"
+      grep -qxF "$id" "$tmp/children" || printf '%s\n' "$entry"
+    done
+
+  echo
+  echo '== Arriving as a pack or dependency child =='
+  cat "$tmp/children"
+}
+
+verify_extensions() {
+  require_code
+  warn_if_autoupdate_enabled
+  local tmp missing entry
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/vscode-ext.XXXXXX")"
+  trap 'rm -rf "$tmp"' RETURN
+  declared_list >"$tmp/declared"
+  installed_list >"$tmp/installed"
+
+  # Only the declared side is enforced. An extra extension is reported by --diff
+  # but does not fail verification, because this file is a floor and not a cage.
+  missing="$(comm -23 "$tmp/declared" "$tmp/installed")"
+  if [[ -n "$missing" ]]; then
+    warn 'Declared extensions are missing or at a different version:'
+    while IFS= read -r entry; do printf '  %s\n' "$entry" >&2; done <<<"$missing"
+    die 'Run ./script/vscode-extensions apply.'
+  fi
+  success "Every declared extension is installed at its declared version."
+}
+
+case "$MODE" in
+  apply) apply_extensions ;;
+  dry-run) dry_run_extensions ;;
+  diff) diff_extensions ;;
+  verify) verify_extensions ;;
+esac

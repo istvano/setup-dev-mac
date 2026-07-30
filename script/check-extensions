@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Verify every declared VS Code extension still exists and report newer versions.
+#
+# The sibling of script/check-tokens, for the same reason: vscode/extensions.list
+# pins exact versions, and a pin is a claim about the marketplace that goes stale
+# without anyone touching this repository. A withdrawn or renamed extension fails
+# only at apply time, on a real machine.
+#
+# Network access is required, so this is deliberately not part of ./script/test.
+# It runs on a schedule from .github/workflows/tokens.yml.
+#
+# This never edits the list. A newer version is a review decision: an extension
+# update is new third-party code running inside the editor (ADR-032).
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+command_exists python3 || die "python3 is required."
+
+DECLARED="$ROOT/vscode/extensions.list"
+[[ -f "$DECLARED" ]] || die "Missing $DECLARED"
+
+# Commented entries are checked too. They are published for people to enable, so
+# a dead id among them is a trap that only fires later.
+python3 - "$DECLARED" <<'PY'
+import json
+import re
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+entry = re.compile(
+    r"^#?\s*(?P<id>[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*)"
+    r"@(?P<version>\d+(?:\.\d+)*)\s+#\s+\S"
+)
+
+declared = {}
+for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    match = entry.match(line)
+    if match:
+        declared[match.group("id")] = match.group("version")
+
+if not declared:
+    print("[ERROR] No extensions found; the extraction is broken.", file=sys.stderr)
+    raise SystemExit(1)
+
+# filterType 7 is ExtensionName, an exact publisher.name match.
+# flags: IncludeVersions | IncludeLatestVersionOnly.
+body = {
+    "filters": [
+        {
+            "criteria": [{"filterType": 7, "value": i} for i in declared],
+            "pageSize": 200,
+            "pageNumber": 1,
+        }
+    ],
+    "flags": 0x1 | 0x200,
+}
+request = urllib.request.Request(
+    "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery",
+    data=json.dumps(body).encode(),
+    headers={
+        "Content-Type": "application/json",
+        "Accept": "application/json;api-version=7.2-preview.1",
+        "User-Agent": "mac-security-ai-workstation/check-extensions",
+    },
+)
+try:
+    with urllib.request.urlopen(request, timeout=40) as response:
+        data = json.load(response)
+except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+    print(f"[ERROR] Could not reach the marketplace: {error}", file=sys.stderr)
+    raise SystemExit(1)
+
+latest = {}
+for extension in data["results"][0]["extensions"]:
+    identifier = (
+        f'{extension["publisher"]["publisherName"]}.{extension["extensionName"]}'
+    )
+    latest[identifier.lower()] = (identifier, extension["versions"][0]["version"])
+
+failures = 0
+outdated = 0
+for identifier, pinned in sorted(declared.items()):
+    found = latest.get(identifier.lower())
+    if not found:
+        print(
+            f"[WARN] {identifier} is not a current marketplace extension.",
+            file=sys.stderr,
+        )
+        failures += 1
+        continue
+    canonical, newest = found
+    if canonical != identifier:
+        # code --install-extension is case-insensitive, so this installs fine, but
+        # --verify compares text against --list-extensions, which reports the
+        # published casing. A mismatch would read as permanent drift.
+        print(
+            f"[WARN] {identifier} is published as {canonical}; the casing must "
+            "match or --verify reports it as missing forever.",
+            file=sys.stderr,
+        )
+        failures += 1
+    if pinned != newest:
+        print(f"  {canonical}: pinned {pinned}, latest {newest}")
+        outdated += 1
+
+print()
+print(f"{len(declared)} declared extension(s) checked.")
+if outdated:
+    print(f"{outdated} have a newer version. Updating one is a review decision:")
+    print("  edit vscode/extensions.list, then ./script/vscode-extensions apply")
+else:
+    print("Every pin is at the latest published version.")
+
+if failures:
+    print(f"[ERROR] {failures} extension(s) need attention.", file=sys.stderr)
+    raise SystemExit(1)
+PY
+
+success "Declared VS Code extensions are all current marketplace ids."

@@ -22,6 +22,11 @@ These are deliberate defaults, not placeholders:
   Homebrew's own bundled Ruby internally.
 - Local AI baseline: MLX as a project-local Python dependency. LM Studio is the
   only permitted local inference runtime and is opt-in via `local-llm` (ADR-025).
+- VS Code extensions are declared in `vscode/extensions.list` with exact pinned
+  versions, roots only; nothing is uninstalled automatically (ADR-032).
+- Nerd Fonts come from homebrew/cask, never from the upstream installer script.
+- Default interactive shell: zsh. fish is the mutually exclusive alternative,
+  selected by `--shell`; it never changes the account login shell (ADR-031).
 - Default free container runtime: Rancher Desktop configured with Moby.
 - Default free password manager: Bitwarden.
 - Default free outbound firewall: LuLu.
@@ -202,7 +207,10 @@ Do not weaken these without explicit user approval and a documented decision:
 - Image source tags are resolved to reviewed immutable digests before use.
 - Project-local MLX serving binds to loopback and is not presented as
   production-safe.
-- Host firewalls and password managers remain mutually exclusive choices.
+- Interactive shells, host firewalls and password managers remain mutually
+  exclusive choices.
+- The account login shell is not reassigned automatically, and `/etc/shells` is
+  not edited.
 
 ## Documentation contract
 

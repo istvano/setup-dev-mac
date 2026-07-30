@@ -15,6 +15,7 @@ VALID_PROFILES=(
   local-llm
   lab
   docs
+  fonts
   mcp
   cloud
   cloud-aws

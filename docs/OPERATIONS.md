@@ -42,6 +42,7 @@ An explicit installation using the free defaults is:
 ```bash
 ./bootstrap install \
   --profiles core,dev,security,productivity,backup \
+  --shell zsh \
   --runtime rancher \
   --password-manager bitwarden \
   --firewall lulu \
@@ -114,9 +115,11 @@ renders that exact Brewfile and checks it with Homebrew Bundle before running
 
 ### Migrating an older configuration
 
-Configurations created before the current data keys existed need
+Configurations created before the current data keys existed need `shell`,
 `gitSigningMethod`, `gitSigningKey`, `workGitDir` and `workGitEmail` added to
-`data` in `~/.config/chezmoi/chezmoi.toml`. `gitSigningMethod` is one of `gpg`,
+`data` in `~/.config/chezmoi/chezmoi.toml`. `shell` is `zsh` or `fish`; it has no
+default on purpose, so a stale configuration fails loudly in `./script/verify`
+rather than being checked against a shell fragment nobody selected. `gitSigningMethod` is one of `gpg`,
 `ssh` or `none`; an empty `gitSigningKey` disables signing regardless, and an
 empty `workGitEmail` disables the work identity split.
 
@@ -199,6 +202,164 @@ releases and cannot be predicted from the repository.
 Settings in the Safari domain are protected by TCC. They are reported as
 unreadable unless the terminal has Full Disk Access, and this is a warning
 rather than a failure.
+
+## VS Code extensions
+
+`vscode/extensions.list` is the declared state; every entry carries an exact
+version. Applied automatically on `chezmoi apply` when the `dev` profile is
+selected, and by hand with:
+
+```bash
+./script/vscode-extensions --dry-run   # print the commands, change nothing
+./script/vscode-extensions apply
+./script/vscode-extensions --diff      # installed versus declared
+./script/vscode-extensions --verify    # non-zero on drift
+./script/check-extensions              # network: are the pins still latest?
+```
+
+### Turn off VS Code's own extension updates
+
+Pinning is defeated by VS Code updating extensions behind it. Set this in
+`~/Library/Application Support/Code/User/settings.json`:
+
+```json
+"extensions.autoUpdate": false
+```
+
+The repository does not write this for you — `settings.json` is a personal file
+and merging into it would be a destructive edit. `--verify` warns when the setting
+is not `false` and reports the drift regardless, so a machine that ignores this
+advice is noisy rather than silently wrong.
+
+### Only roots are declared
+
+Extension packs install their own children. `ms-python.python` brings Pylance,
+the debugger and the environments extension; `ms-toolsai.jupyter` brings four
+more; `ms-vscode-remote.remote-ssh` brings two; `ms-azuretools.vscode-docker`
+depends on Container Tools. Those children are not declared and not pinned.
+
+`--diff` resolves pack membership from each installed extension's own
+`package.json`, so it separates three cases:
+
+```text
+== Declared but not installed at the declared version ==
+== Installed but not declared ==            # things added by hand
+== Arriving as a pack or dependency child ==
+```
+
+Nothing is ever uninstalled. An extension in the second list is left alone;
+removing it is a decision, the same treatment `./script/update-report` gives
+Homebrew cleanup candidates.
+
+### Updating a pinned version
+
+An extension update is new third-party code inside the editor, so it is reviewed
+rather than applied automatically:
+
+```bash
+./script/check-extensions       # reports pinned versus latest for each entry
+# edit vscode/extensions.list
+./script/test
+./script/vscode-extensions apply
+```
+
+## Fonts
+
+`core` installs JetBrainsMono Nerd Font because `dot_config/ghostty/config`
+selects it by name. An unknown font name is not an error in Ghostty — it falls
+back silently, and the only symptom is prompt and `eza --icons` glyphs turning
+into replacement boxes, so `tests/placement-policy.sh` asserts that the configured
+font-family and the `core` cask stay paired.
+
+The opt-in `fonts` profile adds more from
+[ryanoasis/nerd-fonts](https://github.com/ryanoasis/nerd-fonts):
+
+```bash
+./bootstrap plan --profiles core,dev,security,productivity,backup,fonts
+```
+
+To use an unpatched font and still get every Nerd Font glyph, name the real font
+first and the symbols-only font second — Ghostty tries them in order:
+
+```text
+font-family = Your Preferred Font
+font-family = Symbols Nerd Font Mono
+```
+
+That second line requires the `fonts` profile, so add it only once
+`font-symbols-only-nerd-font` is installed.
+
+Fonts install to `~/Library/Fonts` per user. Confirm what the terminal actually
+resolved rather than what was requested:
+
+```bash
+ghostty +show-config | grep font
+ghostty +list-fonts | grep -i nerd
+```
+
+## Interactive shell
+
+`--shell` selects zsh (default) or fish. The choice is a mutually exclusive
+Brewfile fragment, so fish replaces the two zsh plugin formulae rather than
+adding to them:
+
+```bash
+./bootstrap plan --shell fish
+```
+
+On an already-installed machine, edit `shell` in
+`~/.config/chezmoi/chezmoi.toml` and run `./script/setup`. Chezmoi then installs
+the other fragment, writes or removes `~/.config/fish`, and re-renders the
+Ghostty configuration.
+
+### The login shell is not changed
+
+Selecting fish configures Ghostty to run it (`command = /opt/homebrew/bin/fish
+--login`). The account login shell stays zsh, deliberately:
+
+- A fish configuration that fails to parse costs a terminal tab, not the ability
+  to log in.
+- `chsh` requires editing `/etc/shells` with sudo. Privileged, hard-to-reverse
+  account changes stay manual here, like FileVault and the Touch ID PAM entry.
+- Anything reading `$SHELL` — `git`, editors, `ssh <host> <command>` — keeps
+  getting a shell that is always present on macOS.
+
+`--login` is not cosmetic. fish applies `/etc/paths` and `/etc/paths.d` only when
+it is a login shell, and those are how macOS installers put themselves on `PATH`.
+Without it fish starts normally and quietly has a shorter `PATH` than zsh.
+
+Every apply reports the current state and changes nothing:
+
+```text
+[INFO] Login shell is /bin/zsh; the selected interactive shell is fish.
+```
+
+To change it anyway, both steps are required, because `chsh` refuses a shell that
+is not listed in `/etc/shells`:
+
+```bash
+echo "$(brew --prefix)/bin/fish" | sudo tee -a /etc/shells
+chsh -s "$(brew --prefix)/bin/fish"
+```
+
+Reverse it with `chsh -s /bin/zsh`. Keep a second terminal open until a new
+window has started successfully.
+
+### Verifying the shell configuration
+
+Upstream resolvers report effective values after parsing (ADR-030):
+
+```bash
+ghostty +show-config | grep -E 'shell-integration|^command'
+dscl . -read "/Users/$USER" UserShell   # the login shell, not $SHELL
+fish -n ~/.config/fish/config.fish      # parse without executing
+fish -c 'echo $fish_key_bindings'       # must be fish_default_key_bindings
+bind ctrl-w                             # backward-kill-path-component
+starship explain                        # same prompt modules under either shell
+```
+
+`$SHELL` names the shell that happens to be running, so it cannot confirm either
+the selection or the login shell.
 
 ## Commit signing
 

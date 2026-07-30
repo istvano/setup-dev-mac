@@ -1,0 +1,160 @@
+# Interactive fish configuration. The counterpart of dot_zshrc.tmpl, selected by
+# `--shell fish`; only one of the two shells is installed on a given machine.
+#
+# config.fish is read by EVERY fish process, including a non-interactive one
+# running a script, so anything that only makes sense at a prompt sits inside the
+# `status is-interactive` block below. PATH and the editor stay outside it,
+# because a script needs those too.
+#
+# Every activation stays guarded by `type -q` so a partially installed
+# workstation still gets a usable shell.
+
+# --- PATH --------------------------------------------------------------------
+
+# -g on purpose. fish_add_path defaults to a UNIVERSAL fish_user_paths, which
+# would persist in ~/.config/fish/fish_variables and keep applying even after
+# this line was removed — shell state outside the reviewed file. A global is
+# rebuilt from this file on every start. It is idempotent either way: "If a
+# directory is already included, it is not added again."
+#
+# Note the difference from .zshrc, which prepends unconditionally:
+# fish_add_path SILENTLY skips a directory that does not exist ("Ignore
+# non-existing paths" in its own source, with a message only under --verbose).
+# ~/.local/bin is on PATH here because chezmoi creates it — dot_local/bin holds
+# browser-profile — so this line depends on that. If dot_local/bin ever went
+# away, zsh would keep the entry and fish would quietly lose it;
+# tests/placement-policy.sh ties the two together.
+fish_add_path -g $HOME/.local/bin
+
+# `brew shellenv fish` emits fish `set -gx` syntax, so it is piped to `source`
+# rather than eval'd. It prints nothing once Homebrew's bin and sbin are already
+# first and second in PATH, so re-running it cannot reorder anything.
+if test -x /opt/homebrew/bin/brew
+    /opt/homebrew/bin/brew shellenv fish | source
+end
+# Rust comes from mise, which shims cargo and rustc; no Homebrew keg on PATH.
+
+# --- Completion --------------------------------------------------------------
+
+# Nothing to configure. There is no compinit, no compaudit and no insecure
+# completion directory to audit, because fish autoloads completions on demand.
+#
+# Homebrew is explicit that the paths need no help here: "Homebrew's `fish`
+# formula discovers Homebrew-managed completions automatically." The
+# fish_complete_path additions in Homebrew's instructions apply only to a fish
+# installed some other way, and profiles/shell-fish.Brewfile installs it from
+# Homebrew.
+
+# --- Editor ------------------------------------------------------------------
+
+# Prefer a terminal editor: `code --wait` is unusable over SSH or in recovery.
+if type -q nvim
+    set -gx EDITOR nvim
+else if type -q vim
+    set -gx EDITOR vim
+else
+    set -gx EDITOR "code --wait"
+end
+set -gx VISUAL $EDITOR
+
+# --- Environment -------------------------------------------------------------
+
+# `set` takes options only before the variable name, so the leading dash in the
+# value is unambiguous here: "set flags -l will have the effect of setting the
+# value of the variable flags to '-l'".
+set -gx LESS -R
+
+# A stricter umask is deliberately not set here: Homebrew fails to build several
+# formulae under umask 077. Rely on FileVault and per-file modes instead.
+
+# --- Interactive only --------------------------------------------------------
+
+if status is-interactive
+    set -g fish_greeting ""
+
+    # --- Keymap --------------------------------------------------------------
+
+    # fish already defaults to emacs bindings and, unlike zsh, does not infer the
+    # mode from $EDITOR, so this is not correcting a defect. It is declared
+    # because fish_key_bindings is conventionally universal: running
+    # `fish_vi_key_bindings` once at a prompt writes it to fish_variables, where
+    # it then applies to every future session. A global assignment shadows the
+    # universal one — fish resolves the smallest scope first — which keeps this
+    # file authoritative over that stored state.
+    set -g fish_key_bindings fish_default_key_bindings
+
+    # --- History -------------------------------------------------------------
+
+    # Nothing to set. fish's history is unbounded and shared between sessions by
+    # default, so HISTSIZE, SAVEHIST and SHARE_HISTORY have no counterpart, and
+    # the zsh HIST_IGNORE_SPACE behaviour is built in: "Prefixing the commandline
+    # with a space will prevent the entire line from being stored in the
+    # history."
+    #
+    # Atuin is still the primary history store; fish keeps its own file as well
+    # and it is read by anything that does not know about Atuin.
+
+    # --- Line editing --------------------------------------------------------
+
+    # Nothing to set. The zsh WORDCHARS fix has no counterpart because fish
+    # already binds Control-W to backward-kill-path-component: it "removes the
+    # previous path component (everything up to the previous "/", ":" or "@")".
+    # Alt-Backspace is the word-wise kill when that is what is wanted.
+    #
+    # Syntax highlighting and autosuggestions are part of the fish reader rather
+    # than sourced plugins, so there is no load order to get right and no
+    # ZSH_HIGHLIGHT_MAXLENGTH-style cap needed to keep typing responsive.
+
+    # --- Tool activation -----------------------------------------------------
+
+    type -q mise; and mise activate fish | source
+    type -q direnv; and direnv hook fish | source
+    type -q starship; and starship init fish | source
+    type -q zoxide; and zoxide init fish | source
+
+    # fzf uses fd so results honour .gitignore and skip .git. These are set
+    # BEFORE the bindings are sourced: fzf decides at source time whether to bind
+    # Control-T and Alt-C at all, and reads the command values only when the
+    # widget runs. Setting them first is correct under both behaviours.
+    if type -q fd
+        set -gx FZF_DEFAULT_COMMAND 'fd --type f --hidden --exclude .git'
+        set -gx FZF_CTRL_T_COMMAND $FZF_DEFAULT_COMMAND
+        set -gx FZF_ALT_C_COMMAND 'fd --type d --hidden --exclude .git'
+    end
+    set -gx FZF_DEFAULT_OPTS '--height 40% --layout=reverse --border'
+
+    # ORDER MATTERS, for the same reason as in dot_zshrc.tmpl. fzf's fish
+    # bindings run `bind \cr fzf-history-widget` and Atuin binds Control-R as
+    # well, so whichever is sourced last wins. Atuin is the history store this
+    # workstation is built around, so it goes after fzf. Reversing these two
+    # silently replaces Atuin search with fzf's, which still works and is
+    # therefore easy not to notice.
+    # tests/placement-policy.sh asserts this order.
+    type -q fzf; and fzf --fish | source
+    type -q atuin; and atuin init fish --disable-ai | source
+
+    # GPG_TTY must name a real terminal, which is why it is in this block rather
+    # than with the other exports: `tty` has nothing to report without one.
+    set -gx GPG_TTY (tty)
+
+    # --- Aliases -------------------------------------------------------------
+
+    # `alias` in fish defines a function for this session only. It is
+    # deliberately not `alias --save`, which would write a file into
+    # ~/.config/fish/functions and put shell state outside this reviewed file.
+    # --icons=auto needs a Nerd Font, which core.Brewfile installs and
+    # dot_config/ghostty/config selects; `auto` restricts icons to a real
+    # terminal, so a redirect or a pipe still produces plain parsable output.
+    if type -q eza
+        alias ls 'eza --icons=auto --group-directories-first'
+        alias ll 'eza -l --git --icons=auto --group-directories-first'
+        alias la 'eza -la --git --icons=auto --group-directories-first'
+        alias lt 'eza --tree --level=2 --icons=auto --group-directories-first'
+    end
+    type -q bat; and alias cat 'bat --paging=never'
+
+    # `rm` is deliberately not aliased to trash. Redefining it builds a habit
+    # that does not transfer to another machine, a container, or anything run
+    # under sudo, where the same keystrokes delete irreversibly. Call trash by
+    # name.
+end

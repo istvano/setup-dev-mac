@@ -8,9 +8,19 @@ These files define software installed directly on macOS.
   it belongs on the host rather than in a container or VM.
 - Keep profiles composable and deterministic.
 - Keep mutually exclusive tools in separate fragments:
+  - interactive shells
   - container runtimes
   - password managers
   - outbound firewalls
+- The shell fragment is the only alternative without a `none`: a workstation
+  always has an interactive shell, so `script/render-brewfile` appends it
+  unconditionally. Do not copy the `!= none` guard onto it.
+- Fonts belong in the `fonts` profile and are judged more leniently than software:
+  a font executes nothing, opens no port and needs no permission. The exception is
+  the Ghostty font-family font, which stays in `core` because the terminal depends
+  on it; `tests/placement-policy.sh` asserts that pairing.
+- Do not add a shell plugin manager. fisher, oh-my-fish and the zsh frameworks
+  fetch unreviewed code at runtime, outside the Homebrew trust boundary (ADR-031).
 - Keep cloud providers, Kubernetes, privileged security tools and personal
   productivity applications in explicit opt-in fragments.
 - A new profile must be added to `VALID_PROFILES` in `script/lib/profiles.sh`

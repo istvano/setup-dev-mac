@@ -27,7 +27,10 @@ require_or_skip() {
 }
 
 if require_or_skip shfmt; then
-  mapfile -t files < <("$ROOT/script/shell-files")
+  # Not mapfile; see tests/shell-syntax.sh. macOS bash is 3.2.
+  files=()
+  while IFS= read -r file; do files+=("$file"); done \
+    < <("$ROOT/script/shell-files")
   shfmt -d "${SHFMT_FLAGS[@]}" "${files[@]}"
 fi
 

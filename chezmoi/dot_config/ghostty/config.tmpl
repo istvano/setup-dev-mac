@@ -22,7 +22,27 @@ scrollback-limit-lines = 10000
 
 copy-on-select = false
 confirm-close-surface = true
-shell-integration = zsh
+
+# Ghostty can detect the shell, but naming it means the selection in
+# ~/.config/chezmoi/chezmoi.toml is what decides, not whatever the surface
+# happens to launch.
+shell-integration = {{ .shell }}
+{{ if eq .shell "fish" }}
+# `command` runs fish in every new surface WITHOUT changing the account login
+# shell, which stays zsh. That is the point: a fish configuration that fails to
+# parse costs a terminal tab, not the ability to log in. `chsh` is a separate,
+# manual step documented in docs/OPERATIONS.md.
+#
+# --login is required, not cosmetic. fish applies /etc/paths and /etc/paths.d
+# only when it is a login shell — `status is-login && command -sq
+# /usr/libexec/path_helper` in its own share/config.fish — and those are how
+# macOS installers put themselves on PATH. Without it, fish starts fine and
+# quietly lacks entries zsh has.
+#
+# The absolute path is Homebrew's fixed arm64 prefix, which this repository
+# already requires; `command` is not a shell, so it cannot ask brew --prefix.
+command = /opt/homebrew/bin/fish --login
+{{ end }}
 
 # ssh-env and ssh-terminfo both default to off. Ghostty exports
 # TERM=xterm-ghostty, which remote hosts do not have in their terminfo database,

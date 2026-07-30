@@ -1,0 +1,69 @@
+# Declared VS Code extensions. Applied by script/vscode-extensions.
+#
+# Format: publisher.name@version  # what it does and why it is here
+#
+# Every entry carries an EXACT version. An extension is unreviewed third-party
+# code running inside the editor with the editor's filesystem access, so it gets
+# the same treatment as an MCP server package in ADR-029: no floating versions,
+# no implicit latest. See ADR-032.
+#
+# Pinning only means something while VS Code's own extension auto-update is off.
+# `script/vscode-extensions --verify` reports drift either way, and warns when
+# that setting would defeat the pins.
+#
+# ONLY ROOTS ARE DECLARED. An extension pack or dependency installs its children
+# automatically, and pinning a child here would add a version that moves on its
+# own schedule for no benefit. `--diff` resolves pack membership from the
+# installed extensions on disk, so children are not reported as undeclared.
+# The children currently arriving this way are named in the comments below.
+#
+# Ids are case-sensitive as published — golang.Go, EditorConfig.EditorConfig —
+# even though `code --install-extension` matches without regard to case.
+
+# --- AI coding agents ---------------------------------------------------------
+# Both send file contents to a remote service by design. That is their purpose
+# and it is a deliberate choice, but it is the widest data path in this file, so
+# it is stated rather than left implicit.
+anthropic.claude-code@2.1.220  # Editor integration for the Claude Code CLI in dev.Brewfile.
+openai.chatgpt@26.5721.30844   # Codex, OpenAI's coding agent; pairs with the codex cask.
+
+# --- Remote and container development ----------------------------------------
+ms-vscode-remote.remote-containers@0.467.0    # Devcontainer client; the reason dev.Brewfile installs VS Code.
+ms-vscode-remote.remote-ssh@0.125.2026072315  # Edit over SSH on Lima VMs and remote hosts. Pack: adds remote-ssh-edit and ms-vscode.remote-explorer.
+ms-azuretools.vscode-docker@2.0.0             # Dockerfile and Compose editing. Depends on ms-azuretools.vscode-containers, which does the work since 2.0.
+
+# --- Kubernetes ---------------------------------------------------------------
+ms-kubernetes-tools.vscode-kubernetes-tools@1.4.1 # Manifest authoring and cluster browsing. Depends on redhat.vscode-yaml, which is also declared below in its own right.
+
+# --- Languages ----------------------------------------------------------------
+# The toolchains themselves come from mise (ADR-021); these are the editor half.
+golang.Go@0.57.0                     # Go language support.
+ms-python.python@2026.5.2026070801   # Python language support. Pack: adds vscode-pylance, debugpy and vscode-python-envs.
+ms-toolsai.jupyter@2026.6.2026071501 # Notebooks, including MLX experiments. Pack: adds jupyter-keymap, jupyter-renderers, vscode-jupyter-cell-tags and vscode-jupyter-slideshow.
+dbaeumer.vscode-eslint@3.0.34        # JavaScript and TypeScript linting.
+esbenp.prettier-vscode@12.4.0        # Formatter for web and Markdown files.
+
+# --- Markup and data ----------------------------------------------------------
+redhat.vscode-yaml@1.25.2026073008 # YAML validation and schema completion for workflows and manifests.
+redhat.vscode-xml@0.29.2026061109  # XML and XSD editing.
+
+# --- Build and version control ------------------------------------------------
+ms-vscode.makefile-tools@0.13.37 # Makefile targets; this repository uses just, other projects use make.
+eamodio.gitlens@2026.7.300552    # Blame, history and range navigation. Prompts for a GitKraken account for its paid features; the free feature set needs no sign-in.
+
+# --- Appearance ---------------------------------------------------------------
+vscode-icons-team.vscode-icons@12.19.0 # File-explorer icons. Independent of the terminal Nerd Font glyphs.
+
+# --- Recommended, not installed ----------------------------------------------
+# These mirror gates that ./script/test already runs, so enabling them makes the
+# editor agree with CI instead of adding new capability. Uncomment to adopt.
+#timonwong.shellcheck@0.39.5            # The same shellcheck the test suite runs, inline while editing.
+#foxundermoon.shell-format@7.2.8        # shfmt formatting, matching tests/format.sh.
+#tamasfe.even-better-toml@0.21.2        # TOML editing; chezmoi, mise, starship and atuin configs are all TOML.
+#EditorConfig.EditorConfig@0.18.2       # Applies the repository .editorconfig rather than personal defaults.
+#DavidAnson.vscode-markdownlint@0.62.0  # Markdown linting for a documentation-heavy repository.
+
+# --- Further alternatives -----------------------------------------------------
+#HashiCorp.terraform@2.40.0    # HCL for the `cloud` profile's OpenTofu.
+#charliermarsh.ruff@2026.66.0  # Ruff linting and formatting for Python.
+#rust-lang.rust-analyzer@0.4.2992 # Rust language server.

@@ -19,6 +19,10 @@ done
 
 selection="$(chezmoi data)"
 profiles="$(jq -er '.profiles | join(",")' <<<"$selection")"
+# Required, not optional. Rendering the wrong shell fragment would make the
+# cleanup section at the end of this report list the selected shell itself as a
+# package to remove, which reads as a legitimate suggestion.
+shell_choice="$(jq -er '.shell' <<<"$selection")"
 runtime="$(jq -er '.runtime' <<<"$selection")"
 password_manager="$(jq -er '.passwordManager' <<<"$selection")"
 firewall="$(jq -er '.firewall' <<<"$selection")"
@@ -29,6 +33,7 @@ brewfile="$tmp_dir/Brewfile"
 
 "$ROOT/script/render-brewfile" \
   --profiles "$profiles" \
+  --shell "$shell_choice" \
   --runtime "$runtime" \
   --password-manager "$password_manager" \
   --firewall "$firewall" \

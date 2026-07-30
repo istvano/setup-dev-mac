@@ -1,8 +1,48 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
 source "$ROOT/script/lib/common.sh"
 command_exists chezmoi || die "chezmoi is not installed; run ./bootstrap install"
+
+# Every data key the templates read. chezmoi uses missingkey=error, so a
+# configuration written before a key existed fails with
+#   template: ...: map has no entry for key "shell"
+# which says nothing about the cause or the fix. This names the missing keys and
+# the one command that repairs them, before chezmoi is reached.
+#
+# Checked here rather than in each template: this is the documented entry point,
+# and one list is easier to keep current than a guard per template.
+REQUIRED_DATA_KEYS=(
+  gitName gitEmail gitSigningMethod gitSigningKey
+  workGitDir workGitEmail
+  profiles shell runtime passwordManager firewall applyMacOSDefaults
+)
+
+require_data_keys() {
+  command_exists python3 || return 0
+  local data missing
+  data="$(chezmoi data 2>/dev/null)" || die "chezmoi data failed; is chezmoi initialised?"
+  missing="$(python3 -c '
+import json
+import sys
+
+data = json.loads(sys.stdin.read())
+print(" ".join(key for key in sys.argv[1:] if key not in data))
+' "${REQUIRED_DATA_KEYS[@]}" <<<"$data")"
+
+  [[ -z "$missing" ]] && return 0
+
+  warn "This chezmoi configuration predates some data keys the templates need:"
+  local key
+  for key in $missing; do printf '  %s\n' "$key" >&2; done
+  log 'Regenerate the configuration, which prompts only for what is missing:'
+  log "  chezmoi init --source $ROOT"
+  log 'See docs/OPERATIONS.md, "Migrating an older configuration".'
+  die 'Refusing to apply against an incomplete configuration.'
+}
+
+require_data_keys
 chezmoi diff
 confirm "Apply chezmoi source state?" || die "Cancelled."
 chezmoi apply --source "$ROOT"

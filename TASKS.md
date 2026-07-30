@@ -22,6 +22,25 @@ Linux CI cannot prove any of these. Record the results after the first install.
 - [ ] Prove the lab boundary: `limactl start`, then `ansible -i lab, -m ping all`.
       The isolated-VM domain was documented but unimplemented until ADR-027, so
       it has never actually been exercised.
+- [ ] If fish is selected, confirm `ghostty +show-config | grep -E
+      'shell-integration|^command'` reports `fish` and the `--login` argument.
+      Ghostty is the only thing that launches fish, so a rejected `command` line
+      would leave zsh running with no error anywhere.
+- [ ] With fish selected, compare `PATH` against zsh's. They should differ only
+      in ordering. A missing `/etc/paths.d` entry means `--login` is not taking
+      effect, which is invisible until a tool installed by a macOS package is
+      not found.
+- [ ] Run `./script/test` on the Mac. It is now verified against bash 3.2.57, the
+      version macOS ships, but only Linux CI has run the shellcheck, shfmt,
+      actionlint and gitleaks paths on the real binaries.
+- [ ] After the first `chezmoi apply`, confirm nothing landed in `$HOME` that is
+      not a dotfile: `chezmoi managed --include=files,dirs | grep -v '^\.'` must
+      print nothing.
+- [ ] With the `dev` profile, confirm `./script/vscode-extensions --verify` passes
+      and that `--diff` reports the ten pack children rather than calling them
+      undeclared.
+- [ ] Set `"extensions.autoUpdate": false` in VS Code settings, or accept that
+      the pinned versions will drift and `--verify` will keep reporting it.
 - [ ] Add macOS integration tests once first-run behaviour has been observed.
 
 ## MCP follow-up

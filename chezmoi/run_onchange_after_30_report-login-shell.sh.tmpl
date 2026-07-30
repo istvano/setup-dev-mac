@@ -1,0 +1,61 @@
+{{- if eq .chezmoi.os "darwin" -}}
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Reports the account login shell against the selected shell. Changes nothing.
+#
+# run_onchange rather than run_once: the selection below is part of the script, so
+# switching shells re-runs this and re-reports. A run_once script would stay
+# silent through exactly the change worth reporting.
+#
+# Nothing here calls chsh. Editing /etc/shells and reassigning the login shell is
+# a privileged change to the account, and AGENTS.md keeps that class of operation
+# manual — the same reason FileVault and the Touch ID PAM entry are not automated.
+# Ghostty already runs the selected shell through its `command` setting, so the
+# workstation is usable without this step ever being taken.
+SELECTED={{ .shell | quote }}
+# From chezmoi rather than $USER: a run script does not get an interactive shell's
+# environment, and an unset $USER would make dscl read /Users/ and report nothing.
+ACCOUNT={{ .chezmoi.username | quote }}
+
+# Vendor-generated shell initialisation. Chezmoi run scripts do not inherit an
+# interactive shell's PATH, so Homebrew must be located explicitly or the
+# `command -v` below cannot find a Homebrew-installed shell.
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
+# dscl reads the account record. $SHELL only reports the shell that happens to be
+# running this script, which is bash, and would always look like a mismatch.
+current="$(dscl . -read "/Users/$ACCOUNT" UserShell 2>/dev/null | awk '{print $2}')"
+
+if [[ -z "$current" ]]; then
+  echo "[WARN] Could not read the login shell for $ACCOUNT; skipping the check." >&2
+  exit 0
+fi
+
+if [[ "$(basename "$current")" == "$SELECTED" ]]; then
+  exit 0
+fi
+
+selected_path="$(command -v "$SELECTED" 2>/dev/null || true)"
+
+cat >&2 <<EOF
+[INFO] Login shell is $current; the selected interactive shell is $SELECTED.
+       This is expected and supported: Ghostty runs $SELECTED directly, and
+       leaving the login shell alone means a broken shell configuration cannot
+       lock you out of the account.
+EOF
+
+if [[ -n "$selected_path" ]]; then
+  cat >&2 <<EOF
+       To change it anyway, deliberately and with sudo:
+         echo '$selected_path' | sudo tee -a /etc/shells
+         chsh -s '$selected_path'
+       chsh refuses a shell that is not listed in /etc/shells, which is why the
+       first line is needed. Both are reversible with the previous value above.
+EOF
+else
+  echo "[WARN] $SELECTED is not on PATH; check that its Brewfile fragment installed." >&2
+fi
+{{- end }}

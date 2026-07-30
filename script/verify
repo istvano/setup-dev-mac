@@ -12,6 +12,12 @@ done
 
 selection="$(chezmoi data)"
 profiles="$(jq -er '.profiles | join(",")' <<<"$selection")"
+# Named explicitly rather than left to jq's own error text. A configuration
+# predating this key must fail loudly and be migrated, not be verified against
+# the wrong shell fragment — but "jq: error: null has no ..." does not say so.
+shell_choice="$(jq -er '.shell' <<<"$selection")" || die "chezmoi data has no 'shell' key.
+Run 'chezmoi init --source $ROOT' to add it, or see docs/OPERATIONS.md,
+\"Migrating an older configuration\"."
 runtime="$(jq -er '.runtime' <<<"$selection")"
 password_manager="$(jq -er '.passwordManager' <<<"$selection")"
 firewall="$(jq -er '.firewall' <<<"$selection")"
@@ -21,6 +27,7 @@ trap 'rm -rf "$tmp_dir"' EXIT
 brewfile="$tmp_dir/Brewfile"
 "$ROOT/script/render-brewfile" \
   --profiles "$profiles" \
+  --shell "$shell_choice" \
   --runtime "$runtime" \
   --password-manager "$password_manager" \
   --firewall "$firewall" \

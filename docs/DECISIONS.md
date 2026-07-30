@@ -642,3 +642,236 @@ Where upstream provides a resolver, prefer it over reading the file:
 `script/macos-defaults --verify` all report effective values after parsing,
 precedence and compatibility renames. Every defect in this record would have been
 visible in one of those outputs.
+
+## ADR-031: Offer fish as a mutually exclusive shell fragment, without reassigning the login shell
+
+zsh is the default because macOS ships it, but the interactive shell is a
+preference, not an architectural constraint. fish is offered as an alternative.
+
+### Why a fragment, not a profile
+
+The shell is a mutually exclusive choice, like the container runtime, the password
+manager and the outbound firewall, so it uses the same mechanism:
+`profiles/shell-zsh.Brewfile` or `profiles/shell-fish.Brewfile`, selected by
+`--shell`. A profile would let both be selected at once, which is meaningless —
+and worse, it would still work, so nobody would notice.
+
+Selecting fish therefore *replaces* `zsh-autosuggestions` and
+`zsh-syntax-highlighting` rather than adding to them. Those two formulae exist
+only to give zsh what the fish reader already does natively, which is also why
+fish needs one package where zsh needs two.
+
+It is the only alternative with no `none`: a workstation always has an
+interactive shell, so the fragment is appended unconditionally.
+
+### No plugin manager, for either shell
+
+fisher, oh-my-fish, Tide and the zsh frameworks all fetch code from GitHub at
+runtime, outside the Homebrew trust boundary that `SECURITY.md` draws. Nothing
+here needs them: the prompt is starship, history is Atuin, directory jumping is
+zoxide and per-directory environments are direnv, and every one of those supports
+fish directly. This is ADR-020 applied to shell plugins.
+
+### The account login shell is not reassigned
+
+Selecting fish sets Ghostty's `command` to run it. It does **not** run `chsh`, and
+it does not add a line to `/etc/shells`.
+
+This is the more defensive arrangement, not merely the more cautious one. A shell
+configuration that fails to parse costs a terminal tab instead of the ability to
+open a working login session, and zsh — which macOS guarantees is present —
+remains what `$SHELL`, `ssh <host> <command>` and recovery mode get. Editing
+`/etc/shells` also needs sudo, and this repository keeps privileged account
+changes manual for the same reason FileVault and the Touch ID PAM entry are
+manual: they are hard to reverse and they are the user's decision.
+
+`chsh` is documented in `docs/OPERATIONS.md`, and a `run_onchange` hook reports
+the divergence on every apply so it is visible rather than assumed. It is
+`run_onchange` and not `run_once` because the selection is part of the script:
+switching shells re-runs it, where a `run_once` script would stay silent through
+exactly the change worth reporting.
+
+### Two settings that are wrong in the ADR-030 way
+
+Both were found by reading upstream sources rather than by using the result.
+
+`command = /opt/homebrew/bin/fish --login` needs `--login`. fish applies
+`/etc/paths` and `/etc/paths.d` only for a login shell — `status is-login && command
+-sq /usr/libexec/path_helper`, in fish's own `share/config.fish` — and those files
+are how macOS installers put themselves on `PATH`. Without `--login`, fish starts
+normally and silently has a shorter `PATH` than zsh.
+
+`fish_add_path` ignores a directory that does not exist, and says so only under
+`--verbose`. `~/.local/bin` is on fish's `PATH` purely because chezmoi creates it
+for `dot_local/bin`, whereas `.zshrc` prepends it unconditionally. If that
+directory were emptied, zsh would keep the entry and fish would quietly lose it,
+so `tests/placement-policy.sh` ties the two together.
+
+The Control-R collision between fzf and Atuin is the same hazard as in
+`.zshrc`: fish's fzf bindings run `bind \cr fzf-history-widget` and Atuin binds
+Control-R too, so the later initialisation wins. The order is asserted for both
+shells.
+
+`.chezmoiignore` also gets an assertion. It has no `.tmpl` suffix, so the template
+test's file selector cannot see it, and it fails open — a broken conditional
+simply stops ignoring the target, which looks like nothing happening.
+
+### What fish needs less of
+
+Documented as absences in `config.fish`, because a missing setting otherwise reads
+as an oversight: there is no `compinit`/`compaudit` (completions autoload, and
+Homebrew's own fish formula "discovers Homebrew-managed completions
+automatically"); no `HISTSIZE`, `SAVEHIST` or `SHARE_HISTORY` (history is unbounded
+and shared by default, and a leading space already keeps a line out of it); no
+`WORDCHARS` fix (Control-W is `backward-kill-path-component`, verified against
+fish 4.8.1); and no `ZSH_HIGHLIGHT_MAXLENGTH` equivalent (highlighting and
+autosuggestions are part of the reader, not sourced plugins).
+
+What fish needs *more* of is a `status is-interactive` guard, because
+`config.fish` is read by every fish process including non-interactive ones, and an
+explicit `set -g fish_key_bindings`: that variable is conventionally universal, so
+running `fish_vi_key_bindings` once at a prompt persists into every future
+session. A global assignment shadows the universal one and keeps the reviewed file
+authoritative — the same concern as the zsh keymap in ADR-030, reached by a
+different route.
+
+## ADR-032: Declare VS Code extensions with pinned versions; take Nerd Fonts from casks, not the upstream installer
+
+Two additions with one shape in common: both install third-party content, and both
+have an easy path that skips review.
+
+### Extensions are the same trust problem as MCP servers
+
+A VS Code extension is unreviewed third-party code running inside the editor
+process, with the editor's filesystem access and network egress. The usual way to
+install one is to click Install and take whatever the marketplace serves, then let
+the editor update it silently forever.
+
+`vscode/extensions.list` gets the answer ADR-029 already gave for MCP server
+packages: an exact version on every entry, a stated purpose on every entry, and
+`script/vscode-extensions` as the only thing that installs them. Version pinning
+is enforced by `tests/vscode-extensions.sh`, which also rejects a commented-out
+entry that would not parse if enabled — a trap that otherwise fires during an
+apply rather than in CI.
+
+`script/check-extensions` is the sibling of `script/check-tokens` and runs in the
+same weekly workflow. A pin is a claim about an upstream registry, and it goes
+stale without anyone touching this repository.
+
+### Pinning depends on a setting this repository does not own
+
+VS Code updates extensions itself unless `extensions.autoUpdate` is `false`. With
+it on, every pin describes a version that was installed once rather than the one
+running now, and the list becomes fiction while still looking maintained.
+
+`settings.json` is a personal file and merging into it would be a destructive edit
+of user-owned state, so the scripts do not write it. Instead `--verify` warns when
+the setting is not `false` and reports drift regardless. A machine that ignores the
+advice is noisy, not silently wrong.
+
+### Only roots are declared
+
+An extension pack installs its children. `ms-python.python` brings Pylance,
+debugpy and the environments extension; `ms-toolsai.jupyter` brings four;
+`remote-ssh` brings two; `vscode-docker` depends on Container Tools. Ten of the
+sixteen declared entries' worth of extensions arrive this way.
+
+Pinning a child would add a version moving on someone else's release schedule for
+no benefit. But leaving them undeclared makes `--diff` report ten false
+"undeclared" entries, and a diff nobody reads is not a control. So `--diff`
+resolves pack membership from each installed extension's own `package.json` on
+disk — local, authoritative, and impossible to leave stale, unlike a
+hand-maintained table.
+
+Nothing is uninstalled. An extension added by hand is reported and left alone,
+the same treatment `script/update-report` gives Homebrew cleanup candidates.
+
+### Nerd Fonts come from casks
+
+The upstream project's `install.sh` clones a multi-gigabyte repository and runs a
+remote script, which is outside the Homebrew trust boundary in `SECURITY.md`.
+There is no need for it: the `font-*-nerd-font` casks are in `homebrew/cask`
+proper — the `homebrew/cask-fonts` tap was merged and no `brew tap` is required,
+so ADR-020 is satisfied — and each cask downloads the release archive from
+`github.com/ryanoasis/nerd-fonts` with a pinned SHA-256. The result is the same
+files through a reviewed, digest-verified path.
+
+The `fonts` profile is opt-in and judged more leniently than the software
+profiles, because a font executes nothing, opens no port and needs no permission.
+It is still curated rather than complete: `homebrew/cask` carries 71 Nerd Font
+casks, and installing all of them only makes the font picker unusable. The
+symbols-only font earns its place on capability rather than taste — being glyphs
+without an alphabet, it upgrades any unpatched font by fallback.
+
+`font-jetbrains-mono-nerd-font` stays in `core` because
+`dot_config/ghostty/config` names it, so the terminal depends on it whether or not
+the profile is selected.
+
+### Three failures found by building this, all of the ADR-030 kind
+
+An unknown `font-family` is not an error in Ghostty: it falls back to a default
+silently, and upstream carries a discussion titled "Setting the wrong font family
+silently fails and the default font is used instead". The symptom is prompt and
+`eza --icons` glyphs becoming replacement boxes — a configuration problem that
+presents as a rendering problem. `tests/placement-policy.sh` now asserts the
+font-family and the `core` cask as a literal pair. Deliberately not derived one
+from the other: Homebrew's word splitting is not mechanical
+("JetBrainsMono Nerd Font" is `font-jetbrains-mono-nerd-font`, "MesloLGS Nerd
+Font" is `font-meslo-lg-nerd-font`), so any normalisation clever enough to pair
+them is also wrong often enough to fail a valid change.
+
+`comm` compares byte by byte while `sort` under a UTF-8 locale gives punctuation
+no weight. `ms-vscode-remote.remote-ssh` and `ms-vscode.remote-explorer` therefore
+sorted in an order `comm` did not expect, and `comm` warned on stderr but still
+printed a result — one that listed the same extension as both missing and
+undeclared. Every sort in `script/vscode-extensions` is `LC_ALL=C`.
+
+Extension ids are case-sensitive as published, and `code --install-extension`
+matches case-insensitively. `golang.go` therefore installs correctly and then
+reports as permanently missing in `--verify`, because that compares text against
+`--list-extensions`, which prints the published casing. `script/check-extensions`
+reports the canonical casing as a failure rather than a note.
+
+## ADR-033: The test suite must run on the target platform, not only in CI
+
+Two defects found while reviewing before the first real install. Neither could
+fail in CI, and both would have failed immediately on the Mac.
+
+### macOS ships bash 3.2, and four test scripts required bash 4
+
+Apple froze `/bin/bash` at 3.2.57 rather than ship GPLv3, and nothing here
+installs a newer bash, so `#!/usr/bin/env bash` resolves to 3.2 on the only
+machine this repository targets. `mapfile` arrived in bash 4.0.
+
+`tests/shell-syntax.sh`, `tests/format.sh`, `tests/chezmoi-templates.sh` and
+`tests/profiles.sh` all used it. Every one would have died with
+`mapfile: command not found` on the first `./script/test` on the Mac, while
+passing on bash 5 in Linux CI.
+
+`bash -n` cannot catch this: a missing builtin is a runtime lookup failure, not a
+syntax error. So the guard is a grep for bash 4 builtins in command position,
+in `tests/shell-syntax.sh`, over the same file list the linters use. The
+whole suite is now verified against bash 3.2.57 directly.
+
+The general point: a test suite that only ever runs on the CI platform is
+testing the CI platform. Where the target differs — bash version, BSD versus GNU
+userland — the difference has to be either asserted or exercised. `stat` was
+already handled this way, trying `stat -f` before `stat -c`; `mapfile` was not.
+
+### chezmoi applied the repository's own documentation to the home directory
+
+`chezmoi/AGENTS.md` is instructions for whoever edits the source state. chezmoi
+makes no such distinction: every file under the source directory is a target, so
+`chezmoi apply` wrote `~/AGENTS.md` containing that document. Nothing failed and
+nothing warned — the home directory simply gained a file from the repository on
+every apply.
+
+It is now in `.chezmoiignore`, and `tests/chezmoi-templates.sh` requires every
+managed file or directory target to be a dotfile, which catches the next
+README, AGENTS.md or note added there for humans.
+
+That test asks `chezmoi managed` rather than reading `.chezmoiignore`, for the
+reason ADR-030 gives: whether a pattern excludes a path is chezmoi's decision,
+and a grep for the pattern text only proves the text is present. The earlier
+version of this test checked the rendered ignore file and would not have caught
+the stray target at all.

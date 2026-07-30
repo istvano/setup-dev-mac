@@ -32,6 +32,11 @@ grep -q 'cask "bitwarden"' "$TMP/Brewfile"
 grep -q 'cask "lulu"' "$TMP/Brewfile"
 refute_match 'cask "1password"' "$TMP/Brewfile"
 
+# The default shell is zsh, so its two plugin formulae ship and fish does not.
+grep -q 'brew "zsh-autosuggestions"' "$TMP/Brewfile"
+grep -q 'brew "zsh-syntax-highlighting"' "$TMP/Brewfile"
+refute_match '^brew "fish"' "$TMP/Brewfile"
+
 # One tool per job (ADR-022). Each duplicate below has a replacement that must
 # still be present, so a regression cannot quietly remove capability instead.
 grep -q 'brew "eza"' "$TMP/Brewfile"       # replaces tree, via --tree
@@ -100,6 +105,24 @@ grep -q 'brew "ansible"' "$TMP/optional.Brewfile"
 grep -q 'brew "d2"' "$TMP/optional.Brewfile"
 grep -q 'brew "argocd"' "$TMP/optional.Brewfile"
 grep -q 'brew "mcp-inspector"' "$TMP/optional.Brewfile"
+
+# Selecting fish must REPLACE the zsh plugins rather than add to them. Shipping
+# both is the failure that matters: it would install a shell nobody selected, or
+# leave plugins for a shell that is no longer used, and either still works.
+"$ROOT/script/render-brewfile" --shell fish --output "$TMP/fish.Brewfile" >/dev/null
+grep -q '^brew "fish"' "$TMP/fish.Brewfile"
+refute_match '^brew "zsh-(autosuggestions|syntax-highlighting)"' "$TMP/fish.Brewfile"
+# fish provides suggestions and highlighting itself, so it needs no plugin
+# manager; fisher and oh-my-fish fetch unreviewed code at runtime (ADR-031).
+refute_match '^(brew|cask) "(fisher|oh-my-fish|fishtape|tide)"' "$ROOT/profiles"
+# Everything shell-agnostic must survive the switch, or the fragment split moved
+# more than it was meant to.
+grep -q 'brew "starship"' "$TMP/fish.Brewfile"
+grep -q 'brew "atuin"' "$TMP/fish.Brewfile"
+grep -q 'cask "ghostty"' "$TMP/fish.Brewfile"
+
+refute_command 'An invalid shell was unexpectedly accepted.' \
+  "$ROOT/script/render-brewfile" --shell bash --output "$TMP/bash.Brewfile"
 
 refute_command 'Duplicate profiles were unexpectedly accepted.' \
   "$ROOT/script/render-brewfile" --profiles core,core --output "$TMP/duplicate.Brewfile"

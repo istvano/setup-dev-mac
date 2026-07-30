@@ -43,6 +43,7 @@ Or provide the choices explicitly:
 ```bash
 ./bootstrap install \
   --profiles core,dev,security,productivity,backup \
+  --shell zsh \
   --runtime rancher \
   --password-manager bitwarden \
   --firewall lulu \
@@ -61,9 +62,10 @@ Optional identity and privilege choices, all disabled by default:
   --with-touchid-sudo                       # Touch ID for sudo via sudo_local
 ```
 
-The default free choices are Rancher Desktop with Moby, Bitwarden and LuLu.
+The default free choices are zsh, Rancher Desktop with Moby, Bitwarden and LuLu.
 OrbStack, 1Password and Little Snitch are paid alternatives. Colima is the
-CLI-only container-runtime alternative.
+CLI-only container-runtime alternative, and fish is the alternative interactive
+shell (see [Interactive shell](#interactive-shell)).
 
 Follow [Operations](docs/OPERATIONS.md) for the complete first-install,
 verification, update, hardening and package-reconciliation procedures.
@@ -72,7 +74,7 @@ verification, update, hardening and package-reconciliation procedures.
 
 Host packages are defined by composable Brewfile fragments:
 
-- `core`: bootstrap trust set, shell, editor, Git and frequently used CLI
+- `core`: bootstrap trust set, terminal, editor, Git and frequently used CLI
 - `dev`: editors, language managers and local repository validation
 - `security`: the general TLS and cryptographic toolkit
 - `productivity`: BetterDisplay, required for DDC monitor input switching
@@ -86,6 +88,7 @@ Host packages are defined by composable Brewfile fragments:
 - `backup`: restic and rclone for encrypted, verifiable off-site backup
 - `lab`: Lima, UTM and Ansible — the isolated Linux VM domain and local lab
 - `docs`: d2, pandoc and draw.io for diagrams and stakeholder documents
+- `fonts`: Nerd Fonts, including the symbols-only font usable as a fallback
 - `mcp`: the official MCP inspector, for reviewing a server before trusting it
 - `local-llm`: LM Studio, the one permitted local inference runtime (ADR-025)
 - `productivity-extra`: optional browsers, VPN, notes, media and desktop
@@ -93,7 +96,7 @@ Host packages are defined by composable Brewfile fragments:
 - `paid`: non-alternative paid additions
 
 The default profiles are `core,dev,security,productivity,backup`, which install
-48 packages. The default carries one tool per job (ADR-022) and no language
+48 packages with zsh, or 47 with fish. The default carries one tool per job (ADR-022) and no language
 runtime: Node, Go, Java, Rust and pnpm come from mise (ADR-021), and any other
 language is one `mise use -g <lang>` away. Specialist profiles are opt-in. Container runtimes, password managers and outbound firewalls use
 separate mutually exclusive fragments.
@@ -127,6 +130,51 @@ ports, credentials and teardown policy.
 For Rancher Desktop, chezmoi selects Moby and disables Kubernetes by default so
 Compose and Testcontainers have the Docker API without an unused Kubernetes
 control plane.
+
+## Fonts
+
+`core` installs JetBrainsMono Nerd Font, which `dot_config/ghostty/config`
+selects, so the terminal glyphs used by starship and `eza --icons` always work.
+
+The opt-in `fonts` profile adds a curated set from
+[ryanoasis/nerd-fonts](https://github.com/ryanoasis/nerd-fonts). The one worth
+singling out is `font-symbols-only-nerd-font`: it is glyphs with no alphabet, so
+naming it as a second `font-family` in Ghostty upgrades any unpatched font
+without replacing it.
+
+These arrive as Homebrew casks, which download the release archives from that
+project and verify a pinned SHA-256. The upstream `install.sh` is not used: it
+clones a multi-gigabyte repository and runs a remote script outside the trust
+boundary in [Security](SECURITY.md).
+
+## VS Code extensions
+
+`vscode/extensions.list` declares extensions with exact pinned versions, applied
+by `script/vscode-extensions` and by a chezmoi hook when `dev` is selected.
+Extension packs are declared by their root only. See
+[vscode/README.md](vscode/README.md) and ADR-032.
+
+```bash
+just extensions-verify   # non-zero when the installed set has drifted
+just extensions-diff     # includes what arrives as a pack child
+```
+
+## Interactive shell
+
+zsh is the default. `--shell fish` installs fish instead, and the two are
+mutually exclusive: selecting fish drops `zsh-autosuggestions` and
+`zsh-syntax-highlighting`, because fish provides both natively.
+
+Selecting fish does **not** change the account login shell. Ghostty is
+configured to run fish directly, so a fish configuration that fails to parse
+costs a terminal tab rather than the ability to log in, and zsh stays available
+for SSH, recovery and anything reading `$SHELL`. `chsh` remains a documented
+manual step in [Operations](docs/OPERATIONS.md#interactive-shell); chezmoi
+reports the difference on every apply and changes nothing.
+
+Both configurations activate the same tools — mise, direnv, starship, zoxide,
+fzf and Atuin — and neither installs a plugin manager. `~/.config/fish` is only
+written when fish is selected.
 
 ## Shell history
 
@@ -206,7 +254,8 @@ automatically and no repository is created for you; follow
 ├── mcp/               # Declared MCP policy and the ToolHive pin
 ├── profiles/          # Composable host Brewfile fragments
 ├── script/            # Canonical orchestration and validation
-└── tests/             # Static, template and idempotency checks
+├── tests/             # Static, template and idempotency checks
+└── vscode/            # Declared VS Code extensions, pinned
 ```
 
 ## Development
@@ -227,6 +276,7 @@ and it also runs weekly in CI:
 
 ```bash
 ./script/check-tokens
+./script/check-extensions
 ```
 
 Repository-wide and directory-specific agent instructions are in `AGENTS.md`

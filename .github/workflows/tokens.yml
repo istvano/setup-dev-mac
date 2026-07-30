@@ -1,8 +1,11 @@
-name: homebrew-tokens
+name: upstream-tokens
+# Everything this repository pins to an upstream registry, checked on a schedule.
+#
 # Homebrew renames and deprecates formulae and casks continuously. Two tokens in
 # the default security profile had already gone stale (mitmproxy moved from a
 # formula to a cask; wireshark became wireshark-app), which would have failed a
-# first install on a real machine.
+# first install on a real machine. VS Code extension ids and versions go stale the
+# same way, and vscode/extensions.list pins exact versions.
 #
 # This lives in its own workflow so an upstream API outage cannot block
 # validate.yml, which must stay offline and deterministic.
@@ -18,3 +21,11 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: ./script/check-tokens
+  extensions:
+    # VS Code extensions are pinned to exact versions in vscode/extensions.list,
+    # so a withdrawn or renamed id would surface only at apply time. Separate job
+    # so a marketplace outage does not mask a Homebrew rename or vice versa.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: ./script/check-extensions

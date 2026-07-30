@@ -1,0 +1,41 @@
+{{- if and (eq .chezmoi.os "darwin") (has "dev" .profiles) -}}
+{{- /* .chezmoiroot points chezmoi at <repo>/chezmoi, so repository scripts live
+       one level above .chezmoi.sourceDir. */ -}}
+{{- $repo := dir .chezmoi.sourceDir -}}
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Installs the declared VS Code extensions. Gated on the dev profile, which is
+# what installs VS Code in the first place.
+#
+# The declared list is embedded in this comment so any edit to it re-runs the
+# script. Without that, adding an extension would change nothing until some
+# unrelated hook happened to change.
+{{ range (splitList "\n" (include (joinPath $repo "vscode/extensions.list"))) }}
+# declared: {{ . }}
+{{- end }}
+
+# Vendor-generated shell initialisation. Chezmoi run scripts do not inherit an
+# interactive shell's PATH, so Homebrew must be located explicitly.
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
+# Absent rather than broken: the cask may not have finished installing on a first
+# apply, and a missing editor is not a reason to fail the whole apply.
+if ! command -v code >/dev/null 2>&1; then
+  echo "[WARN] The 'code' command is not available yet; skipping extensions." >&2
+  echo "       Run ./script/vscode-extensions once VS Code is installed." >&2
+  exit 0
+fi
+
+# Loud, but not fatal. Installing extensions reaches the marketplace, and a
+# transient failure here would abort the whole apply — skipping 40_macos-defaults,
+# 45_configure-browser-profiles and 90_security-reminder. The same reasoning as
+# 25_configure-container-runtime: report and continue, so one network hiccup does
+# not silently leave later steps unrun.
+if ! {{ joinPath $repo "script/vscode-extensions" | quote }} apply; then
+  echo "[WARN] Some VS Code extensions did not install." >&2
+  echo "       Re-run ./script/vscode-extensions apply, then --verify." >&2
+fi
+{{- end }}

@@ -9,8 +9,8 @@ brew "starship"  # Cross-shell prompt with project and version-control context.
 brew "tmux"      # Persistent terminal session multiplexer.
 cask "ghostty"   # Native GPU-accelerated terminal emulator.
 cask "font-jetbrains-mono-nerd-font" # Coding font with terminal icon glyphs.
-brew "zsh-autosuggestions"     # Inline history suggestions for the interactive host shell.
-brew "zsh-syntax-highlighting" # Highlights invalid commands before they are executed.
+# The interactive shell itself is a mutually exclusive choice: shell-zsh.Brewfile
+# or shell-fish.Brewfile, selected by --shell. Everything below is shell-agnostic.
 
 # Core CLI
 brew "ripgrep"   # Fast recursive text and regular-expression search.

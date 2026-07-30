@@ -10,6 +10,10 @@ source "$ROOT/script/lib/profiles.sh"
 
 COMMAND="plan"
 PROFILES="$DEFAULT_PROFILES"
+# Not named SHELL: that variable names the running shell and is read by other
+# programs, so assigning to it here would misreport this process to everything
+# bootstrap invokes.
+SHELL_CHOICE="zsh"
 RUNTIME="rancher"
 PASSWORD_MANAGER="bitwarden"
 FIREWALL="lulu"
@@ -32,6 +36,7 @@ usage() {
   cat <<'EOF'
 Usage: ./bootstrap plan|install [options]
   --profiles LIST
+  --shell zsh|fish
   --runtime rancher|orbstack|colima|none
   --password-manager bitwarden|1password|none
   --firewall lulu|little-snitch|none
@@ -58,6 +63,10 @@ parse_args() {
     case "$1" in
       --profiles)
         PROFILES="$2"
+        shift 2
+        ;;
+      --shell)
+        SHELL_CHOICE="$2"
         shift 2
         ;;
       --runtime)
@@ -129,6 +138,7 @@ parse_args() {
 validate_choices() {
   [[ "$COMMAND" =~ ^(plan|install|help)$ ]] || die "Unknown command: $COMMAND"
   validate_profiles "$PROFILES"
+  [[ "$SHELL_CHOICE" =~ ^(zsh|fish)$ ]] || die "Invalid shell"
   [[ "$RUNTIME" =~ ^(rancher|orbstack|colima|none)$ ]] || die "Invalid runtime"
   [[ "$PASSWORD_MANAGER" =~ ^(bitwarden|1password|none)$ ]] || die "Invalid password manager"
   [[ "$FIREWALL" =~ ^(lulu|little-snitch|none)$ ]] || die "Invalid firewall"
@@ -136,10 +146,16 @@ validate_choices() {
 }
 
 print_plan() {
+  # Naming the consequence in the plan, because "shell: fish" reads as a promise
+  # that the account login shell changes, and it deliberately does not.
+  local shell_note=""
+  [[ "$SHELL_CHOICE" == fish ]] &&
+    shell_note=" (Ghostty runs fish; the account login shell is unchanged)"
   cat <<EOF
 Workstation bootstrap plan
   source repository:    $ROOT
   profiles:             $PROFILES
+  interactive shell:    $SHELL_CHOICE$shell_note
   container runtime:    $RUNTIME
   password manager:     $PASSWORD_MANAGER
   outbound firewall:    $FIREWALL
@@ -287,6 +303,7 @@ gitSigningKey = $(toml_quote "$GIT_SIGNING_KEY")
 workGitDir = $(toml_quote "$WORK_GIT_DIR")
 workGitEmail = $(toml_quote "$WORK_GIT_EMAIL")
 profiles = [$profiles_toml]
+shell = $(toml_quote "$SHELL_CHOICE")
 runtime = $(toml_quote "$RUNTIME")
 passwordManager = $(toml_quote "$PASSWORD_MANAGER")
 firewall = $(toml_quote "$FIREWALL")

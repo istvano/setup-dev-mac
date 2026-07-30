@@ -12,6 +12,7 @@ TESTS=(
   mcp-policy
   yaml
   placement-policy
+  vscode-extensions
   idempotency
   browser-profiles
   agents

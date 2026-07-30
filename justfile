@@ -23,6 +23,20 @@ render:
 tokens:
   ./script/check-tokens
 
+# Network check: confirms every declared VS Code extension id still exists.
+extensions-check:
+  ./script/check-extensions
+
+# Install the declared VS Code extensions at their pinned versions.
+extensions:
+  ./script/vscode-extensions apply
+
+extensions-diff:
+  ./script/vscode-extensions --diff
+
+extensions-verify:
+  ./script/vscode-extensions --verify
+
 # Reviewable report of pending package updates. Changes nothing.
 update-report:
   ./script/update-report

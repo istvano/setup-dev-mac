@@ -7,6 +7,8 @@ source "$ROOT/script/lib/common.sh"
 # shellcheck source=script/lib/profiles.sh
 source "$ROOT/script/lib/profiles.sh"
 PROFILES="$DEFAULT_PROFILES"
+# See bootstrap: SHELL names the running shell, so the selection needs its own name.
+SHELL_CHOICE="zsh"
 RUNTIME="rancher"
 PASSWORD_MANAGER="bitwarden"
 FIREWALL="lulu"
@@ -15,6 +17,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --profiles)
       PROFILES="$2"
+      shift 2
+      ;;
+    --shell)
+      SHELL_CHOICE="$2"
       shift 2
       ;;
     --runtime)
@@ -36,6 +42,7 @@ while [[ $# -gt 0 ]]; do
     *) die "Unknown option: $1" ;;
   esac
 done
+[[ "$SHELL_CHOICE" =~ ^(zsh|fish)$ ]] || die "Invalid shell"
 [[ "$RUNTIME" =~ ^(rancher|orbstack|colima|none)$ ]] || die "Invalid runtime"
 [[ "$PASSWORD_MANAGER" =~ ^(bitwarden|1password|none)$ ]] || die "Invalid password manager"
 [[ "$FIREWALL" =~ ^(lulu|little-snitch|none)$ ]] || die "Invalid firewall"
@@ -45,6 +52,8 @@ IFS=',' read -r -a requested_profiles <<<"$PROFILES"
 for profile in "${requested_profiles[@]}"; do
   fragments+=("$ROOT/profiles/$profile.Brewfile")
 done
+# The shell fragment has no `none`: a workstation always has an interactive shell.
+fragments+=("$ROOT/profiles/shell-$SHELL_CHOICE.Brewfile")
 [[ "$RUNTIME" != none ]] && fragments+=("$ROOT/profiles/runtime-$RUNTIME.Brewfile")
 [[ "$PASSWORD_MANAGER" != none ]] && fragments+=("$ROOT/profiles/password-$PASSWORD_MANAGER.Brewfile")
 [[ "$FIREWALL" != none ]] && fragments+=("$ROOT/profiles/firewall-$FIREWALL.Brewfile")
@@ -52,7 +61,8 @@ for fragment in "${fragments[@]}"; do [[ -f "$fragment" ]] || die "Missing fragm
 {
   printf '# Generated from reviewed profile fragments. Do not edit directly.\n'
   printf '# Profiles: %s\n' "$PROFILES"
-  printf '# Runtime: %s; password manager: %s; firewall: %s\n\n' "$RUNTIME" "$PASSWORD_MANAGER" "$FIREWALL"
+  printf '# Shell: %s; runtime: %s; password manager: %s; firewall: %s\n\n' \
+    "$SHELL_CHOICE" "$RUNTIME" "$PASSWORD_MANAGER" "$FIREWALL"
   for fragment in "${fragments[@]}"; do
     printf '# ---- %s ----\n' "$(basename "$fragment")"
     cat "$fragment"

@@ -21,3 +21,10 @@ Before changing this security-sensitive workstation baseline:
 
 Broad repository work uses the repo-local `$workstation-maintainer` skill.
 Package decisions use `$add-workstation-tool`.
+
+## Shell portability
+
+Scripts run on macOS, where `/bin/bash` is 3.2.57 and the userland is BSD. Use a
+`while IFS= read -r` loop rather than `mapfile`, and no associative arrays;
+`tests/shell-syntax.sh` rejects bash 4 builtins. Prefer POSIX flags, or probe for
+the BSD form first as `tests/browser-profiles.sh` does with `stat`. See ADR-033.

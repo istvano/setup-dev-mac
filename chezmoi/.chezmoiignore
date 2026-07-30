@@ -1,0 +1,23 @@
+{{- /*
+  Targets excluded from the destination state.
+
+  AGENTS.md sits in this directory as instructions for agents editing the source
+  state, but chezmoi sees any file here as a target and was writing ~/AGENTS.md on
+  every apply — the repository's own documentation, littered into the home
+  directory. Anything added here for humans rather than for the destination needs
+  the same treatment; tests/chezmoi-templates.sh requires every managed target to
+  be a dotfile, which catches the next one.
+
+  The fish configuration is only written when fish is the selected shell, so a
+  zsh workstation does not carry a config for a shell it has not installed.
+
+  .zshrc is deliberately NOT excluded when fish is selected. zsh remains the
+  account login shell — see the `command` comment in dot_config/ghostty/config
+  and ADR-031 — so its configuration has to keep working. Every activation in it
+  is guarded by `command -v` or a readability test, so it degrades cleanly on a
+  machine where the zsh plugin formulae were never installed.
+*/ -}}
+AGENTS.md
+{{ if ne .shell "fish" }}
+.config/fish
+{{ end }}
