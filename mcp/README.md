@@ -1,0 +1,66 @@
+# MCP policy
+
+`managed-settings.json` is installed verbatim by `script/mcp-policy` to
+`/Library/Application Support/ClaudeCode/managed-settings.json` — the managed
+settings tier, which no user, project or local setting can override.
+
+It contains no comments on purpose. Claude Code validates this file, and an
+unrecognised key risks being rejected, so the explanation lives here instead.
+
+## Why this file exists
+
+An MCP server is arbitrary code with tool access to the machine. The usual way
+to run one is `npx -y some-package@latest`, which downloads and executes
+unpinned remote code with full user privileges every time an agent starts. That
+contradicts ADR-006 and the rule in `AGENTS.md` against unreviewed remote-script
+execution. See ADR-029.
+
+## The rules this file follows
+
+`allowManagedMcpServersOnly` makes the allowlist authoritative: allowlists in
+user, project and local settings are ignored. Denylists still merge from every
+source, so a server can always be blocked, never unblocked.
+
+**Use `serverCommand` or `serverUrl` only.** `serverName` is not a security
+control — it is a label the user assigns, so any server can be called `github`.
+`tests/mcp-policy.sh` rejects a `serverName` entry in the allowlist because
+accepting one would give false assurance.
+
+**`serverCommand` matches exactly**, every argument in order:
+`["npx","-y","server"]` does not match `["npx","-y","server","--flag"]`. That
+exactness is the lever. Allowlist a pinned command and every unpinned variant
+fails the policy, which turns ADR-006 from a principle into a check.
+
+An empty `allowedMcpServers` array means no servers are permitted. That is the
+correct starting point: adding one is a deliberate act.
+
+## Two kinds of entry
+
+A server run directly is a stdio command, so it is allowlisted by
+`serverCommand` with an explicit version.
+
+A server run under ToolHive is exposed over HTTP on loopback, so it is
+allowlisted by `serverUrl`. Give it a fixed port with `thv run --proxy-port`;
+a wildcard port would permit any local listener and is rejected. Use
+`127.0.0.1` rather than `localhost`, because URL matching is on the literal
+host.
+
+## Adding a server
+
+The full workflow, including inspection and pinning, is in
+[Operations](../docs/OPERATIONS.md#mcp-servers). In short: inspect it, pin it,
+add its command or URL here, apply the policy, then point the client at it.
+
+Apply the policy *before* registering the client. `allowManagedMcpServersOnly`
+means a server absent from the allowlist will not load even once the client is
+configured to use it.
+
+## toolhive.lock
+
+ToolHive is optional and is not installed by default. This file pins the release
+that `script/install-toolhive` will fetch if you choose to run it, and nothing
+else depends on it: `script/update-report` skips its version check unless `thv`
+is actually installed, and the test suite treats a missing lock as valid.
+
+It is deliberately not installed through Homebrew, so this file is the only
+record of which build is trusted and `brew upgrade` will never move it.

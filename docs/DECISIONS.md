@@ -57,6 +57,19 @@ provide an image controller or shared scanner wrappers.
 Display discovery, HiDPI scaling, DDC brightness and macOS display control
 require host integration and are not meaningful container workloads.
 
+BetterDisplay is a hard requirement rather than a convenience: this workstation
+shares its monitors with a second Mac, and DDC input switching is how the
+displays are moved between the two machines. Removing it removes the ability to
+use both machines at one desk.
+
+DDC support, brightness, volume, power and input switching are all free-tier
+features, so no licence is required for this use case. Advanced keyboard
+shortcuts are Pro-only, which matters only if input switching is to be bound to
+a hotkey rather than driven from the menu bar.
+
+Keyboard and pointer sharing between the two Macs is not a package decision:
+macOS Universal Control provides it natively.
+
 ## ADR-008: Use `just` as a thin command UX, not an implementation layer
 
 **Status:** accepted
@@ -244,3 +257,325 @@ not silently reconsidered:
   tap extends the trusted software supply chain beyond homebrew-core and
   homebrew-cask, and needs its own decision rather than arriving as a
   side effect of wanting one tool.
+
+## ADR-021: Consolidate runtime management on mise
+
+**Status:** accepted
+
+Node, Go, Java, Rust and pnpm are declared in
+`chezmoi/dot_config/mise/config.toml.tmpl`. Homebrew installs none of them.
+
+Rust is the case that matters. mise manages Rust by driving rustup: it installs
+rustup itself when absent and sets `RUSTUP_TOOLCHAIN` for the selected version.
+A `brew "rustup"` alongside it is therefore not a second implementation but a
+second *place the toolchain version is decided*, which is how a project ends up
+building against a different compiler than the one its `mise.toml` names.
+
+`uv` remains separate and stays in `core`. It is the Python package and
+environment manager for project-local work, including MLX (ADR-004), and is not
+competing with mise for the same responsibility.
+
+This removes the rustup fix-up block from
+`run_onchange_after_20_configure-runtimes.sh.tmpl` and the Homebrew rustup keg
+from `PATH` in `dot_zshrc.tmpl`; `mise install` now provisions everything.
+
+## ADR-022: One tool per job in the default profile
+
+**Status:** accepted
+
+The default profile carries exactly one tool for each job. Every entry is
+software that executes on the host from first boot, so a second tool for the
+same task is trusted code that buys nothing.
+
+Removed, with the replacement that already covers the use case:
+
+| Removed | Replacement |
+|---|---|
+| `htop` | `btop`, which shows the same process view plus CPU, memory, disk and network |
+| `tree` | `eza --tree`, already aliased as `lt` in `dot_zshrc.tmpl` |
+| `difftastic` | `git-delta`, already wired in as Git's pager and `diffFilter` |
+| `wget` | the system `curl`, which the bootstrap and every repository script already use |
+
+`tests/render-brewfile.sh` asserts both directions: each replacement is present
+*and* each duplicate is absent. Asserting only the absence would let a future
+change satisfy the rule by removing the capability instead of the duplicate.
+
+Two exceptions are deliberate. `actionlint` depends on `shellcheck`, and `nmap`
+depends on `openssl@3`; both are still declared explicitly. A tool that is
+relied on directly should be declared directly, not acquired as a side effect of
+another package's dependency graph, which can change without notice.
+
+Two further carve-outs, stated rather than left to look like oversights:
+
+- **AI coding agents are not one job.** `codex`, `claude-code` and `opencode`
+  all sit in `dev`. They are not substitutes: each reaches a different model
+  provider, and the plurality is the reason for having them. The rule targets
+  redundant tools, not deliberate access to different backends.
+- **`curl` and `xh` coexist in `core`.** `curl` is what scripts and the
+  bootstrap call and must not be removed; `xh` is for interactive API work,
+  which is a daily task on this machine. Removing `xh` as a duplicate was the
+  wrong call for this workload and was reversed.
+
+Tools that are useful but not baseline stay in the profile commented out with
+the reason, rather than deleted, so the evaluation is not repeated later. A
+duplicate is deleted outright: leaving it commented invites reintroducing a
+second tool for a job that is already covered.
+
+## ADR-023: No pre-commit framework; `./script/test` and CI are the gate
+
+**Status:** accepted
+
+A `pre-commit` configuration briefly ran the lint and format checks on every
+commit. It was removed after measuring it:
+
+| Hook | Cost | Frequency |
+|---|---|---|
+| `tests/shell-syntax.sh` | 1633 ms | every commit |
+| `tests/format.sh` | 815 ms | every commit |
+| `script/test` | 5693 ms | every push |
+
+Roughly 2.4 seconds per commit, and not constant: the format hook ran
+`gitleaks detect` over the entire history each time, so the cost grew with every
+commit ever made. The hooks also used `always_run` with `pass_filenames: false`,
+so editing one comment re-linted every shell file in the repository.
+
+The checks themselves are not in question — they run unchanged in
+`./script/test` and in CI on every push, which is where a growing full-history
+scan belongs. What was rejected is paying that cost on an operation as frequent
+as `git commit`.
+
+`brew "pre-commit"` is therefore not installed. If per-commit enforcement is
+ever wanted again, scope it: `gitleaks protect --staged` is constant-time
+because it reads only the staged diff, and shellcheck should receive changed
+files rather than the whole tree.
+
+## ADR-024: Keep continuously polling menu-bar agents out of the profiles
+
+**Status:** accepted
+
+`stats` was removed from `productivity-extra`. It polls hardware sensors
+continuously to display a reading that `btop` produces on demand, so it is a
+permanent background cost for an occasional need, and it duplicates a tool
+already in `core` (ADR-022).
+
+The same test applies to any future menu-bar utility: an agent that samples on a
+timer forever must justify itself against running a CLI when the question is
+actually asked. This does not apply to agents whose value *is* continuous
+presence, such as the outbound firewall or the display manager.
+
+## ADR-025: Permit one local inference runtime, in an opt-in profile
+
+**Status:** accepted
+
+`profiles/AGENTS.md` excludes Ollama, llama.cpp, PyTorch and Open WebUI from the
+baseline. LM Studio bundles llama.cpp and MLX engines, so it falls under that
+exclusion and is added only on explicit direction, as the maintainer skill
+requires, and only in an opt-in `local-llm` profile. The default selection is
+unchanged.
+
+The exclusion was never about local inference being unwanted. It was about a
+model runtime becoming an always-present, self-updating component of the
+baseline. Confining it to an opt-in profile preserves that.
+
+Three properties make this cask unlike anything else installed here, and they
+are recorded because they are easy to forget:
+
+- It self-updates. The cask carries `auto_updates`, so new code arrives without
+  `brew upgrade` and never appears in `./script/update-report`. It is outside
+  the reviewed update flow by construction.
+- Its server must remain on loopback. The OpenAI-compatible endpoint defaults to
+  `localhost:1234`; enabling "Serve on Local Network" would publish an
+  unauthenticated inference endpoint, contradicting the serving invariant.
+- The weights are the trust surface, not the application. GGUF and safetensors
+  are data; pickle-backed `.bin` checkpoints execute code on load. Model
+  publishers are a supply-chain dependency like any other.
+
+The profile is named `local-llm`, not `ai`: `tests/placement-policy.sh` asserts
+`profiles/ai.Brewfile` does not exist and refutes a bare `ai` token, which
+enforces ADR-004's rule that there is no shared workstation AI environment.
+
+Note that the placement test refutes the literal token `llama.cpp` and therefore
+does not catch a bundled engine. The rule is stated here rather than left to a
+check that cannot see it.
+
+MLX placement is unchanged by this decision. It remains a project-local uv
+dependency under ADR-004; `local-llm` installs a GUI application, not a Python
+environment.
+
+## ADR-026: Judge a candidate on maintenance, not popularity
+
+**Status:** accepted
+
+Three tools were proposed and evaluated together. Two were rejected on evidence
+gathered before installing anything, and the rule they produced is recorded here
+because star counts are the metric people reach for first and are the least
+informative.
+
+**Kap — rejected.** 19,300 stars, MIT, and effectively abandoned: last release
+3.6.0 in October 2022, with one CI-config commit since. It bundles Electron
+13.6.9, so its Chromium has had no security updates since 2021, and it holds
+Screen Recording permission while doing so. Popularity measured a project that
+was healthy years ago. CleanShot X in `paid` and the built-in Cmd+Shift+5 cover
+the use case; `obs` is the free alternative if a non-paid recorder is wanted.
+
+**Rockxy — rejected.** AGPL-3.0, 577 stars, but created in March 2026 with one
+human contributor holding 448 of 453 commits, two watchers, 98 open issues and a
+pre-1.0 version. It is also an intercepting proxy, so it would hold a trusted
+root CA capable of decrypting every TLS session on the machine. That privilege
+demands a maintenance story stronger than one person and four months. Replaced
+by mitmproxy: MIT, 44,500 stars, commits landing daily, and no cask self-update
+to bypass the reviewed upgrade flow.
+
+**iTerm2 — accepted**, in `productivity-extra`. ADR-022 restricts one tool per
+job to the *default* profile, so a second terminal is permitted opt-in. Ghostty
+stays in `core` because the managed terminal configuration is written for it.
+
+The checks that produced these decisions, in order of usefulness: date of the
+last release (not the last commit — a CI tweak is not maintenance), number of
+humans with meaningful commit counts, bundled runtime versions for anything
+Electron-based, and whether the cask self-updates outside `brew upgrade`. Stars
+came last and changed no outcome.
+
+## ADR-027: Provide the isolated Linux VM the architecture already required
+
+**Status:** accepted
+
+`docs/ARCHITECTURE.md` and the placement matrix in
+`.agents/skills/add-workstation-tool/references/placement.md` have always named
+an isolated Linux VM as one of four execution domains, owning exploit
+development, malware analysis, untrusted binaries, ptrace and GDB workflows, and
+x86-specific testing.
+
+No profile installed any VM tooling. For the repository's entire life the
+placement matrix has been routing the most dangerous class of work to a boundary
+that did not exist, which in practice means that work either did not happen or
+happened somewhere less safe. Colima's VM is a container runtime and is not a
+substitute: it exists to serve a Docker API, not to contain hostile code.
+
+The `lab` profile closes this:
+
+- **Lima** for the common case: scriptable, disposable Linux VMs declared in
+  YAML, running arm64 guests on Virtualization.framework.
+- **UTM** for what Lima cannot do: a GUI, non-Linux guests, and **x86_64
+  emulation**, without which the architecture's x86-specific testing claim stays
+  unmet. Emulation is slow, so it is a deliberate choice rather than a default.
+- **Ansible** so lab machines are provisioned from source and can be destroyed
+  and rebuilt rather than repaired.
+
+The profile is opt-in. Two operating rules keep the boundary real rather than
+nominal, and are documented in `docs/OPERATIONS.md`: no home, SSH or credential
+directories are mounted into a lab VM, and snapshots are taken before running
+anything untrusted and reverted afterwards. A VM that is continuously patched
+in place is no longer isolated from what it has run.
+
+## ADR-028: Add the product-management half of the toolchain
+
+**Status:** accepted
+
+The workstation was equipped for engineering and had almost nothing for the
+product work done on the same machine: Obsidian for notes and no way to produce
+a diagram or a document for someone who does not use a terminal.
+
+The `docs` profile adds `d2` and `pandoc`, with `drawio` for GUI work.
+
+Diagrams-as-code is preferred over a binary canvas for the same reason
+infrastructure is code here: a `.d2` source reviews in a pull request, diffs
+meaningfully, and outlives the tool that produced it. `drawio` is included
+because some diagrams are genuinely faster to draw than to declare, and it works
+offline, unlike the browser-based alternatives — but it self-updates outside
+`brew upgrade`, so it does not pass through the reviewed update flow.
+
+Figma, Miro, Notion and Linear were rejected: each is a browser application
+wrapped in Electron, and the isolated browser contexts from ADR-014 already
+provide access to them without adding a runtime to the trusted computing base.
+
+## ADR-029: Manage MCP servers with an approved catalogue and container isolation
+
+**Status:** accepted
+
+An MCP server is arbitrary code holding tool access to the machine. The usual
+way to run one is `npx -y some-package@latest`, which downloads and executes
+unpinned remote code with full user privileges every time an agent starts. That
+contradicts ADR-006 and the rule in `AGENTS.md` against unreviewed remote-script
+execution outside the Homebrew bootstrap boundary. Config sprawl across four
+agents is the visible problem; this is the actual one.
+
+No single tool manages MCP. Enforcement, isolation and review are three separate
+jobs, and the survey found one credible answer for each:
+
+- `mcp-get` is archived upstream and deprecated in Homebrew.
+- `mcpm` synchronises configuration across clients. It solves sprawl, not trust.
+- Docker's MCP Gateway documents Docker Desktop 4.59+ as a prerequisite, which
+  does not fit a Rancher Desktop workstation.
+
+**Enforcement.** Claude Code's managed settings tier supports an approved
+catalogue: `allowManagedMcpServersOnly` with `allowedMcpServers`, deployed to
+`/Library/Application Support/ClaudeCode/managed-settings.json`. That tier
+outranks user, project and local settings, so the catalogue cannot be widened
+from a config file. `mcp/managed-settings.json` is the declared state and
+`script/mcp-policy` installs and verifies it.
+
+Two properties of the mechanism shape the design:
+
+- **`serverName` is not a security control.** The name is a label the user
+  assigns, so any server can be called `github`. `tests/mcp-policy.sh` rejects a
+  `serverName` entry in the allowlist, because accepting one would look like
+  enforcement while providing none.
+- **`serverCommand` matches exactly**, every argument in order. That is the
+  lever: allowlist a pinned command and every unpinned variant is refused. The
+  test rejects `@latest` and unversioned package specs, which turns ADR-006 from
+  a principle into a check that fails the build.
+
+**Isolation, available but not deployed.** ToolHive runs each server in its own
+container with minimal permissions and no local credentials, and works with any
+Docker-compatible runtime, so Rancher's Moby qualifies. It is **not installed by
+default**: nothing in the bootstrap, the profiles or the chezmoi apply path
+brings it in. `script/install-toolhive` is an explicit, separate action, and it
+fetches a release pinned by SHA-256 in `mcp/toolhive.lock` rather than using the
+third-party tap that ADR-020 discourages.
+
+It stays optional because it is pre-1.0, it depends on a running container
+runtime, and it changes how servers are reached. Keeping it out of the default
+path means the baseline does not acquire a pre-1.0 dependency that most sessions
+never use.
+
+Because it is optional, nothing else may assume it: `script/update-report` skips
+the version check unless `thv` is actually installed, and `tests/mcp-policy.sh`
+treats a missing lock file as valid rather than a failure.
+
+**Review.** The `mcp` profile installs the official `mcp-inspector`, which shows
+the tools a server actually exposes. Inspection happens before trust, not after.
+
+### What the two controls cost each other
+
+ToolHive exposes servers over HTTP on loopback rather than as stdio commands, so
+a ToolHive-managed server is allowlisted by `serverUrl`, not `serverCommand`.
+The allowlist therefore pins a port rather than a package version, and version
+pinning moves into the container image ToolHive runs.
+
+That is a deliberate trade, not an oversight: the allowlist entry becomes less
+specific, and in exchange the server holds no host credentials and is cut off
+from the host network. It is only an acceptable trade with a fixed port.
+ToolHive assigns a random proxy port by default, and the only entry matching a
+random port is a wildcard such as `http://127.0.0.1:*/*`, which would admit any
+process listening on loopback. `tests/mcp-policy.sh` rejects a wildcard loopback
+port and the runbook uses `thv run --proxy-port`.
+
+### Stated limitations
+
+**Enforcement covers Claude Code only.** Codex and opencode read their own
+configuration and no allowlist mechanism for either could be confirmed from
+their documentation; this decision does not claim one.
+`script/hardening-check` asks for those two configs to be reviewed by hand and
+says plainly that they are checked rather than enforced.
+
+**Without ToolHive, the only control is the allowlist, and it covers one agent.**
+That is the cost of leaving isolation optional, and it should not be discovered
+later: a server started directly runs as your user, with your environment, your
+credentials and your network. The allowlist governs *which* servers may load in
+Claude Code; it does nothing to limit what one can reach once loaded, and it
+does not apply to Codex or opencode at all. Reach for ToolHive when a server is
+not fully trusted, needs credentials, or came from someone else.
+
+**ToolHive is pre-1.0** (v0.41.0 at the time of writing). The lock file and the
+update report are the compensating controls.

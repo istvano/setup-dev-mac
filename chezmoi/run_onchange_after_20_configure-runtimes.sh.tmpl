@@ -8,18 +8,11 @@ if [[ -x /opt/homebrew/bin/brew ]]; then
   eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 
+# mise provisions every declared runtime, including Rust: it drives rustup and
+# installs rustup itself when absent, so no separate toolchain fix-up is needed.
 if command -v mise >/dev/null 2>&1; then
   mise install
 else
   echo "[WARN] mise is not installed; skipping runtime installation." >&2
-fi
-
-# brew --prefix fails when the formula is absent, so the lookup is guarded
-# rather than substituted directly into an assignment under set -e.
-if rustup_prefix="$(brew --prefix rustup 2>/dev/null)" &&
-  [[ -x "$rustup_prefix/bin/rustup" ]]; then
-  "$rustup_prefix/bin/rustup" default stable
-else
-  echo "[WARN] rustup is not installed; skipping Rust toolchain selection." >&2
 fi
 {{- end }}

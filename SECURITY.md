@@ -48,6 +48,20 @@ For every new package or image:
 5. pin container images to immutable digests
 6. avoid Docker socket and broad home-directory mounts
 
+## MCP servers
+
+An MCP server is arbitrary code with tool access to the machine, and the usual
+invocation pattern executes unpinned remote code at every agent start. Treat one
+as you would a package, not as a configuration value:
+
+1. inspect the tools it exposes with `mcp-inspector` before trusting it
+2. pin an explicit version; `@latest` is rejected by `tests/mcp-policy.sh`
+3. allowlist it by `serverCommand` or `serverUrl` in `mcp/managed-settings.json`
+   — never by `serverName`, which any server can claim
+4. run it under ToolHive so it holds no host credentials
+5. review the Codex and opencode configurations by hand: only Claude Code
+   enforces the allowlist
+
 ## Secrets
 
 No secrets belong in this repository. Use short-lived cloud sessions, hardware

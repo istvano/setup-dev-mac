@@ -42,6 +42,11 @@ and does not deploy a shared workstation stack.
 
 ### Isolated Linux VM
 
+Provided by the `lab` profile: Lima for scriptable Linux VMs, UTM for GUI VMs
+and x86_64 emulation. Before that profile existed this domain was declared but
+had no implementation, so the placement matrix directed dangerous work to a
+boundary that was not installed (ADR-027).
+
 Owns high-risk or Linux-specific work:
 
 - GDB/GEF/pwndbg

@@ -42,7 +42,7 @@ Or provide the choices explicitly:
 
 ```bash
 ./bootstrap install \
-  --profiles core,dev,security,productivity \
+  --profiles core,dev,security,productivity,backup \
   --runtime rancher \
   --password-manager bitwarden \
   --firewall lulu \
@@ -74,35 +74,49 @@ Host packages are defined by composable Brewfile fragments:
 
 - `core`: bootstrap trust set, shell, editor, Git and frequently used CLI
 - `dev`: editors, language managers and local repository validation
-- `security`: host-network, TLS and cryptographic inspection tools
-- `productivity`: BetterDisplay, the required native display dependency
+- `security`: the general TLS and cryptographic toolkit
+- `productivity`: BetterDisplay, required for DDC monitor input switching
 - `cloud`: OpenTofu and module documentation
 - `cloud-aws`, `cloud-azure`, `cloud-gcp`: provider-specific control-plane CLIs
 - `kubernetes`: Kubernetes control-plane and interactive operations
 - `data`: embedded SQL CLIs and native database/API clients
-- `security-extra`: optional privileged, hardware-key and macOS monitoring tools
+- `security-extra`: host-network and PKI tooling, hardware security keys,
+  privileged and macOS monitoring tools
 - `security-scan`: single-binary scanners for interactive use (see ADR-015)
 - `backup`: restic and rclone for encrypted, verifiable off-site backup
+- `lab`: Lima, UTM and Ansible — the isolated Linux VM domain and local lab
+- `docs`: d2, pandoc and draw.io for diagrams and stakeholder documents
+- `mcp`: the official MCP inspector, for reviewing a server before trusting it
+- `local-llm`: LM Studio, the one permitted local inference runtime (ADR-025)
 - `productivity-extra`: optional browsers, VPN, notes, media and desktop
   utilities
 - `paid`: non-alternative paid additions
 
-The default profiles are `core,dev,security,productivity`. Specialist profiles
-are opt-in. Container runtimes, password managers and outbound firewalls use
+The default profiles are `core,dev,security,productivity,backup`, which install
+48 packages. The default carries one tool per job (ADR-022) and no language
+runtime: Node, Go, Java, Rust and pnpm come from mise (ADR-021), and any other
+language is one `mise use -g <lang>` away. Specialist profiles are opt-in. Container runtimes, password managers and outbound firewalls use
 separate mutually exclusive fragments.
 
-## Project-local MLX
+## Local AI
 
 MLX is not a workstation profile or global environment. Each Apple Silicon
 project declares the Python packages and version it needs:
 
 ```bash
-uv add mlx
+uv add mlx mlx-lm
 ```
 
-Add `mlx-lm`, notebooks, model tooling and serving dependencies only to the
-projects that use them. Development servers must bind to loopback and must not
-be presented as production-safe.
+Add notebooks, model tooling and serving dependencies only to the projects that
+use them. Development servers must bind to loopback and must not be presented as
+production-safe. There is no `huggingface-cli` formula; install the CLI as an
+isolated uv tool with `uv tool install "huggingface_hub[cli]"`.
+
+LM Studio is the one permitted local inference runtime, in the opt-in
+`local-llm` profile. It self-updates outside `brew upgrade`, its server must stay
+on loopback, and the model weights are the trust surface rather than the app.
+See [Operations](docs/OPERATIONS.md#local-ai-models) and
+[ADR-025](docs/DECISIONS.md).
 
 ## Project containers
 
@@ -189,6 +203,7 @@ automatically and no repository is created for you; follow
 ├── bootstrap          # Minimal trust bootstrap
 ├── chezmoi/           # Dotfiles, configuration and apply hooks
 ├── docs/              # Architecture, decisions and operations
+├── mcp/               # Declared MCP policy and the ToolHive pin
 ├── profiles/          # Composable host Brewfile fragments
 ├── script/            # Canonical orchestration and validation
 └── tests/             # Static, template and idempotency checks

@@ -31,10 +31,16 @@ update-report:
 snapshot:
   ./script/snapshot
 
-# Install the local pre-commit and pre-push hooks.
-hooks:
-  pre-commit install --install-hooks
-  pre-commit install --hook-type pre-push
+# Install the declared MCP approved catalogue (needs sudo for the system path).
+mcp-policy:
+  ./script/mcp-policy apply
+
+mcp-verify:
+  ./script/mcp-policy --verify
+
+# Install ToolHive from the release pinned in mcp/toolhive.lock.
+toolhive:
+  ./script/install-toolhive
 
 defaults-diff:
   ./script/macos-defaults --diff

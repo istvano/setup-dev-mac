@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Install ToolHive (thv) from a pinned, checksummed release.
+#
+# ToolHive runs each MCP server in its own container with minimal permissions
+# and no local credentials, which is the only control that applies to every
+# agent rather than to Claude Code alone (ADR-029).
+#
+# It is deliberately not installed through Homebrew: the only tap that carries
+# it is third-party, which ADR-020 discourages. The cost of that choice is that
+# `brew upgrade` will never move this binary, so the version and digest are
+# pinned in mcp/toolhive.lock and script/update-report reports newer releases.
+#
+#   install-toolhive            install or reinstall the pinned release
+#   install-toolhive --verify   check the installed binary against the pin
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+LOCK="$ROOT/mcp/toolhive.lock"
+INSTALL_DIR="$HOME/.local/bin"
+BINARY="$INSTALL_DIR/thv"
+
+MODE="install"
+[[ "${1:-}" == "--verify" ]] && MODE="verify"
+[[ "${1:-}" =~ ^(--help|-h)$ ]] && {
+  echo 'Usage: script/install-toolhive [--verify]'
+  exit 0
+}
+
+[[ -f "$LOCK" ]] || die "Missing $LOCK"
+
+lock_value() {
+  local key="$1" value
+  value="$(grep -E "^$key=" "$LOCK" | head -n 1 | cut -d= -f2-)"
+  [[ -n "$value" ]] || die "$LOCK has no '$key'"
+  printf '%s' "$value"
+}
+
+VERSION="$(lock_value version)"
+
+platform_key() {
+  local arch
+  case "$(uname -m)" in
+    arm64) arch=arm64 ;;
+    x86_64) arch=amd64 ;;
+    *) die "Unsupported architecture: $(uname -m)" ;;
+  esac
+  case "$(uname -s)" in
+    Darwin) printf 'darwin_%s' "$arch" ;;
+    *) die "ToolHive is pinned here for macOS only." ;;
+  esac
+}
+
+if [[ "$MODE" == "verify" ]]; then
+  [[ -x "$BINARY" ]] || die "thv is not installed at $BINARY"
+  installed="$("$BINARY" version 2>/dev/null | head -n 1 || true)"
+  if [[ "$installed" == *"$VERSION"* ]]; then
+    success "thv $VERSION is installed and matches mcp/toolhive.lock."
+    exit 0
+  fi
+  die "Installed thv does not report the pinned version $VERSION: ${installed:-unknown}"
+fi
+
+require_macos_arm64
+command_exists curl || die "curl is required."
+command_exists shasum || die "shasum is required."
+
+KEY="$(platform_key)"
+EXPECTED="$(lock_value "$KEY")"
+ARCHIVE="toolhive_${VERSION}_${KEY}.tar.gz"
+URL="https://github.com/stacklok/toolhive/releases/download/v${VERSION}/${ARCHIVE}"
+
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/toolhive.XXXXXX")"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+log "Downloading $ARCHIVE"
+curl -fsSL "$URL" -o "$tmp_dir/$ARCHIVE"
+
+actual="$(shasum -a 256 "$tmp_dir/$ARCHIVE" | awk '{print $1}')"
+if [[ "$actual" != "$EXPECTED" ]]; then
+  warn "Expected $EXPECTED"
+  warn "Received $actual"
+  die "Checksum mismatch for $ARCHIVE; refusing to install."
+fi
+success "Checksum matches the pin in mcp/toolhive.lock."
+
+tar -xzf "$tmp_dir/$ARCHIVE" -C "$tmp_dir" thv
+mkdir -p "$INSTALL_DIR"
+[[ -e "$BINARY" ]] && backup_file "$BINARY"
+install -m 755 "$tmp_dir/thv" "$BINARY"
+
+success "Installed thv $VERSION to $BINARY"
+log "ToolHive needs a running container runtime; start Rancher Desktop first."
+log "Servers are launched with: thv run <server>"

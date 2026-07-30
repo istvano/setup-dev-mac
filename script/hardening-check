@@ -124,6 +124,18 @@ else
 fi
 
 echo
+echo '== MCP policy =='
+if [[ -f "$ROOT/mcp/managed-settings.json" ]]; then
+  if "$ROOT/script/mcp-policy" --verify >/dev/null 2>&1; then
+    pass 'Installed MCP policy matches the declared approved catalogue.'
+  else
+    fail 'MCP policy is missing or has drifted; run script/mcp-policy --diff.'
+  fi
+else
+  review 'No declared MCP policy found in the repository.'
+fi
+
+echo
 echo '== Declared macOS defaults =='
 if "$ROOT/script/macos-defaults" --verify; then
   pass 'Declared macOS defaults are in effect.'
@@ -141,7 +153,9 @@ cat <<'EOF'
     contain only reviewed applications
   - Login Items and background items reviewed after every install
   - BetterDisplay permissions limited to required features
-  - no unreviewed MCP servers, editor extensions or coding-agent tools
+  - editor extensions and coding-agent tools reviewed
+  - Codex and opencode MCP configs reviewed by hand: only Claude Code
+    enforces the allowlist, so those two are checked, not enforced
   - browser contexts not signed into a shared sync account
 EOF
 

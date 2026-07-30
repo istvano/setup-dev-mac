@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Install and verify the Claude Code MCP policy.
+#
+# mcp/managed-settings.json is the declared state. This installs it to the
+# managed settings tier, which no user, project or local setting can override,
+# so the approved catalogue cannot be widened from a config file.
+#
+#   mcp-policy [apply]     install the declared policy (default)
+#   mcp-policy --dry-run   print what would run, change nothing
+#   mcp-policy --diff      installed versus declared
+#   mcp-policy --verify    non-zero when the installed policy has drifted
+#
+# The write needs administrator privileges because the target is a system path.
+# The command is shown and confirmed rather than elevating silently.
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+DECLARED="$ROOT/mcp/managed-settings.json"
+TARGET_DIR="/Library/Application Support/ClaudeCode"
+TARGET="$TARGET_DIR/managed-settings.json"
+STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation"
+
+MODE="apply"
+
+usage() {
+  cat <<'EOF'
+Usage: script/mcp-policy [apply|--dry-run|--diff|--verify]
+
+  apply       install the declared policy (default)
+  --dry-run   print the commands that would run, change nothing
+  --diff      show the installed policy against the declared one
+  --verify    non-zero when the installed policy differs from the declared one
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    apply) MODE="apply" ;;
+    --dry-run) MODE="dry-run" ;;
+    --diff) MODE="diff" ;;
+    --verify) MODE="verify" ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    *) die "Unknown argument: $1" ;;
+  esac
+  shift
+done
+
+[[ -f "$DECLARED" ]] || die "Declared policy is missing: $DECLARED"
+
+# Never install a policy that would not pass the repository's own checks.
+validate_declared() {
+  bash "$ROOT/tests/mcp-policy.sh" >/dev/null ||
+    die "Declared policy failed validation; run tests/mcp-policy.sh for detail."
+}
+
+require_darwin() {
+  [[ "$(uname -s)" == Darwin ]] || die "macOS is required for this mode."
+}
+
+do_dry_run() {
+  validate_declared
+  printf 'sudo mkdir -p %q\n' "$TARGET_DIR"
+  printf 'sudo install -m 644 -o root -g wheel %q %q\n' "$DECLARED" "$TARGET"
+}
+
+do_diff() {
+  require_darwin
+  if [[ ! -f "$TARGET" ]]; then
+    warn "No policy is installed at $TARGET."
+    log "Declared policy:"
+    cat "$DECLARED"
+    return 0
+  fi
+  if diff -u "$TARGET" "$DECLARED"; then
+    success "Installed policy matches the declared policy."
+  else
+    log "The installed policy differs from the declared policy (- installed, + declared)."
+  fi
+}
+
+do_apply() {
+  require_darwin
+  validate_declared
+
+  printf 'These commands require sudo:\n'
+  do_dry_run | tail -n 2
+  confirm "Install the declared MCP policy?" || die "Cancelled."
+
+  # Record what was there before, so a policy change is reversible.
+  if [[ -f "$TARGET" ]]; then
+    mkdir -p "$STATE_DIR"
+    local snapshot
+    snapshot="$STATE_DIR/managed-settings.before.$(date +%Y%m%d-%H%M%S).json"
+    # No sudo: the policy is installed world-readable (644), and redirecting a
+    # sudo'd read would write as the user anyway.
+    cat "$TARGET" >"$snapshot"
+    chmod 600 "$snapshot"
+    log "Recorded the previous policy in $snapshot"
+  fi
+
+  sudo mkdir -p "$TARGET_DIR"
+  sudo install -m 644 -o root -g wheel "$DECLARED" "$TARGET"
+
+  success "Installed the MCP policy. Restart any running agent for it to take effect."
+  log "Confirm with: claude mcp list"
+}
+
+do_verify() {
+  require_darwin
+  [[ -f "$TARGET" ]] || die "No MCP policy is installed at $TARGET."
+  if cmp -s "$TARGET" "$DECLARED"; then
+    success "The installed MCP policy matches the declared policy."
+    return 0
+  fi
+  die "The installed MCP policy has drifted from $DECLARED; run --diff."
+}
+
+case "$MODE" in
+  apply) do_apply ;;
+  dry-run) do_dry_run ;;
+  diff) do_diff ;;
+  verify) do_verify ;;
+esac

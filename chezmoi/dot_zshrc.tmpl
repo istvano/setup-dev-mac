@@ -7,7 +7,7 @@
 
 [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] || export PATH="$HOME/.local/bin:$PATH"
 if [[ -x /opt/homebrew/bin/brew ]]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi
-[[ -d /opt/homebrew/opt/rustup/bin ]] && export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
+# Rust comes from mise, which shims cargo and rustc; no Homebrew keg on PATH.
 
 # --- Completion --------------------------------------------------------------
 
@@ -79,8 +79,10 @@ if command -v eza >/dev/null 2>&1; then
   alias lt='eza --tree --level=2 --group-directories-first'
 fi
 command -v bat >/dev/null 2>&1 && alias cat='bat --paging=never'
-command -v trash >/dev/null 2>&1 && alias rm='trash'
-command -v difft >/dev/null 2>&1 && alias gdt='GIT_EXTERNAL_DIFF=difft git diff'
+
+# `rm` is deliberately not aliased to trash. Redefining it builds a habit that
+# does not transfer to another machine, a container, or anything run under sudo,
+# where the same keystrokes delete irreversibly. Call trash by name.
 
 # --- Environment -------------------------------------------------------------
 

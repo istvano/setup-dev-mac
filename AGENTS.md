@@ -16,19 +16,23 @@ These are deliberate defaults, not placeholders:
   128 GB unified memory and 4 TB storage.
 - Configuration engine: chezmoi.
 - Host package manager: Homebrew Bundle with composable profile fragments.
-- Runtime managers: mise for general runtimes, uv for Python, rustup for Rust.
+- Runtime managers: mise for general runtimes including Rust, which it manages
+  by driving rustup; uv for Python. Homebrew installs no language runtime.
 - Repository scripts and validation do not invoke Ruby. Homebrew Bundle may use
   Homebrew's own bundled Ruby internally.
-- Local AI baseline: MLX as a project-local Python dependency.
+- Local AI baseline: MLX as a project-local Python dependency. LM Studio is the
+  only permitted local inference runtime and is opt-in via `local-llm` (ADR-025).
 - Default free container runtime: Rancher Desktop configured with Moby.
 - Default free password manager: Bitwarden.
 - Default free outbound firewall: LuLu.
-- Default package profiles: core, dev, security and minimal productivity.
+- Default package profiles: core, dev, security, minimal productivity and backup.
 - Cloud providers, Kubernetes, data clients, privileged security monitors and
   personal productivity applications are explicit opt-ins.
 - Optional browsers use isolated `personal` and `work` data roots; additional
   lowercase profile names are created explicitly with `browser-profile`.
-- BetterDisplay Free Edition is a native productivity dependency.
+- BetterDisplay Free Edition is a hard requirement, not a convenience: the
+  monitors are shared with a second Mac and DDC input switching moves them
+  between the two machines (ADR-007).
 - Stateful services and repeatable scanners belong in containers.
 - Exploit development, malware analysis, GDB-centric workflows and untrusted
   binaries belong in an isolated Linux VM.
@@ -44,7 +48,8 @@ Use the smallest appropriate execution boundary:
 3. **Linux containers** for databases, vector stores, queues, observability,
    batch scanners and CI-equivalent services.
 4. **Isolated Linux VM** for hostile, kernel-sensitive or architecture-specific
-   security work.
+   security work. Provided by the `lab` profile (Lima, UTM); before it existed
+   this boundary was documented but not installable (ADR-027).
 
 Do not containerise a tool merely for consistency when doing so removes a
 required host capability. Do not install a daemon natively merely because a
@@ -53,6 +58,8 @@ Homebrew formula exists.
 ## Sources of truth
 
 - `profiles/*.Brewfile`: host packages and native GUI applications.
+- `mcp/managed-settings.json`: the approved MCP server catalogue.
+- `mcp/toolhive.lock`: the pinned ToolHive release and its digests.
 - `chezmoi/`: user configuration and idempotent apply hooks.
 - `script/`: orchestration, validation and maintenance commands.
 - `docs/ARCHITECTURE.md`: current boundaries and configuration flow.
@@ -80,6 +87,8 @@ While editing:
   command aliases.
 - Explain each package's purpose and why its execution boundary is correct.
 - Keep mutually exclusive alternatives in separate profile fragments.
+- One tool per job in the default profile (ADR-022). Before adding one, check
+  whether an installed tool already covers the use case.
 - Never put credentials, recovery keys, private addresses or machine-specific
   absolute paths in tracked files.
 - Do not add automatic major macOS upgrades, automatic FileVault enablement,
@@ -181,6 +190,8 @@ Use the `$add-workstation-tool` skill for this workflow.
 Do not weaken these without explicit user approval and a documented decision:
 
 - Container ports bind to `127.0.0.1` by default.
+- MCP servers are allowlisted by `serverCommand` or `serverUrl`, never by
+  `serverName`, and every package spec carries an explicit version (ADR-029).
 - Stateful Linux services use named volumes, not macOS bind mounts for data.
 - Scanner source mounts are read-only unless remediation explicitly requires
   writes.

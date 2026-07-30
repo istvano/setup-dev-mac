@@ -1,0 +1,10 @@
+# Pinned ToolHive release. thv is installed outside Homebrew (ADR-029), so this
+# file is the only record of which build is trusted, and `brew upgrade` will
+# never move it. script/update-report reports when a newer release exists.
+#
+# To bump: change version, fetch the new archives, and replace the digests with
+# the values published in the release. Verify against the upstream checksums
+# rather than computing them from whatever the download happened to return.
+version=0.41.0
+darwin_arm64=08a6dd7093f17f1190fdb191bc6634acf43849dbe7cb9e782b9558c14f215ca6
+darwin_amd64=4c0310f8d5a60203f3b0d2c9b27910b839e1156aee769c13547b4d047877e580

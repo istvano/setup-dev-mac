@@ -41,7 +41,7 @@ An explicit installation using the free defaults is:
 
 ```bash
 ./bootstrap install \
-  --profiles core,dev,security,productivity \
+  --profiles core,dev,security,productivity,backup \
   --runtime rancher \
   --password-manager bitwarden \
   --firewall lulu \
@@ -256,6 +256,285 @@ To use a key held by 1Password, Secretive or a YubiKey resident key instead, set
 `gitSigningMethod = "ssh"` and put the SSH public key in `gitSigningKey`. The
 `allowedSignersFile` is generated only for that method.
 
+## Lab virtual machines
+
+The `lab` profile provides the isolated Linux VM that `docs/ARCHITECTURE.md`
+names as an execution domain. Anything hostile, kernel-sensitive or
+architecture-specific belongs here rather than on the host or in a container:
+exploit development, malware analysis, untrusted binaries, ptrace and GDB work.
+
+Lima handles the common case — scriptable, disposable, declared in YAML:
+
+```bash
+limactl start --name=lab template://ubuntu-lts
+limactl shell lab
+limactl stop lab && limactl delete lab      # disposable by design
+```
+
+Reach for UTM when Lima cannot help: a GUI is needed, a non-Linux guest is
+involved, or the work is **x86-specific**. Lima runs arm64 guests under
+Virtualization.framework, so x86_64 emulation is UTM's job, and it is slow
+enough that it should be a deliberate choice rather than a default.
+
+Provision with Ansible over SSH rather than by hand, so a compromised or broken
+lab VM can be destroyed and rebuilt instead of repaired:
+
+```bash
+ansible -i lab, -m ping all
+ansible-playbook -i lab, lab.yml
+```
+
+Two rules make the boundary real rather than nominal:
+
+- Do not mount the home directory, SSH directory or credential stores into a lab
+  VM. Share a single scratch directory if something must cross.
+- Snapshot before running anything untrusted, and revert afterwards. A VM you
+  keep patching is no longer isolated from what it has run.
+
+## Intercepting proxies
+
+`security-extra` installs Burp Suite and mitmproxy. Both read HTTPS by
+terminating TLS, which requires a root CA in the keychain. While that
+certificate is trusted, anything holding its private key can decrypt every TLS
+session the machine makes — not only the traffic being debugged.
+
+Changing interception tool does not change this: the root CA is inherent to the
+technique, not to any one implementation. What it changes is who maintains the
+code holding that privilege, which is why mitmproxy is preferred here.
+
+Treat the CA as a temporary grant, not a setup step:
+
+```bash
+# Confirm what is currently trusted before and after a debugging session.
+security dump-trust-settings -d 2>/dev/null | grep -iE 'rockxy|portswigger|burp'
+```
+
+Remove the certificate from the login and System keychains when the session
+ends, and re-add it next time. Leave system-wide proxy settings off when not in
+use; a proxy left configured silently routes traffic through a stopped listener
+or, worse, a running one.
+
+mitmproxy runs three ways from one install: `mitmproxy` (terminal UI),
+`mitmweb` (browser UI) and `mitmdump` (scriptable, non-interactive). Its CA is
+generated on first run into `~/.mitmproxy`; trust it deliberately and remove it
+afterwards.
+
+```bash
+mitmproxy --listen-host 127.0.0.1 --listen-port 8080
+```
+
+Bind to `127.0.0.1` explicitly. mitmproxy listens on all interfaces by default,
+which would turn the machine into an open proxy on any network it joins.
+
+## MCP servers
+
+An MCP server is arbitrary code with tool access to this machine. The default
+way to run one, `npx -y package@latest`, fetches and executes unpinned remote
+code every time an agent starts. Two controls apply instead (ADR-029): an
+approved catalogue that Claude Code enforces, and container isolation that
+applies to every agent.
+
+### Install the policy
+
+```bash
+./script/mcp-policy --dry-run    # the exact privileged commands
+./script/mcp-policy --diff       # installed versus declared
+./script/mcp-policy apply        # confirms before writing the system path
+./script/mcp-policy --verify     # non-zero on drift
+```
+
+`script/hardening-check` runs `--verify`, so a drifted or missing policy fails
+the audit.
+
+Prove it is in force. The second command must be refused by policy before
+anything is contacted, so the URL does not need to be real:
+
+```bash
+claude mcp list
+claude mcp add --transport http test https://example.com/mcp
+```
+
+### Add a server
+
+1. **Inspect it before trusting it.** `mcp-inspector` shows the tools it
+   actually exposes, which is often broader than its README suggests:
+
+   ```bash
+   npx @modelcontextprotocol/inspector npx -y <package>@<version>
+   ```
+
+2. **Pin it.** Resolve the version; never `@latest`.
+3. **Allowlist it** in `mcp/managed-settings.json`. Which key depends on how it
+   runs: a direct stdio server uses `serverCommand` with the exact pinned
+   command; a ToolHive-managed server uses `serverUrl` with its fixed loopback
+   port. Never `serverName` — it is a label the user assigns, so any server can
+   claim it. `tests/mcp-policy.sh` rejects an unpinned spec, a `serverName`
+   allowlist entry and a wildcard loopback port.
+4. **Apply and verify**, then restart the agent.
+
+Because `serverCommand` matches every argument in order, the pinned command is
+the only form that will load. A bumped version is a deliberate edit to a file
+that is reviewed in git.
+
+### Optional: run servers in containers with ToolHive
+
+ToolHive is **not installed by default and nothing depends on it**. The policy
+above works without it. Install it when a server is not fully trusted, needs
+credentials, or came from someone else — it is the only control that limits what
+a server can reach once loaded, and the only one that applies to Codex and
+opencode as well as Claude Code.
+
+Without it, a server runs as your user, with your environment, your credentials
+and your network access. The allowlist decides *which* servers load in Claude
+Code; it does not constrain them afterwards.
+
+ToolHive does not run servers as stdio commands. It runs each one in its own
+container and exposes it over HTTP on loopback, so the allowlist entry is a
+**`serverUrl`, not a `serverCommand`**.
+
+It also assigns a random proxy port unless told otherwise. A random port cannot
+be pinned, and the only allowlist entry that would match it is a wildcard like
+`http://127.0.0.1:*/*` — which permits any process listening on loopback to load
+as an MCP server. Always fix the port; `tests/mcp-policy.sh` rejects a wildcard
+loopback port for this reason.
+
+Start the container runtime first, then:
+
+```bash
+./script/install-toolhive          # pinned release, verified against the lock file
+thv run --proxy-port 8123 \
+        --isolate-network \
+        --permission-profile none \
+        <server>
+thv list                           # shows each server and its URL
+```
+
+`--isolate-network` cuts the container off from the host network and
+`--permission-profile none` grants nothing by default; widen only what a
+specific server demonstrably needs.
+
+Order matters. `allowManagedMcpServersOnly` is true, so a server that is not on
+the allowlist will not load even after ToolHive registers it:
+
+```bash
+# 1. add {"serverUrl": "http://127.0.0.1:8123/mcp"} to mcp/managed-settings.json
+./script/mcp-policy apply          # 2. policy first
+thv client register claude-code    # 3. then point the client at the URL
+                                   # 4. restart the agent
+claude mcp list                    # 5. confirm it loaded
+```
+
+Use `127.0.0.1`, not `localhost`: allowlist URLs match the literal host, so a
+`localhost` pattern will not match a `127.0.0.1` URL.
+
+Pass credentials with `--secret`, which pulls from ToolHive's secrets manager
+into the container's environment. Never put them in the policy file or a client
+config, both of which any user on the machine can read.
+
+### What pinning means under ToolHive
+
+With a direct stdio server, the allowlist pins the exact package and version.
+With ToolHive, the allowlist pins a loopback URL, and the version pinning moves
+into the container image ToolHive runs. That is a deliberate trade: the
+allowlist becomes less specific, and in exchange the server holds no host
+credentials and cannot reach the host network. Review the image reference
+ToolHive resolves with `thv list` and treat it as you would any other image
+under ADR-006.
+
+`thv` is deliberately outside Homebrew, so `brew upgrade` will not move it.
+`./script/update-report` reports when a newer release exists; bumping means
+editing `mcp/toolhive.lock` with the published digests and re-running the
+installer.
+
+### What is not enforced
+
+Only Claude Code enforces the allowlist. Codex and opencode read their own
+configuration, and no equivalent mechanism could be confirmed for either, so
+review those two by hand after adding any server.
+
+Container isolation is the only control covering all three, and it is optional,
+so by default the enforced surface is one agent. Weigh that when adding a server
+you did not write.
+
+## Local AI models
+
+Two separate things, with different placements.
+
+### MLX: project-local, nothing installed on the host
+
+MLX is a Python dependency, not a workstation package (ADR-004). Nothing is
+installed globally, and `tests/placement-policy.sh` fails the suite if an `mlx`
+token appears in any profile. Everything MLX needs is already present: `uv` from
+`core`, the Xcode Command Line Tools from the bootstrap, and Apple Silicon.
+
+Per project:
+
+```bash
+uv init
+uv add mlx mlx-lm
+```
+
+Add `mlx-vlm`, notebooks and serving dependencies only to the projects that use
+them. A development server must bind to loopback and must not be presented as
+production-safe.
+
+There is no `huggingface-cli` Homebrew formula. The CLI ships inside the
+`huggingface_hub` package, so install it as an isolated uv tool rather than
+adding it to a profile:
+
+```bash
+uv tool install "huggingface_hub[cli]"
+hf download mlx-community/<model> --local-dir ./models/<model>
+```
+
+Crawl4AI is the same shape: a Python crawler for LLM pipelines, with no Homebrew
+package. It belongs in the project that uses it, or as an isolated tool, never in
+a profile (ADR-004):
+
+```bash
+uv add crawl4ai            # in the project that needs it
+uv tool install crawl4ai   # or standalone, isolated from every project
+```
+
+Crawling fetches and renders untrusted pages. Treat it as a network-facing
+dependency: pin the version in the project, and prefer running it in that
+project's container when a run is unattended or scheduled.
+
+### LM Studio: opt-in `local-llm` profile
+
+```bash
+./bootstrap plan --profiles core,dev,security,productivity,local-llm
+```
+
+Operating constraints, all of which differ from the rest of the workstation:
+
+- **It updates itself.** The cask carries `auto_updates`, so new versions arrive
+  without `brew upgrade` and without appearing in `./script/update-report`.
+  Treat it as outside the reviewed update flow and read its release notes.
+- **Keep the server on loopback.** The OpenAI-compatible server defaults to
+  `localhost:1234`. Leave "Serve on Local Network" off; enabling it exposes an
+  unauthenticated inference endpoint to the network.
+- **The weights are the trust surface, not the app.** Prefer GGUF and
+  safetensors. Avoid pickle-backed `.bin` checkpoints, which execute code when
+  loaded. Model publishers are as much a supply-chain dependency as any package.
+
+### Model storage and backup
+
+Weights are large and re-downloadable, so they do not belong in an off-site
+backup. LM Studio stores under `~/.lmstudio`, and Hugging Face caches under
+`~/.cache/huggingface`. Exclude both from restic:
+
+```bash
+restic backup ~/workspace ~/Documents \
+  --exclude-caches \
+  --exclude "$HOME/.lmstudio" \
+  --exclude "$HOME/.cache/huggingface" \
+  --exclude '**/.venv' --exclude '**/node_modules' --exclude '**/target'
+```
+
+Keep a note of which models a project depends on in that project's own
+repository. That is the reproducible artefact; the weights themselves are not.
+
 ## Backup
 
 Selecting the `backup` profile installs `restic` and `rclone`. This supplements
@@ -276,6 +555,8 @@ Back up, then verify:
 ```bash
 restic backup ~/workspace ~/Documents \
   --exclude-caches \
+  --exclude "$HOME/.lmstudio" \
+  --exclude "$HOME/.cache/huggingface" \
   --exclude '**/.venv' --exclude '**/node_modules' --exclude '**/target'
 restic check --read-data-subset=5%
 ```
@@ -304,6 +585,33 @@ assume -c <profile>         # opens the console in an isolated browser profile
 `granted`'s per-profile browser containers and the `browser-profile` contexts
 serve the same purpose: keep administrative sessions out of the browser context
 used for everything else.
+
+## Kubernetes and GitOps
+
+The `kubernetes` profile is client-side only; no cluster runs on the host unless
+`kind` is started deliberately.
+
+```bash
+kubectx                      # choose a cluster, then confirm it before acting
+kubeconform -strict -summary manifests/     # schema check, no cluster needed
+kustomize build overlays/prod | kubeconform -strict -
+helmfile diff                # what a release change would do
+argocd app diff <app>        # what the cluster and Git disagree about
+```
+
+Diff before sync, always. `argocd app sync` against the wrong context is the
+failure mode these tools exist to prevent, and `kubectx` makes the current
+context cheap to check.
+
+Commit secrets only as SealedSecrets:
+
+```bash
+kubeseal --controller-namespace kube-system <secret.yaml >sealed-secret.yaml
+```
+
+The sealed output is safe to commit; the input is not. Keep the plaintext out of
+the repository entirely — `gitleaks` runs in `./script/test`, but do not rely on
+a scanner to catch what should never have been staged.
 
 ## Package updates
 

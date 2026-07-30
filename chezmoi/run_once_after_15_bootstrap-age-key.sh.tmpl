@@ -2,10 +2,10 @@
 #!/usr/bin/env bash
 # Create the age identity that SOPS uses, if one does not already exist.
 #
-# sops and age are installed by the security profile but had no key-management
-# story, so encrypted project files could not actually be created. The private
-# key is written to ~/.config/age/keys.txt with mode 0600 and is never placed
-# in this repository.
+# age is in the core profile and sops in security-extra, but neither had a
+# key-management story, so encrypted project files could not actually be
+# created. The private key is written to ~/.config/age/keys.txt with mode 0600
+# and is never placed in this repository. Only age is required here.
 #
 # For a hardware-backed identity instead, install security-extra and use
 # age-plugin-yubikey; this script leaves an existing key untouched.

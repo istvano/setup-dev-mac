@@ -9,6 +9,7 @@ TESTS=(
   render-brewfile
   profiles
   chezmoi-templates
+  mcp-policy
   yaml
   placement-policy
   idempotency

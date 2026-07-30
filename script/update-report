@@ -75,6 +75,30 @@ if total:
 PY
 
 echo
+echo '== Pinned tools outside Homebrew =='
+# thv is optional and is not installed by default. Only report on it once it is
+# actually present: `brew outdated` cannot see it, so without this check an
+# installed copy would silently never update, but an uninstalled one should not
+# generate noise on every update.
+lock="$ROOT/mcp/toolhive.lock"
+if ! command_exists thv; then
+  log 'ToolHive is not installed; skipping. See docs/OPERATIONS.md#mcp-servers.'
+elif [[ -f "$lock" ]]; then
+  pinned="$(grep -E '^version=' "$lock" | cut -d= -f2)"
+  latest="$(curl -fsS --max-time 20 https://api.github.com/repos/stacklok/toolhive/releases/latest 2>/dev/null |
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)"
+  if [[ -z "$latest" ]]; then
+    warn "Could not reach the ToolHive release API; pinned version is $pinned."
+  elif [[ "$pinned" == "$latest" ]]; then
+    success "ToolHive is at the latest release ($pinned)."
+  else
+    warn "ToolHive $pinned is pinned; $latest is available."
+    log "Update mcp/toolhive.lock with the new version and its published digests,"
+    log "then run ./script/install-toolhive."
+  fi
+fi
+
+echo
 echo '== Cleanup candidates =='
 warn 'Listed only. Removing a package is never automatic; see docs/OPERATIONS.md.'
 brew bundle cleanup --file="$brewfile" || true

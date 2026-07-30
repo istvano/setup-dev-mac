@@ -22,6 +22,13 @@ These files define software installed directly on macOS.
   Monitoring, Full Disk Access or a driver extension must state that in its
   purpose comment.
 - Do not add Ollama, llama.cpp, PyTorch or Open WebUI to the initial baseline.
+  Local inference lives in the opt-in `local-llm` profile only (ADR-025); note
+  that the placement test matches literal tokens and cannot detect a bundled
+  engine, so apply this rule by reading, not by trusting the check.
+- Do not add a language runtime. Node, Go, Java, Rust and pnpm are declared in
+  chezmoi/dot_config/mise/config.toml.tmpl (ADR-021).
+- One tool per job in the default profile (ADR-022). If an installed tool
+  already covers the use case, extend its configuration instead.
 - Do not add native databases, vector stores or automated scanners when a
   container provides equivalent functionality without material degradation.
 - Paid or conditionally licensed software must be isolated in the appropriate

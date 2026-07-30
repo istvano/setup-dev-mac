@@ -4,7 +4,7 @@
 # list because it cannot source shell data.
 # Consumed by sourcing scripts (bootstrap, script/render-brewfile, tests).
 # shellcheck disable=SC2034
-DEFAULT_PROFILES="core,dev,security,productivity"
+DEFAULT_PROFILES="core,dev,security,productivity,backup"
 VALID_PROFILES=(
   core
   dev
@@ -12,6 +12,10 @@ VALID_PROFILES=(
   security-extra
   security-scan
   backup
+  local-llm
+  lab
+  docs
+  mcp
   cloud
   cloud-aws
   cloud-azure
