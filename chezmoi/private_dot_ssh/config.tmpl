@@ -4,13 +4,26 @@
 # Algorithm lists are allowlists rather than exclusions, so a future weak
 # default cannot be silently negotiated.
 
+# Included FIRST, deliberately. ssh takes the first value it obtains for each
+# keyword, so anything after the `Host *` block below could never override it.
+# Per-host settings live here and are not managed by the repository, so
+# machine-specific hostnames never reach version control.
+Include ~/.ssh/config.d/*
+
 Host *
   # Keys are added to the agent on first use and unlocked from the Keychain.
+  # UseKeychain is Apple's ssh only: a Homebrew openssh would reject this file.
   AddKeysToAgent yes
   UseKeychain yes
 
   # Only offer the key configured for a host. Without this, ssh walks every key
   # in the agent and leaks which identities exist to any server it contacts.
+  #
+  # This has a requirement worth knowing before it bites: under IdentitiesOnly,
+  # ssh uses only the configured identity files even when an agent offers more.
+  # Keys held solely in an agent are therefore skipped. Give each host in
+  # config.d an `IdentityFile ~/.ssh/<name>.pub` — the public key is enough, and
+  # is how ssh selects one specific identity out of an agent.
   IdentitiesOnly yes
 
   HashKnownHosts yes
@@ -30,18 +43,19 @@ Host *
 
   ServerAliveInterval 60
   ServerAliveCountMax 3
-
-{{ if eq .passwordManager "1password" -}}
+{{ if eq .passwordManager "1password" }}
   # 1Password holds the private keys; the local agent socket exposes only the
   # items you have explicitly authorised.
   IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
-{{- else -}}
-  # Secretive keeps keys in the Secure Enclave so they cannot be exported. It is
-  # not installed by any profile at present; add `cask "secretive"` to
-  # security-extra first, then uncomment this after creating a key.
-  # IdentityAgent "~/Library/Containers/com.maxgoedjen.Secretive.SecretAgent/Data/socket.ssh"
+{{- else if eq .passwordManager "bitwarden" }}
+  # Bitwarden's desktop app holds the private keys, so they never exist as files.
+  # This path is the .dmg layout, which is what the Homebrew cask installs. The
+  # Mac App Store build uses
+  # ~/Library/Containers/com.bitwarden.desktop/Data/.bitwarden-ssh-agent.sock
+  # instead. Enable the SSH agent in Bitwarden's settings before this works.
+  IdentityAgent "~/.bitwarden-ssh-agent.sock"
+{{- else }}
+  # No password manager selected, so no agent socket is configured and ssh falls
+  # back to Apple's agent with keys on disk. To keep keys off disk instead,
+  # install a Secure Enclave agent such as Secretive and set IdentityAgent here.
 {{- end }}
-
-# Per-host overrides belong in ~/.ssh/config.d and are not managed here, so
-# machine-specific hostnames never reach the repository.
-Include ~/.ssh/config.d/*

@@ -14,10 +14,8 @@ pinentry-program {{ lookPath "pinentry-mac" }}
 default-cache-ttl 1800
 max-cache-ttl 28800
 
-# Same bounds for keys held on a smartcard or hardware token.
-default-cache-ttl-ssh 1800
-max-cache-ttl-ssh 28800
-
-# SSH keys are not served by gpg-agent here. ~/.ssh/config uses either the
-# macOS agent or the password manager's agent; running two SSH agents makes it
-# ambiguous which key answers a request.
+# gpg-agent does not serve SSH keys here: ~/.ssh/config uses the password
+# manager's agent, and running two SSH agents makes it ambiguous which key
+# answers a request. The default-cache-ttl-ssh and max-cache-ttl-ssh settings
+# are therefore deliberately absent — they take effect only with
+# enable-ssh-support, so setting them would be dead configuration.

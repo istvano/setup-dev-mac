@@ -2,12 +2,17 @@
 experimental = true
 idiomatic_version_file_enable_tools = ["node", "python", "java", "go"]
 {{- if has "dev" .profiles }}
+# Runtimes are pinned to explicit minor versions rather than tracking "latest"
+# or "lts". A floating version means the toolchain can change under a project
+# without any edit, which is the same objection ADR-006 raises about mutable
+# image tags and the MCP policy raises about @latest. Bumping one is a reviewed
+# edit to this file. See ADR-030.
 [tools]
-node = "lts"
-go = "latest"
+node = "24"
+go = "1.25"
 java = "temurin-21"
+pnpm = "10"
 # mise manages Rust by driving rustup and installing rustup itself when absent,
 # so Homebrew does not also install one. See ADR-021.
 rust = "stable"
-pnpm = "latest"
 {{- end }}

@@ -579,3 +579,48 @@ not fully trusted, needs credentials, or came from someone else.
 
 **ToolHive is pre-1.0** (v0.41.0 at the time of writing). The lock file and the
 update report are the compensating controls.
+
+## ADR-030: Pin language runtime versions, and fix the shell keymap explicitly
+
+**Status:** accepted
+
+A line-by-line review of the managed dotfiles found several places where the
+configuration did not do what its comments claimed. Two are recorded here because
+the reasoning is durable rather than mechanical.
+
+### Runtime versions are pinned
+
+`mise` previously declared `node = "lts"`, `go = "latest"` and `pnpm = "latest"`.
+Those float: the toolchain a project builds against can change with no edit to
+any tracked file, which is the same objection ADR-006 raises about mutable image
+tags and `tests/mcp-policy.sh` enforces against `@latest`. Applying the rule to
+container images and MCP packages while exempting the compilers was inconsistent.
+
+Runtimes are now pinned to explicit minor versions. Bumping one is a reviewed
+edit. `rust = "stable"` is retained deliberately: mise delegates Rust to rustup,
+where `stable` names a release channel that rustup resolves and records, not an
+unpinned fetch.
+
+### The zsh keymap is set explicitly
+
+`bindkey -e` is now set. The zsh manual: *"If one of the VISUAL or EDITOR
+environment variables contain the string 'vi' when the shell starts up then it
+will be 'viins', otherwise it will be 'emacs'."* Because this configuration sets
+`EDITOR=nvim`, the shell was silently starting in vi insert mode, and every
+plugin binding was landing in a keymap nobody chose. A keymap should not be a
+side effect of an unrelated variable.
+
+### Ordering hazards now carry tests, not comments
+
+Two defects were invisible because the result still worked:
+
+- `fzf --zsh` initialised after `atuin init`, and both bind Ctrl-R, so the later
+  one won and Atuin search was silently replaced. `tests/placement-policy.sh` now
+  asserts the order.
+- `Include ~/.ssh/config.d/*` sat below the `Host *` block. ssh uses the first
+  value obtained for each keyword, so per-host overrides could never take effect,
+  even though a comment invited them. The include now comes first.
+
+The general lesson, and the reason these are in a decision record: a
+misconfiguration that still produces working behaviour will not be noticed by
+use, so it needs an assertion. A comment describing intent is not a control.

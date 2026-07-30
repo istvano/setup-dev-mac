@@ -1,5 +1,28 @@
 add_newline = false
+
+# Three times starship's 500 ms default. Left high for slow git in large
+# repositories; this is the knob to lower if the prompt ever feels sluggish.
 command_timeout = 1500
+
 [character]
 success_symbol = "[❯](bold green)"
 error_symbol = "[❯](bold red)"
+
+# The next two modules are a safety control, not decoration. docs/OPERATIONS.md
+# warns that acting on the wrong cluster or account is the failure mode this
+# tooling exists to prevent; showing the context makes that a state you see
+# rather than one you discover afterwards. Both read files and environment
+# variables instead of spawning subprocesses, so the prompt cost is small.
+
+[kubernetes]
+disabled = false
+format = '[$symbol$context( \($namespace\))]($style) '
+style = "bold red"
+symbol = "☸ "
+
+[aws]
+disabled = false
+# granted exports AWS_PROFILE, which this module reads.
+format = '[$symbol$profile( \($region\))]($style) '
+style = "bold yellow"
+symbol = "☁ "

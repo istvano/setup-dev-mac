@@ -23,5 +23,9 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# These also hide legitimate files: a public certificate, or a test fixture.
+# That is the intended trade — a silent skip is better than a leaked key — but
+# when a match really should be committed, use `git add -f <path>`.
 *.pem
 *.key

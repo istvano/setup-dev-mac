@@ -27,6 +27,14 @@ fi
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 
+# --- Keymap ------------------------------------------------------------------
+
+# Chosen explicitly, because otherwise it is a side effect of $EDITOR: zsh uses
+# viins when VISUAL or EDITOR contains the string "vi", and "nvim" does. Without
+# this line the shell silently starts in vi mode and plugin keybindings land in
+# a keymap nobody selected.
+bindkey -e
+
 # --- History -----------------------------------------------------------------
 
 # Atuin is the primary history store, but zsh keeps its own file as well and it
@@ -40,6 +48,9 @@ setopt HIST_REDUCE_BLANKS
 setopt HIST_VERIFY           # expand a history reference for review, do not run it
 setopt SHARE_HISTORY
 setopt EXTENDED_HISTORY
+setopt HIST_FCNTL_LOCK       # safe concurrent writes; SHARE_HISTORY means many
+                             # terminals append to the same file
+setopt INTERACTIVE_COMMENTS  # pasting a command with a trailing # comment works
 
 # --- Tool activation ---------------------------------------------------------
 
@@ -47,8 +58,14 @@ command -v mise >/dev/null 2>&1 && eval "$(mise activate zsh)"
 command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
 command -v starship >/dev/null 2>&1 && eval "$(starship init zsh)"
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
-command -v atuin >/dev/null 2>&1 && eval "$(atuin init zsh --disable-ai)"
+
+# ORDER MATTERS. fzf and Atuin both bind Ctrl-R, and the one initialised last
+# wins. Atuin is the history store this workstation is built around, so it goes
+# after fzf. Reversing these two silently replaces Atuin search with fzf's,
+# which still works and is therefore easy not to notice.
+# tests/placement-policy.sh asserts this order.
 command -v fzf >/dev/null 2>&1 && eval "$(fzf --zsh)"
+command -v atuin >/dev/null 2>&1 && eval "$(atuin init zsh --disable-ai)"
 
 # fzf uses fd so results honour .gitignore and skip .git.
 if command -v fd >/dev/null 2>&1; then

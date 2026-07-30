@@ -39,6 +39,15 @@
   ui = auto
 [branch]
   sort = -committerdate
+[tag]
+  sort = version:refname
+[rebase]
+  autosquash = true
+
+# Without a helper, git caches no HTTPS credential for any host. `gh` covers
+# GitHub only, so every other remote would re-prompt.
+[credential]
+  helper = osxkeychain
 
 # Reject malformed objects instead of writing them into the object store. This
 # is cheap and blocks a class of repository-delivered attacks.
