@@ -9,15 +9,32 @@ window-padding-x = 8
 window-padding-y = 6
 window-save-state = never
 
-# Scrollback stays in memory only. Terminal history on a workstation that
-# handles credentials should not be written to disk by the emulator; Atuin owns
-# deliberate command history instead.
-scrollback-limit = 10000
+# A memory bound per terminal surface, in LINES.
+#
+# `scrollback-limit` is measured in bytes and Ghostty 1.4 renamed it to
+# `scrollback-limit-bytes` because the units were ambiguous. The byte limit
+# defaults to 50 MB, so the previous `scrollback-limit = 10000` here meant 10 KB
+# — roughly a hundred lines, not ten thousand. Use the explicit lines key.
+#
+# Ghostty never writes scrollback to disk, so this is purely about memory. It is
+# not a privacy control, and an earlier comment here wrongly claimed it was.
+scrollback-limit-lines = 10000
 
 copy-on-select = false
 confirm-close-surface = true
 shell-integration = zsh
-shell-integration-features = cursor,sudo,title
+
+# ssh-env and ssh-terminfo both default to off. Ghostty exports
+# TERM=xterm-ghostty, which remote hosts do not have in their terminfo database,
+# so vim, tmux and other curses programs degrade over SSH. ssh-terminfo installs
+# the entry on the remote; ssh-env falls back to a portable TERM when it cannot.
+# This machine SSHes into Lima VMs and Kubernetes nodes, so both earn their place.
+shell-integration-features = cursor,sudo,title,ssh-env,ssh-terminfo
+
+# Unset, Ghostty defers to Sparkle and may install updates on its own, outside
+# `brew upgrade` and ./script/update-report. `check` notifies without installing,
+# which keeps new code arriving through a reviewed step.
+auto-update = check
 
 macos-option-as-alt = true
 macos-titlebar-style = tabs

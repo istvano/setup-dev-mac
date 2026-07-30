@@ -14,6 +14,9 @@ if [[ -x /opt/homebrew/bin/brew ]]; then eval "$(/opt/homebrew/bin/brew shellenv
 if command -v brew >/dev/null 2>&1; then
   FPATH="$(brew --prefix)/share/zsh/site-functions:$FPATH"
 fi
+# complist provides the menuselect keymap that the `menu select` zstyle below
+# relies on; without it, menu selection silently falls back to plain listing.
+zmodload zsh/complist
 autoload -Uz compinit compaudit
 # compinit prompts interactively when it finds group- or world-writable
 # completion directories, which can hang a non-interactive login. Report them
@@ -26,6 +29,11 @@ else
 fi
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
+
+# Cache generated completions. kubectl, aws and docker have large completion
+# sets that are slow to recompute on every invocation.
+zstyle ':completion:*' use-cache on
+zstyle ':completion:*' cache-path "${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompcache"
 
 # --- Keymap ------------------------------------------------------------------
 
@@ -51,6 +59,19 @@ setopt EXTENDED_HISTORY
 setopt HIST_FCNTL_LOCK       # safe concurrent writes; SHARE_HISTORY means many
                              # terminals append to the same file
 setopt INTERACTIVE_COMMENTS  # pasting a command with a trailing # comment works
+
+# --- Directory stack ---------------------------------------------------------
+
+setopt AUTO_PUSHD            # every cd pushes, so `cd -<Tab>` lists recent dirs
+setopt PUSHD_IGNORE_DUPS
+setopt PUSHD_SILENT          # pushd/popd do not print the stack
+
+# --- Line editing ------------------------------------------------------------
+
+# Zsh's default WORDCHARS includes "/", which makes Ctrl-W delete a whole path
+# instead of one segment. Removing it is the single most useful zsh line-editing
+# fix; the rest of the default set is preserved.
+WORDCHARS="${WORDCHARS//\//}"
 
 # --- Tool activation ---------------------------------------------------------
 
@@ -110,6 +131,12 @@ export LESS='-R'
 # formulae under umask 077. Rely on FileVault and per-file modes instead.
 
 # --- Plugins -----------------------------------------------------------------
+
+# Cap what zsh-syntax-highlighting will parse. It re-highlights the entire
+# buffer on every keystroke, so a long pasted command makes typing crawl. This
+# MUST be set before the plugin is sourced; afterwards it has no effect, which
+# tests/placement-policy.sh asserts.
+ZSH_HIGHLIGHT_MAXLENGTH=512
 
 # Syntax highlighting must be sourced last; it wraps the widgets everything
 # else has already registered. The prefix is resolved at shell start rather than

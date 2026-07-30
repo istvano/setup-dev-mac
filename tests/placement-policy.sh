@@ -37,6 +37,27 @@ atuin_line="$(grep -n 'atuin init zsh' "$zshrc" | head -n 1 | cut -d: -f1)"
 # The keymap must be explicit: zsh selects viins whenever EDITOR contains "vi",
 # and this configuration sets EDITOR=nvim.
 assert_match '^bindkey -e$' "$zshrc"
+
+# ZSH_HIGHLIGHT_MAXLENGTH is read when zsh-syntax-highlighting is sourced. Set
+# after that point it has no effect, and the only symptom is a slow prompt.
+maxlen_line="$(grep -n '^ZSH_HIGHLIGHT_MAXLENGTH=' "$zshrc" | head -n 1 | cut -d: -f1)"
+highlight_line="$(grep -n 'zsh-syntax-highlighting.zsh' "$zshrc" | head -n 1 | cut -d: -f1)"
+[[ -n "$maxlen_line" && -n "$highlight_line" ]] || {
+  echo 'Could not locate ZSH_HIGHLIGHT_MAXLENGTH and the syntax-highlighting source line.' >&2
+  exit 1
+}
+((maxlen_line < highlight_line)) || {
+  echo "dot_zshrc.tmpl: ZSH_HIGHLIGHT_MAXLENGTH (line $maxlen_line) must be set" \
+    "before zsh-syntax-highlighting is sourced (line $highlight_line)." >&2
+  exit 1
+}
+
+# Ghostty's scrollback-limit is measured in BYTES and was renamed to
+# scrollback-limit-bytes in 1.4. The bare key set to a line count silently gave a
+# ~10 KB buffer against a 50 MB default, so require the explicit lines key.
+ghostty="$ROOT/chezmoi/dot_config/ghostty/config"
+assert_match '^scrollback-limit-lines[[:space:]]*=' "$ghostty"
+refute_match '^scrollback-limit[[:space:]]*=' "$ghostty"
 assert_match '^auto_sync = false$' "$ROOT/chezmoi/dot_config/atuin/config.toml"
 python3 - "$ROOT/chezmoi/dot_config/atuin/config.toml" <<'PY'
 import sys

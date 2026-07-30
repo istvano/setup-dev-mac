@@ -621,6 +621,24 @@ Two defects were invisible because the result still worked:
   value obtained for each keyword, so per-host overrides could never take effect,
   even though a comment invited them. The include now comes first.
 
+A third case, found later in `dot_config/ghostty/config`, is the same lesson in
+different clothing. `scrollback-limit` is measured in **bytes**, and Ghostty 1.4
+renamed it to `scrollback-limit-bytes` precisely because the units were
+ambiguous. Set to `10000` as though it were a line count, it produced a 10 KB
+scrollback buffer against a 50 MB default — wrong by more than three orders of
+magnitude, while reading as entirely plausible. The comment justifying it was
+also wrong: it claimed the limit kept history off disk, but Ghostty never writes
+scrollback to disk. The config now uses `scrollback-limit-lines`, and
+`tests/placement-policy.sh` rejects the deprecated bare key.
+
 The general lesson, and the reason these are in a decision record: a
 misconfiguration that still produces working behaviour will not be noticed by
-use, so it needs an assertion. A comment describing intent is not a control.
+use, so it needs an assertion. A comment describing intent is not a control — and
+a comment can be confidently wrong, which is worse than no comment, because it
+stops the next reader checking.
+
+Where upstream provides a resolver, prefer it over reading the file:
+`ghostty +show-config`, `ssh -G <host>`, `starship explain` and
+`script/macos-defaults --verify` all report effective values after parsing,
+precedence and compatibility renames. Every defect in this record would have been
+visible in one of those outputs.
