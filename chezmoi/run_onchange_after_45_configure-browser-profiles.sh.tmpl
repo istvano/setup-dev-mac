@@ -9,5 +9,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 # browser-profile: {{ output "shasum" "-a" "256" (joinPath $repo "script/browser-profile") | trim }}
-{{ joinPath $repo "script/browser-profile" | quote }} ensure-defaults
+# Reported, not fatal, for the same reason as the hooks before it.
+{{ joinPath $repo "script/browser-profile" | quote }} ensure-defaults ||
+  echo "[WARN] Browser profile roots could not be created." >&2
 {{- end }}

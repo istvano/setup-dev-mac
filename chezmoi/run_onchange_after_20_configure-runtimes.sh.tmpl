@@ -7,7 +7,9 @@ set -Eeuo pipefail
 # mise provisions every declared runtime, including Rust: it drives rustup and
 # installs rustup itself when absent, so no separate toolchain fix-up is needed.
 if command -v mise >/dev/null 2>&1; then
-  mise install
+  # Reported, not fatal: a single unavailable runtime version must not abort the
+  # apply hooks that follow. ./script/verify still surfaces the drift.
+  mise install || echo "[WARN] mise could not install every declared runtime." >&2
 else
   echo "[WARN] mise is not installed; skipping runtime installation." >&2
 fi

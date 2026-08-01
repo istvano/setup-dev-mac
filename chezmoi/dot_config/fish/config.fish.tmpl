@@ -40,6 +40,12 @@ for __brew in /opt/homebrew/bin/brew /usr/local/bin/brew
     end
 end
 set -e __brew
+# Rancher Desktop's shims, for the reasons given in dot_zshrc.tmpl: Rancher's own
+# "rcfiles" strategy would edit a chezmoi-managed file. -a appends, so the
+# declared Homebrew kubectl, helm and docker-compose win over Rancher's copies.
+# No existence guard is needed — fish_add_path skips a directory that is absent.
+fish_add_path -ga $HOME/.rd/bin
+
 # Rust comes from mise, which shims cargo and rustc; no Homebrew keg on PATH.
 
 # --- Completion --------------------------------------------------------------

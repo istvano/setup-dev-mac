@@ -17,6 +17,19 @@ for __brew in /opt/homebrew/bin/brew /usr/local/bin/brew; do
   fi
 done
 unset __brew
+# Rancher Desktop's shims (docker, nerdctl, rdctl), added here rather than by
+# Rancher itself: its "rcfiles" strategy appends an export block to this file,
+# which chezmoi then sees as an external modification on every apply.
+# run_onchange_after_25 sets the strategy to manual so this stays the only
+# manager of PATH.
+#
+# APPENDED, not prepended. ~/.rd/bin also carries kubectl, helm and
+# docker-compose, and the declared Homebrew versions should win over whatever
+# Rancher happens to bundle (ADR-022). Rancher's own tools are still found.
+if [[ -d "$HOME/.rd/bin" ]]; then
+  [[ ":$PATH:" == *":$HOME/.rd/bin:"* ]] || export PATH="$PATH:$HOME/.rd/bin"
+fi
+
 # Rust comes from mise, which shims cargo and rustc; no Homebrew keg on PATH.
 
 # --- Completion --------------------------------------------------------------

@@ -141,6 +141,41 @@ for CONFIG in "${CONFIGS[@]}"; do
   done
 done
 
+# --- No apply hook may abort the ones after it.
+#
+# chezmoi runs scripts in order and stops at the first non-zero exit, so a hook
+# that fails takes every later hook with it. Seen three times on real hardware:
+# brew bundle failing cost every dotfile; rdctl returning 500 cost the VS Code
+# extensions, the macOS defaults, the browser profiles and the reminder.
+#
+# These hooks CONFIGURE things. Failing to configure one is worth reporting, not
+# worth abandoning the rest of the configuration — ./script/verify and
+# script/macos-defaults --verify are what report the resulting drift.
+#
+# Matched on the last executable line, which is the one whose status chezmoi sees.
+for hook in "$ROOT"/chezmoi/run_*_after_*.sh.tmpl; do
+  name="$(basename "$hook")"
+  # 30 reports and 90 prints a reminder; both end in a plain command that cannot
+  # meaningfully fail, and 15 exits 0 on every branch.
+  case "$name" in
+    *_30_* | *_90_* | *_15_*) continue ;;
+  esac
+  last="$(grep -vE '^\s*#|^\s*$|^\{\{-? ?end \}\}$' "$hook" | tail -n 1)"
+  # Anchored regexes, not globs. `*fi*` matched "browser-profile" and passed a
+  # genuinely unguarded hook — the test looked like it worked and did not.
+  if [[ "$last" =~ \|\|[[:space:]]*echo ]] ||
+    [[ "$last" =~ ^[[:space:]]*fi$ ]] ||
+    [[ "$last" =~ ^[[:space:]]*exit[[:space:]]+0$ ]] ||
+    [[ "$last" =~ \>\&2$ ]]; then
+    continue
+  fi
+  echo "$name ends in an unguarded command:" >&2
+  echo "  $last" >&2
+  echo 'A non-zero exit here aborts every later apply hook. Report the' >&2
+  echo 'failure and continue instead.' >&2
+  exit 1
+done
+
 # --- A failed package install must not abort the whole apply.
 #
 # run_onchange_before_10 runs BEFORE any file is written, so a non-zero exit

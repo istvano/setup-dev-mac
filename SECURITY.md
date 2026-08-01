@@ -67,6 +67,13 @@ as you would a package, not as a configuration value:
 No secrets belong in this repository. Use short-lived cloud sessions, hardware
 security keys, password-manager references and SOPS/age-encrypted project files.
 
+## Work that stays manual
+
+`docs/MANUAL-SECURITY.md` lists what this repository deliberately does not do for
+you, and why: FileVault and its recovery key, remote services, hardware keys, TCC
+permissions, browser sync, Touch ID for sudo, backup restore drills and the
+outbound firewall. Each entry says how to verify it rather than only what to do.
+
 ## Recorded terminal sessions
 
 `script` captures everything that reaches the terminal, including prompts that

@@ -69,12 +69,21 @@ visual-studio-code cask in the dev profile installs it as \$(brew --prefix)/bin/
 # `ms-vscode.y` order differently than comm expects. comm then warns on stderr but
 # still prints a result — and the result was wrong in both directions at once,
 # listing the same extension as missing AND undeclared.
+#
+# Both sides are lowercased, because the two authorities disagree. The
+# marketplace publishes `golang.Go`; `code --list-extensions` reports
+# `golang.go`. Comparing them as written reported a correctly installed extension
+# as missing forever, and no amount of editing the declared file could fix it —
+# whichever casing was chosen, one of the two checks would object. Extension ids
+# are case-insensitive to `code --install-extension`, so they are compared that
+# way here. Versions are digits and dots, so lowercasing the whole line is safe.
 installed_list() {
-  code --list-extensions --show-versions 2>/dev/null | LC_ALL=C sort
+  code --list-extensions --show-versions 2>/dev/null |
+    tr '[:upper:]' '[:lower:]' | LC_ALL=C sort
 }
 
 declared_list() {
-  read_declared | LC_ALL=C sort
+  read_declared | tr '[:upper:]' '[:lower:]' | LC_ALL=C sort
 }
 
 # VS Code updates extensions on its own by default, which would silently move

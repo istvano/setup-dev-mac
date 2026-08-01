@@ -1056,3 +1056,72 @@ directory is the privileged, hard-to-reverse operation `AGENTS.md` keeps manual,
 and who should own a directory under `/usr/local` is a judgement about the
 machine rather than something a bootstrap may assume. The error names the exact
 command, which is the same one Homebrew itself suggests.
+
+## ADR-035: An apply hook reports its failure; it does not abort the ones after it
+
+chezmoi runs scripts in order and stops at the first non-zero exit. Every apply
+hook was therefore a single point of failure for every hook after it, and the
+first real install demonstrated this three times.
+
+**`brew bundle` exiting non-zero cost every dotfile.** Nine formulae have no
+bottle on macOS 13 and their source builds fail, so the package hook — a
+`run_before` script — failed, and chezmoi abandoned the apply before writing a
+single file. The machine ended with 195 packages installed and no `.zshrc`, no
+`.gitconfig`, no terminal configuration: the least useful of the available
+outcomes, caused by packages nobody had asked to be essential.
+
+**`rdctl` returning 500 cost the four hooks after it.** Rancher Desktop answered
+`list-settings` while still starting up and then rejected the write. The hook
+already handled "rdctl is not there" but not "rdctl is there and refused", so the
+VS Code extensions, the macOS defaults, the browser profiles and the security
+reminder were all skipped by a container-runtime preference.
+
+The rule these produce: **an apply hook configures something, and failing to
+configure one thing is worth reporting rather than abandoning everything else.**
+Nothing is swallowed — `./script/verify` fails on `brew bundle check` until the
+packages are resolved, and `script/macos-defaults --verify` reports defaults that
+did not take. The drift is still caught; it is caught by the verification step,
+which can report all of it, instead of by an apply that stops at the first
+problem and hides the rest.
+
+`run_once_after_15`, `run_onchange_after_30` and `run_once_after_90` are exempt:
+they report or print and cannot meaningfully fail.
+
+### Only one thing may manage PATH
+
+Found in the same install. Rancher Desktop defaults to a `rcfiles` path
+management strategy, which appends this to `~/.zshrc`:
+
+```
+### MANAGED BY RANCHER DESKTOP START (DO NOT EDIT)
+export PATH="/Users/istvano/.rd/bin:$PATH"
+### MANAGED BY RANCHER DESKTOP END (DO NOT EDIT)
+```
+
+That file is chezmoi's. So every apply reported `.zshrc` as modified outside
+chezmoi's control and prompted to overwrite; overwriting removed the block,
+Rancher re-added it on next start, and the prompt returned forever. Two managers,
+one file, no resolution — and the injected line carries an absolute home path,
+which is the kind of value this repository keeps out of configuration.
+
+`run_onchange_after_25` now also sets
+`--application.path-management-strategy=manual`, and both shell configurations
+add `~/.rd/bin` themselves.
+
+They **append** it rather than prepend. `~/.rd/bin` also contains `kubectl`,
+`helm` and `docker-compose`, and the versions this repository declares through
+Homebrew should win over whatever Rancher happens to bundle (ADR-022). Rancher's
+own `docker`, `nerdctl` and `rdctl` are still found, because nothing else
+provides them.
+
+### The test for this was wrong in a way that looked right
+
+The first version matched the hook's last line against globs including `*fi*`,
+intending "ends in a closing `fi`". `browser-profile` contains the letters `fi`,
+so an unguarded hook matched and passed. The check reported OK on a file that had
+just been broken deliberately.
+
+It now uses anchored regular expressions, and every guarded hook was unguarded in
+turn to confirm each one is individually rejected. A test that has never been
+seen to fail has not been shown to work — which is the same argument ADR-030
+makes about configuration, applied to the tests themselves.

@@ -1,8 +1,25 @@
 {{- if eq .chezmoi.os "darwin" -}}
+{{- /* .chezmoiroot points chezmoi at <repo>/chezmoi, so repository paths go one
+       level above .chezmoi.sourceDir. */ -}}
+{{- $repo := dir .chezmoi.sourceDir -}}
 #!/usr/bin/env bash
 set -Eeuo pipefail
-cat <<'EOF'
-Manual security work remains: FileVault, offline recovery key, remote service review,
-hardware security keys, privacy permissions, BetterDisplay permissions and browser isolation.
+
+# Points at the checklist rather than reciting it.
+#
+# The previous version listed seven topics in two lines, which named the work
+# without saying what any of it was, why it was not automated, or how to tell
+# whether it had been done. A list of nouns is not a task list.
+cat <<EOF
+Manual security work remains — the parts that need a decision, a physical
+action, or a consent dialog no script may click:
+
+  {{ joinPath $repo "docs/MANUAL-SECURITY.md" }}
+
+Ten items, each with what to do, why it is not automated, and how to verify it.
+Read it and apply what fits; skipping an item is a valid choice once it is a
+chosen one.
+
+  ./script/hardening-check    reports which are already done
 EOF
 {{- end }}

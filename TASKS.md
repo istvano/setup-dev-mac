@@ -70,6 +70,15 @@ The workstation is being built on an Intel macOS 13 VM until the M5 Max arrives
       now catches it in bootstrap and in the apply hook (ADR-034). Fix with
       `sudo chown -R "$(id -un)" /usr/local/share/man/man8`, then
       `./script/setup`.
+- [x] Second install: 195 packages (161 formulae, 34 casks). Nine formulae have
+      no macOS 13 x86_64 bottle and their source builds fail — `eza`, `yq`,
+      `opencode`, `shellcheck`, `actionlint`, `hadolint`, `pandoc`,
+      `mcp-inspector`, `argocd`. An OS-version ceiling, not a repository fault;
+      re-check them on the M5. `shellcheck` and `actionlint` missing means
+      `REQUIRE_LINTERS=1` cannot fully pass on this VM.
+- [ ] Re-apply after ADR-035 and confirm hooks 30/35/40/45/90 now run: VS Code
+      extensions installed, browser profile roots created, security reminder
+      printed. They were all skipped when hook 25 aborted the apply.
 - [ ] Install with all profiles EXCEPT `local-llm`: `lm-studio` declares
       `arch: arm64` and is the only one of 35 casks that cannot install on
       Intel. The other 34 have no arch or macOS constraint that macOS 13 fails.

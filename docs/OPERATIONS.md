@@ -76,6 +76,9 @@ chezmoi diff
 ./script/hardening-check
 ```
 
+`docs/MANUAL-SECURITY.md` covers the work that stays manual, with the reason and
+a verification step for each item.
+
 Also verify manually:
 
 - Rancher Desktop uses Moby and leaves Kubernetes disabled.

@@ -21,7 +21,22 @@ find_rdctl() {
 for _ in $(seq 1 60); do
   RDCTL="$(find_rdctl || true)"
   if [[ -n "$RDCTL" ]] && "$RDCTL" list-settings >/dev/null 2>&1; then
-    "$RDCTL" set --container-engine.name=moby --kubernetes-enabled=false
+    # Answering `list-settings` does not mean the API will accept a write:
+    # Rancher Desktop returned 500 to this `set` while still starting up, and an
+    # unguarded failure here aborted every remaining apply hook.
+    # path-management-strategy=manual matters as much as the engine choice.
+    # The default, "rcfiles", makes Rancher Desktop append an export block to
+    # ~/.zshrc and friends — files chezmoi owns. chezmoi then reports the target
+    # as modified outside its control on every apply, and prompts to overwrite;
+    # overwriting removes the block, Rancher re-adds it on next start, forever.
+    # The shell configurations add ~/.rd/bin themselves instead.
+    if "$RDCTL" set --container-engine.name=moby --kubernetes-enabled=false \
+      --application.path-management-strategy=manual; then
+      exit 0
+    fi
+    echo "[WARN] rdctl rejected the settings change; Rancher Desktop may still be" >&2
+    echo "       starting. Set Moby/Docker and disable Kubernetes in Preferences," >&2
+    echo "       or re-run ./script/setup once it is up." >&2
     exit 0
   fi
   sleep 2

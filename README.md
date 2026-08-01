@@ -319,6 +319,16 @@ repository root:
 codex
 ```
 
+## Manual security work
+
+Some of the workstation cannot be automated: FileVault's recovery key has to
+leave the machine, TCC consent dialogs exist precisely so no script may click
+them, and disabling a remote service you are connected over would strand you.
+
+[docs/MANUAL-SECURITY.md](docs/MANUAL-SECURITY.md) is the checklist — ten items,
+each with what to do, why it is not automated, and how to verify it. The last
+apply hook points at it, and `./script/hardening-check` reports which are done.
+
 ## Trust model
 
 Read every selected profile and every apply script before use. The Homebrew
