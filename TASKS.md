@@ -7,9 +7,24 @@ and hardening procedures are documented in `docs/OPERATIONS.md`.
 
 Linux CI cannot prove any of these. Record the results after the first install.
 
-- [ ] Run `./script/macos-defaults --verify` and record every key this macOS
-      version silently ignores. That list is version-specific and cannot be
-      predicted; it belongs here once observed.
+- [x] `./script/macos-defaults apply` then `--verify` on macOS 13.7.8 (Intel):
+      **no key was found to be ignored.** All 53 declared settings are in effect.
+
+      The two apparent findings were both faults in the verifier, not in macOS,
+      and both were "cannot inspect" reported as "not applied" — the failure
+      ADR-016 exists to prevent:
+
+      - `read_setting` used `sudo defaults read` for system scope. Reading
+        `/Library/Preferences` needs no privilege; requiring it made four
+        SoftwareUpdate keys unreadable wherever sudo could not prompt, and each
+        was reported as unset.
+      - `action_firewall_logging_verify` matched `enabled`, but macOS answers
+        `Log mode is on`. A correctly applied setting reported as drifted
+        forever, and disagreed with `script/hardening-check`, which matched
+        `enabled|on` and passed the same machine.
+
+      Re-check on the M5: the answer is version-specific, and a newer macOS is
+      the more likely one to have dropped a key.
 - [ ] Confirm `brew bundle check` passes for `kubernetes-cli`, the one
       corrected token still enabled. The `mitmproxy` and `wireshark-app`
       corrections are commented out in `profiles/security.Brewfile`; if they are

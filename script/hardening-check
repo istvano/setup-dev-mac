@@ -68,14 +68,21 @@ check 'Firewall stealth mode' 'enabled|on' \
 check 'Firewall logging' 'enabled|on' \
   /usr/libexec/ApplicationFirewall/socketfilterfw --getloggingmode
 
-if remote_login="$(systemsetup -getremotelogin 2>/dev/null)"; then
-  if grep -qi 'Off' <<<"$remote_login"; then
-    pass "$remote_login"
-  else
-    fail "$remote_login"
-  fi
+# systemsetup refuses without administrator rights by printing to STDOUT and
+# exiting 0, so the exit status cannot be used to detect the refusal. The `else`
+# branch here never ran: the refusal text landed in the variable, failed the
+# 'Off' match, and was reported as the name of a failed check —
+#   [FAIL] You need administrator access to run this tool... exiting!
+# Worse than the noise, the real state was never inspected. Remote Login was in
+# fact on, which is exactly the thing this check exists to notice.
+remote_login="$(systemsetup -getremotelogin 2>/dev/null || true)"
+if [[ -z "$remote_login" || "$remote_login" == *'administrator access'* ]]; then
+  review 'Remote Login: needs administrator rights to inspect.
+  sudo systemsetup -getremotelogin'
+elif grep -qi 'Off' <<<"$remote_login"; then
+  pass "$remote_login"
 else
-  review 'Remote Login: requires sudo or Full Disk Access to inspect.'
+  fail "$remote_login"
 fi
 
 echo

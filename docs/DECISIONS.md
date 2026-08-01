@@ -1114,6 +1114,53 @@ Homebrew should win over whatever Rancher happens to bundle (ADR-022). Rancher's
 own `docker`, `nerdctl` and `rdctl` are still found, because nothing else
 provides them.
 
+### An audit that could not see what it was auditing
+
+`script/hardening-check` reported this among its failures:
+
+```
+[FAIL] You need administrator access to run this tool... exiting!
+```
+
+`systemsetup -getremotelogin` refuses without administrator rights by printing to
+**stdout and exiting 0**. The check tested the exit status, so its `review`
+branch for "cannot inspect" never ran: the refusal text landed in the variable,
+failed the match for `Off`, and became the name of a failed check.
+
+The noise was the smaller problem. Remote Login was **on** — the SSH session
+doing the testing proved it — and the check never saw it. An audit that reports a
+permission error as a finding is not merely untidy; it is silently not auditing,
+which is worse than having no check at all because it looks like one.
+
+It now matches the refusal text explicitly, and was exercised against all four
+outcomes: refusal, `On`, `Off`, and the command being absent.
+
+The general point, and the reason it belongs next to the others here: a command's
+exit status is only usable as a signal once you have checked that it actually
+sets one.
+
+### The same fault, twice more, in the verifier built to prevent it
+
+`script/macos-defaults --verify` exists because macOS accepts a `defaults write`
+for a key it no longer honours (ADR-016). Its first run on real hardware reported
+four unset keys and one mismatch. All five were faults in the verifier.
+
+`read_setting` used `sudo defaults read` for system-scope keys. Reading
+`/Library/Preferences` requires no privilege — only writing does — so the sudo
+was unnecessary, and wherever sudo could not prompt the read returned empty and
+was reported as **unset**: precisely the signal that means "macOS ignored this".
+
+`action_firewall_logging_verify` matched the word `enabled`, while macOS answers
+`Log mode is on`. The setting was applied correctly and reported as drifted
+every time. `script/hardening-check` matched `enabled|on` and passed the same
+machine, so two checks of one setting contradicted each other and neither was
+obviously wrong.
+
+Both are the ADR-030 pattern in the tooling rather than the configuration: a
+check that cannot distinguish "not applied" from "not readable" reports
+confidently and means nothing. After the fix, `--verify` reports every declared
+setting in effect on macOS 13.7.8, with no sudo, over SSH.
+
 ### The test for this was wrong in a way that looked right
 
 The first version matched the hook's last line against globs including `*fi*`,

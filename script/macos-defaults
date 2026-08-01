@@ -170,7 +170,13 @@ read_setting() {
   local scope="$1" domain="$2" key="$3"
   case "$scope" in
     host) defaults -currentHost read "$domain" "$key" 2>/dev/null ;;
-    system) sudo defaults read "$domain" "$key" 2>/dev/null ;;
+    # No sudo. Reading /Library/Preferences needs no privilege — only writing
+    # does — and requiring it made every system-scope value unreadable wherever
+    # sudo could not prompt. The empty result was then reported as "unset",
+    # which is indistinguishable from the thing --verify exists to detect: a key
+    # this macOS version silently ignored. A check that cannot tell "not applied"
+    # from "not readable" is not a check.
+    system) defaults read "$domain" "$key" 2>/dev/null ;;
     *) defaults read "$domain" "$key" 2>/dev/null ;;
   esac
 }
@@ -221,8 +227,12 @@ action_firewall_logging_apply() {
   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setloggingmode on >/dev/null
 }
 action_firewall_logging_verify() {
+  # macOS answers "Log mode is on", not "enabled". Matching only the latter made
+  # a correctly applied setting report as drifted forever, and disagreed with
+  # script/hardening-check, which matches 'enabled|on' and passed the same
+  # machine. Two checks of one setting must not be able to disagree.
   /usr/libexec/ApplicationFirewall/socketfilterfw --getloggingmode 2>/dev/null |
-    grep -qi 'enabled'
+    grep -qiE 'enabled|on'
 }
 
 action_guest_account_describe() { printf 'sudo sysadminctl -guestAccount off'; }
