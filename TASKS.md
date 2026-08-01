@@ -37,6 +37,13 @@ Linux CI cannot prove any of these. Record the results after the first install.
 - [ ] Prove the lab boundary: `limactl start`, then `ansible -i lab, -m ping all`.
       The isolated-VM domain was documented but unimplemented until ADR-027, so
       it has never actually been exercised.
+- [ ] **Ghostty cannot be tested on the Intel VM at all.** It is GPU-accelerated
+      and needs Metal; `system_profiler SPDisplaysDataType` reports 7 MB VRAM,
+      `No Kext Loaded` and zero mentions of Metal, so it fails with "terminal
+      failed to initialize" regardless of configuration. The config itself is
+      valid — `ghostty +validate-config` exits 0. Everything about Ghostty waits
+      for the M5: rendering, the theme, the font, shell integration, ssh-terminfo
+      and the fish `command` line.
 - [ ] If fish is selected, confirm `ghostty +show-config | grep -E
       'shell-integration|^command'` reports `fish` and the `--login` argument.
       Ghostty is the only thing that launches fish, so a rejected `command` line

@@ -142,6 +142,25 @@ assert_match '^shell-integration = \{\{ \.shell \}\}$' "$ghostty"
 # tests/chezmoi-templates.sh checks what that actually renders to.
 assert_match '^command = \{\{ template "brew-prefix" \. \}\}/bin/fish --login$' "$ghostty"
 
+# Ghostty theme names use its own spelling, which is not this repository's.
+#
+# `ghostty +list-themes` prints "Catppuccin Mocha" — capitalised, space
+# separated. Written lowercase-hyphenated, Ghostty refuses to start. This asserts
+# the shape only; the machine-specific check is `ghostty +validate-config`, which
+# needs Ghostty installed and is in docs/TESTING.md.
+theme_line="$(grep -m1 '^theme = ' "$ghostty" || true)"
+[[ -n "$theme_line" ]] || {
+  echo 'ghostty/config.tmpl sets no theme.' >&2
+  exit 1
+}
+if [[ "$theme_line" =~ [a-z]+-[a-z]+ ]]; then
+  echo "ghostty/config.tmpl uses a hyphenated theme name:" >&2
+  echo "  $theme_line" >&2
+  echo 'Ghostty names themes as +list-themes prints them, e.g. "Catppuccin Mocha".' >&2
+  echo 'A name it cannot resolve stops Ghostty starting entirely.' >&2
+  exit 1
+fi
+
 # Nothing may assume the Apple Silicon prefix as the only one.
 #
 # Hardcoding /opt/homebrew made every shell activation and apply hook a silent
@@ -174,7 +193,9 @@ done < <(grep -rl '/opt/homebrew' "$ROOT/script" "$ROOT/chezmoi" "$ROOT/bootstra
 # "MesloLGS Nerd Font" is font-meslo-lg-nerd-font — so any normalisation clever
 # enough to pair them is also wrong often enough to fail on a valid change.
 # Changing the font must fail both lines and be re-paired deliberately.
-assert_match '^font-family = JetBrainsMono Nerd Font$' "$ghostty"
+# The trailing "Mono" is required: the cask ships only monospaced variants, and
+# "JetBrainsMono Nerd Font" resolves to nothing. Ghostty then falls back silently.
+assert_match '^font-family = JetBrainsMono Nerd Font Mono$' "$ghostty"
 assert_match '^cask "font-jetbrains-mono-nerd-font"' "$ROOT/profiles/core.Brewfile"
 
 # The symbols-only font is the reason the fonts profile is worth having: it is

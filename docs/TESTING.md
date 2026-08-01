@@ -168,13 +168,20 @@ cannot be found.
 an app and no binary.
 
 ```bash
-ghostty +show-config | grep -E 'scrollback|shell-integration|^command|font-family'
+ghostty +validate-config          # DO THIS FIRST — the only real check
+ghostty +show-config | grep -E 'scrollback|shell-integration|^command|font-family|theme'
+ghostty +list-themes | grep -i catppuccin
 ghostty +list-fonts | grep -i nerd
 ```
 
-`+show-config` prints effective values after parsing and compatibility renames,
-so it is the only thing that proves the configuration is what it looks like
-(ADR-030). A config error notification on first launch means a key was rejected.
+**`+validate-config` is the validator; `+show-config` is not.** `+show-config`
+prints values after parsing and compatibility renames, which catches a renamed or
+mistyped *key* — but it does not resolve a theme, so it happily echoed a theme
+name that stopped Ghostty starting. `+validate-config` resolves it and reports
+`theme "…" not found`.
+
+Theme names are Ghostty's own spelling: `+list-themes` prints `Catppuccin Mocha`,
+capitalised and space-separated, not `catppuccin-mocha`.
 
 ## VS Code extensions
 

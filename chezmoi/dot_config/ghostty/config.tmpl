@@ -1,10 +1,26 @@
 # Ghostty terminal configuration.
 # Reference: https://ghostty.org/docs/config
 
-font-family = JetBrainsMono Nerd Font
+# The family is "JetBrainsMono Nerd Font Mono", with the trailing Mono.
+# font-jetbrains-mono-nerd-font installs only the monospaced variants, and
+# `ghostty +list-fonts` exposes exactly four JetBrains families:
+#   JetBrainsMono NFM, JetBrainsMono Nerd Font Mono,
+#   JetBrainsMonoNL NFM, JetBrainsMonoNL Nerd Font Mono
+# "JetBrainsMono Nerd Font" is none of them. Unlike a bad theme, which stops
+# Ghostty starting, an unresolvable font falls back silently — the terminal opens
+# in a default face and nothing says why. NL means no ligatures.
+font-family = JetBrainsMono Nerd Font Mono
 font-size = 14
 
-theme = dark:catppuccin-mocha,light:catppuccin-latte
+# Theme names are Ghostty's own, exactly as `ghostty +list-themes` prints them:
+# capitalised, space-separated. They were written here in the lowercase-hyphenated
+# style used elsewhere, and Ghostty refused to start at all — the one failure in
+# this file that is loud rather than silent.
+#
+# `+show-config` does NOT catch this. It echoes the parsed value without
+# resolving the theme, and reported the broken spelling as configured. Only
+# `ghostty +validate-config` resolves it.
+theme = dark:Catppuccin Mocha,light:Catppuccin Latte
 window-padding-x = 8
 window-padding-y = 6
 window-save-state = never

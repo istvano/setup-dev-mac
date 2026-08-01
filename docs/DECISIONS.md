@@ -656,6 +656,29 @@ Where upstream provides a resolver, prefer it over reading the file:
 precedence and compatibility renames. Every defect in this record would have been
 visible in one of those outputs.
 
+**But check what the resolver actually resolves.** `ghostty +show-config` reports
+values after parsing, and that is all: it does not load a theme. The theme was
+declared as `catppuccin-mocha`, in this repository's own naming style rather than
+Ghostty's `Catppuccin Mocha`, and `+show-config` echoed it back without
+complaint while Ghostty refused to start at all. `ghostty +validate-config`
+resolves it and says `theme "…" not found`.
+
+A resolver answers one question. Trusting it for a different one is how a check
+comes to be believed without being right — the same shape as the checks in
+ADR-033 that could not distinguish "not applied" from "not readable".
+
+The font in the same file was wrong in the quieter way. `font-family` was
+`JetBrainsMono Nerd Font`, and no such family exists: the cask installs only
+monospaced variants, and `ghostty +list-fonts` exposes `JetBrainsMono Nerd Font
+Mono`, `JetBrainsMono NFM` and their no-ligature counterparts. A bad theme stops
+Ghostty starting; a bad font falls back silently to a default face, so the
+terminal opens looking almost right. `+validate-config` passes either way.
+
+Two names in one file, both written in this repository's naming style rather than
+the one the tool uses, one loud and one silent. The loud one was found in
+minutes. The silent one was found only because the loud one forced someone to
+run `+list-fonts`.
+
 ## ADR-031: Offer fish as a mutually exclusive shell fragment, without reassigning the login shell
 
 zsh is the default because macOS ships it, but the interactive shell is a
