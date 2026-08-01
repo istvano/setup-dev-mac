@@ -9,16 +9,23 @@ window-padding-x = 8
 window-padding-y = 6
 window-save-state = never
 
-# A memory bound per terminal surface, in LINES.
+# A memory bound per terminal surface, in BYTES. 50 MB.
 #
-# `scrollback-limit` is measured in bytes and Ghostty 1.4 renamed it to
-# `scrollback-limit-bytes` because the units were ambiguous. The byte limit
-# defaults to 50 MB, so the previous `scrollback-limit = 10000` here meant 10 KB
-# — roughly a hundred lines, not ten thousand. Use the explicit lines key.
+# The units are the whole story. This key counts bytes, and it was once set to
+# `10000` here as though it were a line count: a 10 KB buffer against the 10 MB
+# default, roughly a hundred lines rather than ten thousand.
+#
+# `scrollback-limit-lines` would say what is meant, but it does not exist on the
+# Ghostty this repository installs. Ghostty 1.4 adds it and renames this key to
+# `scrollback-limit-bytes`; `cask "ghostty"` is 1.3.1, which knows neither, and
+# rejects an unknown key with a config error. The byte key survives the 1.4
+# rename through a compatibility alias, so it is the one spelling correct on
+# both.
 #
 # Ghostty never writes scrollback to disk, so this is purely about memory. It is
 # not a privacy control, and an earlier comment here wrongly claimed it was.
-scrollback-limit-lines = 10000
+# tests/placement-policy.sh asserts the value is plausible for its units.
+scrollback-limit = 52428800
 
 copy-on-select = false
 confirm-close-surface = true
@@ -39,9 +46,10 @@ shell-integration = {{ .shell }}
 # macOS installers put themselves on PATH. Without it, fish starts fine and
 # quietly lacks entries zsh has.
 #
-# The absolute path is Homebrew's fixed arm64 prefix, which this repository
-# already requires; `command` is not a shell, so it cannot ask brew --prefix.
-command = /opt/homebrew/bin/fish --login
+# The prefix is resolved at apply time by the brew-prefix template, because
+# `command` is a static string rather than a shell and cannot ask brew --prefix
+# itself. That is /opt/homebrew on Apple Silicon and /usr/local on Intel.
+command = {{ template "brew-prefix" . }}/bin/fish --login
 {{ end }}
 
 # ssh-env and ssh-terminfo both default to off. Ghostty exports

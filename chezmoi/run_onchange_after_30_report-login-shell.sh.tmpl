@@ -18,12 +18,7 @@ SELECTED={{ .shell | quote }}
 # environment, and an unset $USER would make dscl read /Users/ and report nothing.
 ACCOUNT={{ .chezmoi.username | quote }}
 
-# Vendor-generated shell initialisation. Chezmoi run scripts do not inherit an
-# interactive shell's PATH, so Homebrew must be located explicitly or the
-# `command -v` below cannot find a Homebrew-installed shell.
-if [[ -x /opt/homebrew/bin/brew ]]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-fi
+{{ template "brew-shellenv" . }}
 
 # dscl reads the account record. $SHELL only reports the shell that happens to be
 # running this script, which is bash, and would always look like a mismatch.

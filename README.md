@@ -159,6 +159,23 @@ just extensions-verify   # non-zero when the installed set has drifted
 just extensions-diff     # includes what arrives as a pack child
 ```
 
+## Platform
+
+Apple Silicon is the target. Intel macOS is supported as a development platform
+so the configuration can be built and tested before the arm64 machine exists
+(ADR-034); the Homebrew prefix is discovered rather than assumed, and
+`require_supported_mac` warns rather than passing silently, because the two are
+not equivalent.
+
+What the current machine cannot install is reported rather than remembered:
+
+```bash
+just gaps          # or ./script/platform-gaps
+```
+
+`./bootstrap plan` runs it too, so the gap is visible before an install rather
+than as a `brew bundle` failure partway through one.
+
 ## Interactive shell
 
 zsh is the default. `--shell fish` installs fish instead, and the two are
@@ -269,6 +286,21 @@ Run the validation suite for every change:
 It covers shell syntax and shellcheck, shfmt, actionlint, gitleaks, Brewfile
 rendering, profile-catalogue consistency, chezmoi template execution, YAML,
 placement invariants, render idempotency, browser profiles and agent context.
+
+Nothing here has been validated on macOS by CI, which runs Linux with bash 5
+while macOS ships bash 3.2 (ADR-033). To test on a real Mac, push the working
+tree to it and run there:
+
+```bash
+export MAC_TEST_HOST=user@host MAC_TEST_PORT=22
+./script/sync-to-mac ./script/test
+```
+
+`sync-to-mac` uses rsync rather than a clone, because a test machine may not
+reach the git remote and a clean macOS has no `git` until Xcode Command Line
+Tools are installed. It verifies that `.git` and the executable bits survived the
+transfer — both failures otherwise surface much later as unrelated errors — and
+forwards the remote exit status.
 
 Homebrew renames tokens continuously, so the declared package set is checked
 against upstream separately. This is the only check that needs network access,

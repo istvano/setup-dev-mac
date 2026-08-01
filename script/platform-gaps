@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# Report declared packages that cannot be installed on this machine.
+#
+# The workstation targets Apple Silicon but is developed on Intel until the arm64
+# machine exists (ADR-034). A package that cannot install there is not a problem
+# to work around — it is a gap in what this machine is able to prove, and it
+# should be named at plan time rather than discovered as a `brew bundle` error
+# partway through a long install.
+#
+#   platform-gaps                     report gaps across every profile
+#   platform-gaps --profiles LIST     report gaps in that selection only
+#   platform-gaps --strict            non-zero when the selection has a gap
+#
+# Offline by design: the constraint is declared next to the package as an
+# `arm64-only` marker in its purpose comment, and script/check-tokens verifies
+# those markers against Homebrew's own metadata on a schedule.
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+# shellcheck source=script/lib/profiles.sh
+source "$ROOT/script/lib/profiles.sh"
+
+PROFILES=""
+STRICT=false
+LIST_ONLY=false
+
+usage() {
+  cat <<'EOF'
+Usage: script/platform-gaps [--profiles LIST] [--strict]
+
+  --profiles LIST       restrict the report to these profiles (default: all)
+  --strict              exit non-zero when the selection contains a gap
+  --list-gap-profiles   print just the profiles to exclude, comma-separated,
+                        for scripts. Empty when this machine can install
+                        everything.
+
+Reports packages this machine's architecture cannot install, and names the
+profiles to leave out so the rest can still be installed and tested.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profiles)
+      PROFILES="$2"
+      shift 2
+      ;;
+    --strict)
+      STRICT=true
+      shift
+      ;;
+    --list-gap-profiles)
+      LIST_ONLY=true
+      shift
+      ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    *) die "Unknown option: $1" ;;
+  esac
+done
+
+# Fragments to inspect. An explicit selection is validated so a typo is reported
+# here rather than silently narrowing the report to nothing.
+fragments=()
+if [[ -n "$PROFILES" ]]; then
+  validate_profiles "$PROFILES"
+  IFS=',' read -r -a selected <<<"$PROFILES"
+  for profile in "${selected[@]}"; do
+    fragments+=("$ROOT/profiles/$profile.Brewfile")
+  done
+else
+  for fragment in "$ROOT"/profiles/*.Brewfile; do
+    fragments+=("$fragment")
+  done
+fi
+
+# `arm64-only` at the start of the purpose comment. Anchored so the phrase
+# appearing in ordinary prose elsewhere in a fragment cannot be mistaken for a
+# declaration.
+MARKER='^[[:space:]]*(brew|cask) "[^"]+"[[:space:]]+#[[:space:]]*arm64-only\b'
+
+arch="$(uname -m)"
+gap_lines=()
+gap_profiles=""
+
+for fragment in "${fragments[@]}"; do
+  [[ -f "$fragment" ]] || continue
+  profile="$(basename "$fragment" .Brewfile)"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    token="$(sed -E 's/^[[:space:]]*(brew|cask) "([^"]+)".*/\2/' <<<"$line")"
+    kind="$(sed -E 's/^[[:space:]]*(brew|cask) .*/\1/' <<<"$line")"
+    gap_lines+=("$(printf '%-20s %-6s %s' "$profile" "$kind" "$token")")
+    case ",$gap_profiles," in
+      *",$profile,"*) ;;
+      *) gap_profiles="${gap_profiles:+$gap_profiles,}$profile" ;;
+    esac
+  done < <(grep -E "$MARKER" "$fragment" || true)
+done
+
+if [[ "$LIST_ONLY" == true ]]; then
+  # Only architectures that cannot install the package exclude it. On Apple
+  # Silicon the answer is always empty, which is the point.
+  [[ "$arch" == "arm64" ]] || printf '%s\n' "$gap_profiles"
+  exit 0
+fi
+
+if [[ "$arch" == "arm64" ]]; then
+  success "Apple Silicon: every declared package can be installed here."
+  if ((${#gap_lines[@]} > 0)); then
+    log "${#gap_lines[@]} package(s) are arm64-only and are testable only here:"
+    printf '  %s\n' "${gap_lines[@]}"
+  fi
+  exit 0
+fi
+
+if ((${#gap_lines[@]} == 0)); then
+  success "No declared package is excluded by this machine's architecture ($arch)."
+  exit 0
+fi
+
+warn "$arch: ${#gap_lines[@]} declared package(s) cannot be installed on this machine."
+printf '  %s\n' "${gap_lines[@]}" >&2
+cat >&2 <<EOF
+
+These are the gap. They stay untested until the Apple Silicon machine is
+available, and TASKS.md tracks them. brew bundle fails on them rather than
+skipping, so install everything else by leaving out: $gap_profiles
+EOF
+
+[[ "$STRICT" == true ]] && exit 1
+exit 0

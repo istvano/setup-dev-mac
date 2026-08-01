@@ -81,12 +81,53 @@ compgen -G "$ROOT/chezmoi/dot_local/bin/*" >/dev/null || {
   exit 1
 }
 
-# Ghostty's scrollback-limit is measured in BYTES and was renamed to
-# scrollback-limit-bytes in 1.4. The bare key set to a line count silently gave a
-# ~10 KB buffer against a 50 MB default, so require the explicit lines key.
+# Ghostty's scrollback limit: the hazard is units, not spelling.
+#
+# `scrollback-limit` (and its 1.4 name `scrollback-limit-bytes`) counts BYTES.
+# `scrollback-limit-lines` counts lines and exists only from 1.4, while the cask
+# installs 1.3.1 and rejects it as unknown.
+#
+# So the assertion is on magnitude, not on which key is used. The real defect was
+# `scrollback-limit = 10000` — a value plausible as a line count, catastrophic as
+# a byte count — and naming a key cannot catch that. This also stays correct once
+# a 1.4 upgrade makes the lines key available.
 ghostty="$ROOT/chezmoi/dot_config/ghostty/config.tmpl"
-assert_match '^scrollback-limit-lines[[:space:]]*=' "$ghostty"
-refute_match '^scrollback-limit[[:space:]]*=' "$ghostty"
+
+# `|| true` is required: errexit plus pipefail turns a no-match grep into a failed
+# assignment, and "this key is absent" is a legitimate answer here, not an error.
+scrollback_value() {
+  local line
+  line="$(grep -E "^$1[[:space:]]*=" "$ghostty" | head -n 1 || true)"
+  [[ -n "$line" ]] || return 0
+  sed -E 's/.*=[[:space:]]*//' <<<"$line"
+}
+
+# `scrollback-limit(-bytes)?` cannot match `scrollback-limit-lines`: `-lines`
+# does not satisfy the `[[:space:]]*=` that follows.
+sb_bytes="$(scrollback_value 'scrollback-limit(-bytes)?')"
+sb_lines="$(scrollback_value 'scrollback-limit-lines')"
+
+[[ -n "$sb_bytes" || -n "$sb_lines" ]] || {
+  echo 'ghostty/config.tmpl sets no scrollback limit at all.' >&2
+  exit 1
+}
+for value in "$sb_bytes" "$sb_lines"; do
+  [[ -z "$value" || "$value" =~ ^[0-9]+$ ]] || {
+    echo "ghostty/config.tmpl: non-numeric scrollback value: $value" >&2
+    exit 1
+  }
+done
+if [[ -n "$sb_bytes" ]] && ((sb_bytes < 1000000)); then
+  echo "ghostty/config.tmpl: scrollback-limit = $sb_bytes is measured in BYTES," >&2
+  echo "so this is under a megabyte. That is a line count written into a byte" >&2
+  echo "key — the original defect. Use bytes, or scrollback-limit-lines on 1.4+." >&2
+  exit 1
+fi
+if [[ -n "$sb_lines" ]] && ((sb_lines > 1000000)); then
+  echo "ghostty/config.tmpl: scrollback-limit-lines = $sb_lines is a line count," >&2
+  echo "and this looks like a byte value written into the lines key." >&2
+  exit 1
+fi
 
 # shell-integration must follow the selection. Hardcoding a shell here is the
 # quiet failure: Ghostty falls back to detection, so the terminal still works and
@@ -95,7 +136,30 @@ assert_match '^shell-integration = \{\{ \.shell \}\}$' "$ghostty"
 
 # fish applies /etc/paths and /etc/paths.d only as a login shell, so dropping
 # --login leaves a working terminal whose PATH is quietly missing entries.
-assert_match '^command = /opt/homebrew/bin/fish --login$' "$ghostty"
+#
+# The prefix comes from the brew-prefix template rather than a literal, because
+# Homebrew lives at /opt/homebrew on Apple Silicon and /usr/local on Intel.
+# tests/chezmoi-templates.sh checks what that actually renders to.
+assert_match '^command = \{\{ template "brew-prefix" \. \}\}/bin/fish --login$' "$ghostty"
+
+# Nothing may assume the Apple Silicon prefix as the only one.
+#
+# Hardcoding /opt/homebrew made every shell activation and apply hook a silent
+# no-op on an Intel Mac: the guard simply tested false, so Homebrew was never put
+# on PATH and the failure surfaced later as "command not found" for tools that
+# were in fact installed. Anything naming that path must name /usr/local too.
+while IFS= read -r offender; do
+  file="${offender%%:*}"
+  case "$file" in
+    *lib/common.sh | *docs/* | *.md) continue ;; # prose and the definition itself
+  esac
+  grep -q '/usr/local' "$file" || {
+    echo "$file names /opt/homebrew without /usr/local, so it assumes Apple" >&2
+    echo "Silicon. Homebrew installs to /usr/local on Intel. Use brew_prefix," >&2
+    echo 'the "brew-shellenv" template, or check both paths.' >&2
+    exit 1
+  }
+done < <(grep -rl '/opt/homebrew' "$ROOT/script" "$ROOT/chezmoi" "$ROOT/bootstrap" 2>/dev/null || true)
 
 # Ghostty's font-family must be installed by a fragment that is always selected.
 #
@@ -116,14 +180,54 @@ assert_match '^cask "font-jetbrains-mono-nerd-font"' "$ROOT/profiles/core.Brewfi
 # The symbols-only font is the reason the fonts profile is worth having: it is
 # glyphs alone, so it upgrades any unpatched font by fallback.
 assert_match '^cask "font-symbols-only-nerd-font"' "$ROOT/profiles/fonts.Brewfile"
+
+# `ghostty` has to be on PATH, because the documentation invokes it.
+#
+# The cask ships an app, manpages and completions but NO binary artifact, so
+# `ghostty +show-config` — the resolver ADR-030 tells the reader to trust over the
+# config file — was not a command that existed on macOS. The symlink below makes
+# the documentation true. If it goes, every one of those instructions breaks
+# while the file still reads as correct.
+ghostty_link="$ROOT/chezmoi/dot_local/bin/symlink_ghostty"
+[[ -f "$ghostty_link" ]] || {
+  echo 'chezmoi/dot_local/bin/symlink_ghostty is missing, so ghostty is not on' >&2
+  echo 'PATH and every documented "ghostty +show-config" is a broken command.' >&2
+  exit 1
+}
+assert_match '^/Applications/Ghostty\.app/Contents/MacOS/ghostty$' "$ghostty_link"
 assert_match '^auto_sync = false$' "$ROOT/chezmoi/dot_config/atuin/config.toml"
-python3 - "$ROOT/chezmoi/dot_config/atuin/config.toml" <<'PY'
+# TOML syntax check. tomllib is Python 3.11+, and macOS's Command Line Tools ship
+# 3.9 — so the parser cannot be assumed on the platform this repository targets,
+# even though every CI runner has it. Exit 42 is a sentinel for "no parser here",
+# which has to be distinguished from a real parse failure; treating them alike
+# would let a malformed config pass on any machine without tomllib.
+toml_status=0
+python3 - "$ROOT/chezmoi/dot_config/atuin/config.toml" <<'PY' || toml_status=$?
 import sys
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        raise SystemExit(42)
 
 with open(sys.argv[1], "rb") as config:
     tomllib.load(config)
 PY
+case "$toml_status" in
+  0) ;;
+  42)
+    if [[ "${REQUIRE_LINTERS:-0}" == "1" ]]; then
+      echo 'A TOML parser is required when REQUIRE_LINTERS=1: Python 3.11+ for' >&2
+      echo 'tomllib, or tomli. macOS Command Line Tools ship Python 3.9.' >&2
+      exit 1
+    fi
+    echo '  atuin config.toml: no TOML parser (needs Python 3.11+), check skipped'
+    ;;
+  *) exit "$toml_status" ;;
+esac
 [[ ! -e "$ROOT/containers" ]]
 [[ ! -e "$ROOT/chezmoi/private_dot_config/security-ai-workstation/containers" ]]
 echo 'Placement policy: OK'

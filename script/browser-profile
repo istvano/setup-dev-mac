@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/script/lib/common.sh"
 
 if [[ -z "${BROWSER_PROFILE_ROOT:-}" ]]; then
-  require_macos_arm64
+  require_supported_mac
   BROWSER_PROFILE_ROOT="$HOME/Library/Application Support/security-ai-workstation/browser-profiles"
 fi
 

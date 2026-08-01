@@ -63,7 +63,7 @@ if [[ "$MODE" == "verify" ]]; then
   die "Installed thv does not report the pinned version $VERSION: ${installed:-unknown}"
 fi
 
-require_macos_arm64
+require_supported_mac
 command_exists curl || die "curl is required."
 command_exists shasum || die "shasum is required."
 

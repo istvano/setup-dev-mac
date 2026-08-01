@@ -20,7 +20,7 @@ REQUIRED_DATA_KEYS=(
 )
 
 require_data_keys() {
-  command_exists python3 || return 0
+  python3_available || return 0
   local data missing
   data="$(chezmoi data 2>/dev/null)" || die "chezmoi data failed; is chezmoi initialised?"
   missing="$(python3 -c '
@@ -42,7 +42,26 @@ print(" ".join(key for key in sys.argv[1:] if key not in data))
   die 'Refusing to apply against an incomplete configuration.'
 }
 
+# The diff is paged by default, which is right at a keyboard and wrong everywhere
+# else: under `script`, or any recorded or piped run, the pager takes over the
+# session and there is no obvious way out. chezmoi's own --no-pager prints it
+# straight through instead.
+NO_PAGER=()
+case "${1:-}" in
+  --no-pager)
+    NO_PAGER=(--no-pager)
+    shift
+    ;;
+  --help | -h)
+    echo 'Usage: script/setup [--no-pager]'
+    echo '  --no-pager  print the diff without a pager, for recorded runs'
+    exit 0
+    ;;
+  "") ;;
+  *) die "Unknown option: $1" ;;
+esac
+
 require_data_keys
-chezmoi diff
+chezmoi diff "${NO_PAGER[@]+"${NO_PAGER[@]}"}"
 confirm "Apply chezmoi source state?" || die "Cancelled."
 chezmoi apply --source "$ROOT"

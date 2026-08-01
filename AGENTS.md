@@ -13,7 +13,10 @@ operationally consequential and expected to remain understandable years later.
 These are deliberate defaults, not placeholders:
 
 - Target platform: Apple Silicon macOS, currently an M5 Max MacBook Pro with
-  128 GB unified memory and 4 TB storage.
+  128 GB unified memory and 4 TB storage. Intel macOS is supported as a
+  DEVELOPMENT platform only, so the configuration can be built and tested before
+  the arm64 machine exists (ADR-034). Never hardcode `/opt/homebrew`: use
+  `brew_prefix` or the `brew-shellenv` template.
 - Configuration engine: chezmoi.
 - Host package manager: Homebrew Bundle with composable profile fragments.
 - Runtime managers: mise for general runtimes including Rust, which it manages

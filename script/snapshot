@@ -13,7 +13,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=script/lib/common.sh
 source "$ROOT/script/lib/common.sh"
 
-require_macos_arm64
+require_supported_mac
 command_exists brew || die "brew is required."
 
 STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation/snapshots"

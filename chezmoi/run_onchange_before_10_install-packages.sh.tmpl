@@ -7,15 +7,41 @@ set -Eeuo pipefail
 # Any profile-fragment change invalidates this run_onchange script.
 # profile digest: {{ output (joinPath $repo "script/profile-digest") | trim }}
 
-# Vendor-generated shell initialisation. Chezmoi run scripts do not inherit an
-# interactive shell's PATH, so Homebrew must be located explicitly.
-if [[ -x /opt/homebrew/bin/brew ]]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-fi
+{{ template "brew-shellenv" . }}
 
 SOURCE={{ $repo | quote }}
+
+# Checked here as well as in ./bootstrap, because ./script/setup reaches this hook
+# without going through bootstrap at all. An unwritable directory inside the
+# Homebrew prefix makes `brew bundle` fail EVERY package with the same message —
+# one root-owned /usr/local/share/man/man8 failed 70 of 108 on a real install —
+# so it is worth one cheap check rather than seventy identical errors.
+# shellcheck source=script/lib/common.sh
+source "$SOURCE/script/lib/common.sh"
+require_writable_homebrew
+
 OUTPUT={{ joinPath .chezmoi.homeDir ".config/security-ai-workstation/Brewfile" | quote }}
 "$SOURCE/script/render-brewfile" --profiles {{ join "," .profiles | quote }} --shell {{ .shell | quote }} --runtime {{ .runtime | quote }} --password-manager {{ .passwordManager | quote }} --firewall {{ .firewall | quote }} --output "$OUTPUT"
 export HOMEBREW_BUNDLE_NO_UPGRADE=1
-brew bundle check --file="$OUTPUT" || brew bundle install --file="$OUTPUT" --no-upgrade
+
+# Loud, but NOT fatal — and this one matters more than the others.
+#
+# This is a run_before script, so a non-zero exit aborts the whole apply: no
+# dotfiles, no macOS defaults, no browser profiles, nothing. Observed on macOS 13,
+# where nine formulae have no bottle and their source builds fail: `brew bundle`
+# exited non-zero and the machine ended up with 195 packages and not one
+# configuration file, which is the least useful of all possible outcomes.
+#
+# One unavailable package must not cost the entire configuration. The failure is
+# still reported here, and `./script/verify` fails on `brew bundle check` until it
+# is resolved, so nothing is swallowed — it just no longer takes the dotfiles down
+# with it.
+if ! brew bundle check --file="$OUTPUT"; then
+  if ! brew bundle install --file="$OUTPUT" --no-upgrade; then
+    echo "[WARN] Some declared packages did not install. The apply continues so" >&2
+    echo "       the configuration is still written." >&2
+    echo "       Run ./script/verify to see which, and brew bundle install" >&2
+    echo "       --file=$OUTPUT to retry them." >&2
+  fi
+fi
 {{- end }}

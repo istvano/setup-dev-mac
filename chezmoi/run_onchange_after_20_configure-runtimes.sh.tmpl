@@ -2,11 +2,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Vendor-generated shell initialisation. Chezmoi run scripts do not inherit an
-# interactive shell's PATH, so Homebrew must be located explicitly.
-if [[ -x /opt/homebrew/bin/brew ]]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-fi
+{{ template "brew-shellenv" . }}
 
 # mise provisions every declared runtime, including Rust: it drives rustup and
 # installs rustup itself when absent, so no separate toolchain fix-up is needed.

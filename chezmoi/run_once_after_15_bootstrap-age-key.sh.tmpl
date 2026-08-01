@@ -11,9 +11,7 @@
 # age-plugin-yubikey; this script leaves an existing key untouched.
 set -Eeuo pipefail
 
-if [[ -x /opt/homebrew/bin/brew ]]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-fi
+{{ template "brew-shellenv" . }}
 
 KEY_DIR="{{ joinPath .chezmoi.homeDir ".config/age" }}"
 KEY_FILE="$KEY_DIR/keys.txt"

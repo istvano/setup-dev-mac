@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=script/lib/common.sh
 source "$ROOT/script/lib/common.sh"
 
-require_macos_arm64
+require_supported_mac
 for command in brew chezmoi jq; do
   command_exists "$command" || die "$command is required for verification."
 done

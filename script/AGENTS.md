@@ -17,6 +17,11 @@ to them and contain minimal logic.
   be able to fail; printing a warning and exiting 0 gates nothing.
 - Declare `local` variables one per line when a later value references an
   earlier one: bash expands every argument to `local` before assigning any.
+- Target bash 3.2, which is what macOS ships. No `mapfile`, `readarray`,
+  associative arrays or namerefs; `tests/shell-syntax.sh` rejects them (ADR-033).
+- Collect command options in an **array**, never a space-separated string. Every
+  script here sets `IFS=$'\n\t'`, so a string does not word-split on spaces and
+  the whole thing arrives as one unknown option.
 - Add or update tests for behaviour changes.
 
 ## Validation

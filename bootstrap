@@ -35,7 +35,7 @@ ASSUME_YES=0
 usage() {
   cat <<'EOF'
 Usage: ./bootstrap plan|install [options]
-  --profiles LIST
+  --profiles LIST|all          'all' means every profile this machine supports
   --shell zsh|fish
   --runtime rancher|orbstack|colima|none
   --password-manager bitwarden|1password|none
@@ -135,8 +135,35 @@ parse_args() {
   done
 }
 
+# `--profiles all` means every profile this machine can actually install.
+#
+# It is not a convenience alias for a long string: the exclusions come from
+# script/platform-gaps, so there is one source of truth for what this
+# architecture supports, and the selection widens by itself on the Apple Silicon
+# machine without anyone editing a list. What it expanded to is always printed,
+# because "all" quietly meaning "all but one" would otherwise be a surprise.
+expand_profile_selection() {
+  [[ "$PROFILES" == all ]] || return 0
+  local excluded expanded="" profile
+  excluded="$("$ROOT/script/platform-gaps" --list-gap-profiles)"
+  for profile in "${VALID_PROFILES[@]}"; do
+    case ",$excluded," in
+      *",$profile,"*) continue ;;
+    esac
+    expanded="${expanded:+$expanded,}$profile"
+  done
+  PROFILES="$expanded"
+  if [[ -n "$excluded" ]]; then
+    warn "--profiles all excludes $excluded: this machine's architecture cannot
+install it. Every other profile is selected."
+  else
+    log "--profiles all selected every profile (${#VALID_PROFILES[@]})."
+  fi
+}
+
 validate_choices() {
   [[ "$COMMAND" =~ ^(plan|install|help)$ ]] || die "Unknown command: $COMMAND"
+  expand_profile_selection
   validate_profiles "$PROFILES"
   [[ "$SHELL_CHOICE" =~ ^(zsh|fish)$ ]] || die "Invalid shell"
   [[ "$RUNTIME" =~ ^(rancher|orbstack|colima|none)$ ]] || die "Invalid runtime"
@@ -173,6 +200,18 @@ Workstation bootstrap plan
 Bootstrap trust set:
   Xcode Command Line Tools, Homebrew, Git, GitHub CLI, age, git-delta and chezmoi
 EOF
+  report_platform_gaps || true
+}
+
+# Names what this machine's architecture cannot install, at plan time and again
+# before the install commits to anything.
+#
+# Without it the only signal is a `brew bundle` failure partway through a long
+# install, which reads as a broken repository rather than as a known limit of the
+# hardware. Reported rather than silently dropped: the point is to know which
+# parts remain unproven until the Apple Silicon machine exists (ADR-034).
+report_platform_gaps() {
+  "$ROOT/script/platform-gaps" --profiles "$PROFILES" --strict
 }
 
 ensure_xcode_clt() {
@@ -186,9 +225,8 @@ ensure_xcode_clt() {
 }
 
 ensure_homebrew() {
-  if [[ -x /opt/homebrew/bin/brew ]]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-    success "Homebrew is installed."
+  if activate_homebrew; then
+    success "Homebrew is installed at $(brew_prefix)."
     return
   fi
   confirm "Install Homebrew from brew.sh?" || die "Homebrew is required."
@@ -208,7 +246,10 @@ ensure_homebrew() {
   }
   /bin/bash "$installer"
   rm -f "$installer"
-  eval "$(/opt/homebrew/bin/brew shellenv)"
+  # The installer picks the prefix from the architecture, so it is discovered
+  # rather than assumed: /opt/homebrew on Apple Silicon, /usr/local on Intel.
+  activate_homebrew || die "Homebrew installed but no brew binary was found in
+$(printf '%s ' "${HOMEBREW_PREFIXES[@]}")."
 }
 
 # Apple supports /etc/pam.d/sudo_local for exactly this purpose; it survives
@@ -234,7 +275,10 @@ enable_touchid_sudo_if_requested() {
 
 # git-delta is part of the trust set because the chezmoi configuration selects it
 # as the diff pager, so `chezmoi diff` fails without it before packages install.
-install_bootstrap_packages() { brew install git gh age chezmoi git-delta; }
+install_bootstrap_packages() {
+  require_writable_homebrew
+  brew install git gh age chezmoi git-delta
+}
 
 apply_strap_inspired_security() {
   defaults write com.apple.screensaver askForPassword -int 1
@@ -255,9 +299,22 @@ install_macos_updates_if_requested() {
 }
 
 prompt_identity() {
-  [[ -n "$GIT_NAME" ]] || read -r -p "Git user.name: " GIT_NAME
-  [[ -n "$GIT_EMAIL" ]] || read -r -p "Git user.email: " GIT_EMAIL
-  [[ -n "$GIT_NAME" && -n "$GIT_EMAIL" ]] || die "Git name and email are required."
+  # `read` returns non-zero at end of input, and as the last command of an `||`
+  # list that failure is not exempt from errexit: the script exited immediately
+  # with status 1 and the die below never ran. A bootstrap driven from anything
+  # other than a keyboard therefore failed with no output whatsoever, which is
+  # the least diagnosable result available. The reads are now allowed to fail so
+  # the check underneath is what reports.
+  if [[ -z "$GIT_NAME" ]]; then
+    read -r -p "Git user.name: " GIT_NAME || GIT_NAME=""
+  fi
+  if [[ -z "$GIT_EMAIL" ]]; then
+    read -r -p "Git user.email: " GIT_EMAIL || GIT_EMAIL=""
+  fi
+  [[ -n "$GIT_NAME" && -n "$GIT_EMAIL" ]] || die "Git user.name and user.email are required.
+They were not supplied and could not be read from the terminal. Pass them
+directly, which is also what a non-interactive run needs:
+  ./bootstrap install --git-name \"Your Name\" --git-email you@example.com ..."
 }
 
 toml_quote() {
@@ -292,7 +349,14 @@ autoCommit = false
 autoPush = false
 
 [diff]
-command = "delta"
+# pager only, NOT command. Setting diff.command makes chezmoi invoke the tool for
+# INDIVIDUAL FILE differences, and delta spawns its own pager each time, so a
+# multi-file diff opened a pager per file and could not be escaped. diff.pager is
+# the one that pipes chezmoi's single unified diff through delta once, and it is
+# what "chezmoi diff --no-pager" can then turn off.
+#
+# No backticks in this block: it is written by an unquoted heredoc, where they
+# would be command substitution rather than punctuation.
 pager = "delta"
 
 [data]
@@ -321,7 +385,12 @@ main() {
   }
   print_plan
   [[ "$COMMAND" == plan ]] && exit 0
-  require_macos_arm64
+  require_supported_mac
+  # Asked rather than refused: everything outside the listed profiles still
+  # installs, and the choice of whether to drop them is the operator's.
+  report_platform_gaps ||
+    confirm "Continue anyway? brew bundle will fail on those packages." ||
+    die "Cancelled. Re-run without the profiles listed above."
   confirm "Proceed with bootstrap and chezmoi apply?" || die "Cancelled."
   ensure_xcode_clt
   ensure_homebrew

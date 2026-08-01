@@ -623,13 +623,26 @@ Two defects were invisible because the result still worked:
 
 A third case, found later in `dot_config/ghostty/config`, is the same lesson in
 different clothing. `scrollback-limit` is measured in **bytes**, and Ghostty 1.4
-renamed it to `scrollback-limit-bytes` precisely because the units were
+renames it to `scrollback-limit-bytes` precisely because the units were
 ambiguous. Set to `10000` as though it were a line count, it produced a 10 KB
-scrollback buffer against a 50 MB default — wrong by more than three orders of
-magnitude, while reading as entirely plausible. The comment justifying it was
-also wrong: it claimed the limit kept history off disk, but Ghostty never writes
-scrollback to disk. The config now uses `scrollback-limit-lines`, and
-`tests/placement-policy.sh` rejects the deprecated bare key.
+scrollback buffer against the 10 MB default — wrong by three orders of magnitude,
+while reading as entirely plausible. The comment justifying it was also wrong: it
+claimed the limit kept history off disk, but Ghostty never writes scrollback to
+disk.
+
+The first fix was itself wrong, and in an instructive way. It switched to
+`scrollback-limit-lines`, which says exactly what is meant — but that key arrives
+in Ghostty 1.4 and `cask "ghostty"` installs 1.3.1, which rejects it as unknown.
+Checking all 18 keys in the file against `Config.zig` at each tag found this: a
+config written against the current documentation, for a version that is not the
+one installed. Documentation describes the latest release; the cask decides what
+runs.
+
+The assertion in `tests/placement-policy.sh` is now on **magnitude rather than
+key name**: a byte key must hold at least a megabyte, a lines key at most a
+million. That catches the actual defect — a value plausible for the other unit —
+which naming a key never could, and it stays correct after a 1.4 upgrade makes
+the lines key available.
 
 The general lesson, and the reason these are in a decision record: a
 misconfiguration that still produces working behaviour will not be noticed by
@@ -695,7 +708,7 @@ exactly the change worth reporting.
 
 Both were found by reading upstream sources rather than by using the result.
 
-`command = /opt/homebrew/bin/fish --login` needs `--login`. fish applies
+The Ghostty `command` line needs `--login`. fish applies
 `/etc/paths` and `/etc/paths.d` only for a login shell — `status is-login && command
 -sq /usr/libexec/path_helper`, in fish's own `share/config.fish` — and those files
 are how macOS installers put themselves on `PATH`. Without `--login`, fish starts
@@ -875,3 +888,171 @@ reason ADR-030 gives: whether a pattern excludes a path is chezmoi's decision,
 and a grep for the pattern text only proves the text is present. The earlier
 version of this test checked the rendered ignore file and would not have caught
 the stray target at all.
+
+### `command -v python3` is true on a machine where python3 cannot run
+
+Found on the first run against a real Mac. `./script/test` reached
+`tests/render-brewfile.sh`, which invokes `python3`, and macOS answered:
+
+```
+xcode-select: note: No developer tools were found, requesting install.
+```
+
+Before the Command Line Tools are installed, macOS ships **stubs** at `/usr/bin`
+for `python3`, `git`, `clang` and others. Running one does not fail — it opens a
+GUI installer dialog. Over SSH that is a command which appears to hang, with the
+explanation on a screen nobody is looking at.
+
+The damaging part is that `command_exists python3` returns **true** for a stub.
+`script/check-tokens`, `script/check-extensions`, `script/setup` and
+`script/vscode-extensions` all guarded on exactly that and would all have tripped
+the installer anyway. A guard that cannot fail on the platform it was written for
+is not a guard.
+
+`xcode-select -p` reports the state without triggering anything; only
+`xcode-select --install` opens the dialog. So `common.sh` gains
+`developer_tools_installed`, `require_developer_tools` and `python3_available`,
+and the four scripts use them instead. `script/test` checks once at the entry
+point rather than in each of the five tests that need python3.
+
+This is the same lesson as the two above, reached from a third direction: the
+CI platform has a real python3 and no concept of a stub, so nothing about this
+was visible until the code ran on macOS.
+
+### The CI runner's Python is not the target's Python
+
+Two more failures followed on the next run, from the same root: what ships with
+`python3` differs by platform, and the suite assumed the richer one.
+
+`tests/yaml.sh` preferred `yamllint` and fell back to PyYAML — but PyYAML is not
+in the standard library and the Command Line Tools do not bundle it, so on a
+freshly bootstrapped Mac neither exists. The fallback chain had no floor, and the
+suite died on `ModuleNotFoundError: No module named 'yaml'` before the `dev`
+profile that provides yamllint had been installed.
+
+`tests/placement-policy.sh` used `tomllib`, which is Python 3.11+. The Command
+Line Tools ship 3.9. Every CI runner has 3.11 or later, so this was invisible
+too, and it would have failed two tests after the first one was fixed.
+
+Both now fall back to a **skip that `REQUIRE_LINTERS=1` turns back into a
+failure**, matching the contract shellcheck, shfmt, actionlint and gitleaks
+already use. The distinction that matters is between "no parser available here"
+and "the file is malformed": the TOML check uses an explicit sentinel exit code
+for the former, because collapsing the two would let a broken config pass on
+every machine without a parser.
+
+The rule this yields: an optional dependency needs a floor, and the floor must
+fail loudly under the flag CI sets. A chain of fallbacks ending in an unguarded
+import is not a fallback chain — it is a hard dependency with extra steps.
+
+## ADR-034: Discover the Homebrew prefix; support Intel as a development platform
+
+Apple Silicon remains the target. Intel macOS is now supported so the workstation
+can be built and tested before the arm64 machine exists — which is precisely when
+finding the defects is cheap, and the alternative is discovering them on the
+machine that is supposed to already work.
+
+### Why the hardcoded prefix was a real bug, not a portability nicety
+
+Homebrew installs to `/opt/homebrew` on Apple Silicon and `/usr/local` on Intel.
+Twenty-one places named the first one directly, and almost all of them had this
+shape:
+
+```bash
+if [[ -x /opt/homebrew/bin/brew ]]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi
+```
+
+On Intel that guard is simply false. Nothing errors, nothing warns: Homebrew is
+never put on `PATH`, and the failure arrives much later as "command not found"
+for a tool that is in fact installed. This is the ADR-030 pattern again — a
+configuration that keeps working while doing nothing.
+
+`script/lib/common.sh` gains `brew_prefix` and `activate_homebrew`. Apple Silicon
+is checked first, deliberately: a Mac carrying both a native arm64 install and an
+x86_64 one reached through Rosetta must resolve to the native one, and reversing
+the order would put a translated toolchain on `PATH` — working, slower, and
+subtly wrong.
+
+### Three mechanisms, because there are three different constraints
+
+- **Shell configurations** resolve at shell start, so one file works on either
+  architecture and nothing machine-specific is baked in.
+- **Chezmoi apply hooks** share a `.chezmoitemplates/brew-shellenv` partial. Five
+  hooks previously carried the same snippet; single-sourcing it means the next
+  fix lands in one place.
+- **Ghostty's `command`** is the exception: a terminal config is a static string,
+  not a shell, so it cannot ask `brew --prefix`. It resolves at apply time
+  through `.chezmoitemplates/brew-prefix`, which falls back to the Apple Silicon
+  path when neither exists so the target platform stays correct.
+
+`tests/placement-policy.sh` now rejects any script or template naming
+`/opt/homebrew` without also naming `/usr/local`, and
+`tests/chezmoi-templates.sh` checks what the Ghostty line actually renders to —
+a broken template would leave `command = /bin/fish --login`, a path that exists
+on macOS and is the wrong shell entirely.
+
+### Intel is warned about, not silently accepted
+
+`require_macos_arm64` became `require_supported_mac`, which accepts arm64 and
+x86_64 and warns on the latter. The two are not equivalent and the difference is
+worth stating every time: the prefix differs, and arm64-only casks such as
+`lm-studio` cannot be installed at all. A silent pass would let someone conclude
+from a green Intel run that the Apple Silicon machine is covered.
+
+What Intel *can* validate is most of the repository: every script, every chezmoi
+template, both shell configurations, the profile catalogue and the whole test
+suite. What it cannot validate is the cask set and anything architecture-specific
+— those still need the real machine, and `TASKS.md` keeps them open.
+
+### The gap is declared, reported and verified rather than remembered
+
+"Which parts can this machine not prove?" is a question that decays into folklore
+if the answer lives in someone's head. So it is declared next to the package as an
+`arm64-only` marker in its purpose comment, and three things use it:
+
+- `script/platform-gaps` reports what the current architecture cannot install and
+  names the profiles to leave out. Offline, so it costs nothing at plan time.
+- `bootstrap` runs it at plan time and again before install, where it asks rather
+  than refuses — everything outside those profiles still installs, and dropping
+  them is the operator's call.
+- `script/check-tokens` verifies every marker against Homebrew's own
+  `depends_on arch` **in both directions**, on the weekly schedule it already
+  runs. A missing marker makes the report silently incomplete, so an Intel
+  install fails with a raw `brew bundle` error; a stale one makes it exclude a
+  profile that would have installed. Both are failures.
+
+`tests/profiles.sh` additionally checks that `platform-gaps` still recognises the
+marker form, against a fixture rather than against `profiles/` — deriving the
+expectation from the same files being checked makes the test vacuous, which the
+first version of it was.
+
+### One unwritable directory fails every package
+
+Found on the first real Intel install: 70 of 108 dependencies failed, all with
+the identical message.
+
+```
+Error: The following directories are not writable by your user:
+  sudo chown -R istvano /usr/local/share/man/man8
+```
+
+Homebrew checks prefix writability *before* installing anything, so a single
+root-owned directory fails the whole run rather than only the packages that would
+write there. The count made it look like a broad breakage; the cause was one
+directory.
+
+This is an Intel problem in practice. `/usr/local` is shared with the system and
+with other installers, any of which can leave a root-owned subdirectory behind.
+`/opt/homebrew` belongs to Homebrew alone and is created owned by the installing
+user, so the Apple Silicon target does not meet it.
+
+`require_writable_homebrew` now runs before `brew install` in `./bootstrap` and
+again in the package apply hook — the hook as well, because `./script/setup`
+reaches it without going through bootstrap, and that is the command used to
+re-apply after a fix.
+
+It **reports and refuses**; it does not repair. `sudo chown -R` on a system
+directory is the privileged, hard-to-reverse operation `AGENTS.md` keeps manual,
+and who should own a directory under `/usr/local` is a judgement about the
+machine rather than something a bootstrap may assume. The error names the exact
+command, which is the same one Homebrew itself suggests.

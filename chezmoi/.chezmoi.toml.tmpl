@@ -18,7 +18,11 @@ sourceDir = {{ dir .chezmoi.sourceDir | quote }}
 autoCommit = false
 autoPush = false
 [diff]
-command = "delta"
+# pager only, NOT command. `diff.command` makes chezmoi invoke the tool for
+# INDIVIDUAL FILE differences, and delta spawns its own pager each time — so a
+# multi-file diff opened a pager per file and could not be escaped. `diff.pager`
+# is the one that pipes chezmoi's single unified diff through delta once, and it
+# is what `chezmoi diff --no-pager` can then turn off.
 pager = "delta"
 [data]
 gitName = {{ $gitName | quote }}

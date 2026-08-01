@@ -16,6 +16,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/script/lib/common.sh"
 
 command_exists curl || die "curl is required."
+require_developer_tools
 command_exists python3 || die "python3 is required."
 
 API="https://formulae.brew.sh/api"
@@ -43,6 +44,43 @@ print("")
 ' <<<"$body"
 }
 
+# Casks declared arm64-only in the fragments, as ",token,token," for substring
+# matching — bash 3.2 has no associative arrays.
+#
+# Verified against upstream in BOTH directions below. A marker that is missing
+# leaves script/platform-gaps silently under-reporting, so an Intel install
+# fails with a raw brew error; a marker that is stale makes it over-report and
+# exclude a profile that would in fact install.
+DECLARED_ARM64=","
+while IFS= read -r arm_token; do
+  [[ -n "$arm_token" ]] || continue
+  DECLARED_ARM64+="$arm_token,"
+done < <(
+  grep -rhE '^[[:space:]]*(brew|cask) "[^"]+"[[:space:]]+#[[:space:]]*arm64-only\b' \
+    "$ROOT"/profiles/*.Brewfile |
+    sed -E 's/^[[:space:]]*(brew|cask) "([^"]+)".*/\2/' |
+    sort -u
+)
+
+# Only casks. A cask states the constraint declaratively as depends_on.arch;
+# formulae express architecture through bottle availability, which is a different
+# question and not one this check can answer.
+cask_is_arm64_only() {
+  python3 -c '
+import json
+import sys
+
+try:
+    data = json.load(sys.stdin)
+except json.JSONDecodeError:
+    raise SystemExit(0)
+
+arch = (data.get("depends_on") or {}).get("arch")
+if arch and all(entry.get("type") == "arm" for entry in arch):
+    print("yes")
+' <<<"$1"
+}
+
 while IFS=' ' read -r kind token; do
   [[ -n "$kind" && -n "$token" ]] || continue
   checked=$((checked + 1))
@@ -63,6 +101,23 @@ while IFS=' ' read -r kind token; do
   if [[ -n "$state" ]]; then
     warn "$kind \"$token\" is $state."
     failures=$((failures + 1))
+  fi
+
+  if [[ "$kind" == cask ]]; then
+    upstream_arm64="$(cask_is_arm64_only "$body")"
+    declared_arm64=no
+    case "$DECLARED_ARM64" in
+      *",$token,"*) declared_arm64=yes ;;
+    esac
+    if [[ "$upstream_arm64" == yes && "$declared_arm64" == no ]]; then
+      warn "cask \"$token\" is arm64-only upstream but carries no arm64-only marker.
+Add it to the purpose comment so script/platform-gaps reports it."
+      failures=$((failures + 1))
+    elif [[ "$upstream_arm64" != yes && "$declared_arm64" == yes ]]; then
+      warn "cask \"$token\" is marked arm64-only but upstream declares no such
+constraint. Remove the marker; it excludes a profile that would install."
+      failures=$((failures + 1))
+    fi
   fi
 done < <(
   grep -rhoE '^[[:space:]]*(brew|cask) "[^"]+"' "$ROOT"/profiles/*.Brewfile |

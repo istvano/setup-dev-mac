@@ -82,7 +82,7 @@ declared_list() {
 warn_if_autoupdate_enabled() {
   local settings="$HOME/Library/Application Support/Code/User/settings.json"
   [[ -f "$settings" ]] || return 0
-  command_exists python3 || return 0
+  python3_available || return 0
   # Reads the setting rather than grepping, so a commented or nested occurrence
   # cannot be mistaken for the effective value. VS Code settings.json permits
   # comments and trailing commas, which json.load rejects, so a parse failure is

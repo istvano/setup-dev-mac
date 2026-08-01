@@ -30,9 +30,16 @@ Linux CI cannot prove any of these. Record the results after the first install.
       in ordering. A missing `/etc/paths.d` entry means `--login` is not taking
       effect, which is invisible until a tool installed by a macOS package is
       not found.
-- [ ] Run `./script/test` on the Mac. It is now verified against bash 3.2.57, the
-      version macOS ships, but only Linux CI has run the shellcheck, shfmt,
-      actionlint and gitleaks paths on the real binaries.
+- [x] `./script/test` passes on the Mac, all 12 test scripts. The bash 3.2 fix
+      holds — `Shell syntax: OK (34 files)`. It took three rounds to get there:
+      the `/usr/bin/python3` Command Line Tools stub, then missing PyYAML, then
+      `tomllib` (Python 3.11+; CLT ships 3.9). All three are ADR-033. `shasum`
+      turns out to be base-system rather than CLT-gated, so
+      `tests/idempotency.sh` needed nothing.
+- [ ] Run the suite again after Phase 2 with `REQUIRE_LINTERS=1
+      REQUIRE_CHEZMOI=1`. Until the `dev` profile lands, YAML and TOML are
+      *skipped* and shellcheck, shfmt, actionlint and gitleaks have only ever run
+      on Linux — so the Mac has not yet exercised them on the real binaries.
 - [ ] After the first `chezmoi apply`, confirm nothing landed in `$HOME` that is
       not a dotfile: `chezmoi managed --include=files,dirs | grep -v '^\.'` must
       print nothing.
@@ -41,7 +48,36 @@ Linux CI cannot prove any of these. Record the results after the first install.
       undeclared.
 - [ ] Set `"extensions.autoUpdate": false` in VS Code settings, or accept that
       the pinned versions will drift and `--verify` will keep reporting it.
+- [ ] On the first `git mergetool`, confirm the VS Code panes are the way round
+      the config assumes. `code --merge` takes path1, path2, base, result, and
+      `$LOCAL` is passed first so your side matches git's ours-before-theirs
+      ordering — but which pane VS Code labels as which could not be established
+      from its source. Swapped panes would resolve conflicts the wrong way while
+      looking normal.
 - [ ] Add macOS integration tests once first-run behaviour has been observed.
+
+## Intel development machine
+
+The workstation is being built on an Intel macOS 13 VM until the M5 Max arrives
+(ADR-034). What that machine can and cannot settle:
+
+- [x] Every script, chezmoi template, both shell configurations and the whole
+      test suite run on Intel. `require_supported_mac` accepts x86_64 with a
+      warning, and the Homebrew prefix is discovered rather than assumed.
+- [x] First install attempt: 70 of 108 failed on one root-owned
+      `/usr/local/share/man/man8`. Homebrew checks prefix writability before
+      installing, so one directory fails everything. `require_writable_homebrew`
+      now catches it in bootstrap and in the apply hook (ADR-034). Fix with
+      `sudo chown -R "$(id -un)" /usr/local/share/man/man8`, then
+      `./script/setup`.
+- [ ] Install with all profiles EXCEPT `local-llm`: `lm-studio` declares
+      `arch: arm64` and is the only one of 35 casks that cannot install on
+      Intel. The other 34 have no arch or macOS constraint that macOS 13 fails.
+- [ ] Re-verify the cask set on the M5 Max. Intel proves the tokens resolve and
+      the fragments compose; it does not prove an arm64 build of each exists.
+- [ ] Confirm the Ghostty `command` line renders to `/opt/homebrew/bin/fish` on
+      the M5 Max and `/usr/local/bin/fish` on the VM. It is the one place the
+      prefix is baked in at apply time rather than discovered at runtime.
 
 ## MCP follow-up
 

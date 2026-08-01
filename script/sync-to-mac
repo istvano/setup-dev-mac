@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# Push this working tree to the macOS test VM and optionally run a command there.
+#
+# Cloning is not an option: the test VM cannot reach the git remote, and a clean
+# macOS has no git at all until Xcode Command Line Tools are installed. The
+# working tree goes over ssh instead.
+#
+#   sync-to-mac                       sync only
+#   sync-to-mac ./script/test         sync, then run that in the remote checkout
+#   sync-to-mac --dry-run             list what would transfer, change nothing
+#   sync-to-mac --fetch REMOTE LOCAL  copy a path back off the VM
+#
+# The target is deliberately not hardcoded. AGENTS.md forbids machine-specific
+# addresses in tracked files, so this reads the environment and refuses to guess:
+#
+#   export MAC_TEST_HOST=user@host
+#   export MAC_TEST_PORT=22220
+#   export MAC_TEST_DIR=workspace/mac-os-setup   # optional, relative to ~
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+HOST="${MAC_TEST_HOST:-}"
+PORT="${MAC_TEST_PORT:-22}"
+# Relative to the remote home. Keep it stable: ./bootstrap writes this path into
+# sourceDir in ~/.config/chezmoi/chezmoi.toml, and every apply hook builds
+# repository script paths from it, so moving it later breaks them.
+REMOTE_DIR="${MAC_TEST_DIR:-workspace/mac-os-setup}"
+
+DRY_RUN=false
+FETCH=false
+
+usage() {
+  cat <<'EOF'
+Usage: script/sync-to-mac [--dry-run] [command...]
+       script/sync-to-mac --fetch REMOTE_PATH LOCAL_PATH
+
+  (no arguments)   sync the working tree to the VM and verify it arrived intact
+  command...       sync, then run the command in the remote checkout
+  --dry-run        list what would transfer, change nothing
+  --fetch          copy a path back off the VM, for recording results
+
+Environment:
+  MAC_TEST_HOST    required, e.g. user@host
+  MAC_TEST_PORT    default 22
+  MAC_TEST_DIR     default workspace/mac-os-setup, relative to the remote home
+EOF
+}
+
+case "${1:-}" in
+  --help | -h)
+    usage
+    exit 0
+    ;;
+  --dry-run)
+    DRY_RUN=true
+    shift
+    ;;
+  --fetch)
+    FETCH=true
+    shift
+    ;;
+esac
+
+[[ -n "$HOST" ]] || die "MAC_TEST_HOST is not set. Export MAC_TEST_HOST and
+MAC_TEST_PORT rather than editing this file; a hardcoded address would be a
+machine-specific value in a tracked file. See script/sync-to-mac --help."
+
+ssh_run() { ssh -p "$PORT" "$HOST" "$@"; }
+
+fetch_path() {
+  local remote="$1" local_path="$2"
+  [[ -n "$remote" && -n "$local_path" ]] || die "--fetch needs REMOTE_PATH and LOCAL_PATH"
+  mkdir -p "$(dirname "$local_path")"
+  scp -P "$PORT" -r "$HOST:$remote" "$local_path"
+  success "Fetched $remote to $local_path"
+}
+
+# The transfer must preserve two things, and both fail far from their cause:
+#
+#   .git        tests/format.sh runs `gitleaks detect --source`, which scans
+#               commit history. Without a repository it fails outright under
+#               REQUIRE_LINTERS=1, so a plain file copy silently costs the
+#               secret scan.
+#   mode bits   31 files are executable. tests/chezmoi-templates.sh asserts every
+#               script path a template emits is -x, so a mode-losing copy is
+#               reported as a chezmoi problem.
+#
+# Hence rsync -a, no .git exclusion, and the verification below.
+sync_tree() {
+  # An array, not a string. This file sets IFS=$'\n\t' like every other script
+  # here, so a space-separated string does not word-split and rsync receives one
+  # long unknown option.
+  local flags=(-az --delete --exclude=.DS_Store)
+  if [[ "$DRY_RUN" == true ]]; then
+    flags+=(--dry-run --itemize-changes)
+  fi
+  if command_exists rsync; then
+    # rsync creates the final directory but not its parents, so the first sync to
+    # a fresh VM fails on the missing ~/workspace. --mkpath would cover it but
+    # needs rsync 3.2.3+, and macOS ships an older rsync or openrsync.
+    [[ "$DRY_RUN" == true ]] || ssh_run "mkdir -p '$REMOTE_DIR'"
+    rsync "${flags[@]}" -e "ssh -p $PORT" "$ROOT/" "$HOST:$REMOTE_DIR/"
+  else
+    [[ "$DRY_RUN" == true ]] && die "--dry-run needs rsync."
+    warn "rsync is not installed; falling back to tar over ssh (no deletions)."
+    tar -C "$(dirname "$ROOT")" -czf - "$(basename "$ROOT")" |
+      ssh_run "mkdir -p '$(dirname "$REMOTE_DIR")' && tar -C '$(dirname "$REMOTE_DIR")' -xzf -"
+  fi
+}
+
+# Checked on the remote rather than assumed, because both failures surface later
+# as something else entirely.
+verify_transfer() {
+  ssh_run "test -d '$REMOTE_DIR/.git'" ||
+    die "The remote checkout has no .git directory. gitleaks scans commit
+history and will fail under REQUIRE_LINTERS=1. Re-sync; do not work around it
+with --no-git, which skips history and defeats the check."
+  ssh_run "test -x '$REMOTE_DIR/bootstrap' && test -x '$REMOTE_DIR/script/test'" ||
+    die "Executable bits were lost in transfer. Repository scripts will not run
+and tests/chezmoi-templates.sh will report it as a chezmoi error."
+}
+
+# `ssh host command` gets a NON-INTERACTIVE, NON-LOGIN shell, which reads only
+# ~/.zshenv. This repository puts `brew shellenv` in ~/.zshrc, an interactive
+# file, so Homebrew is absent from PATH here: chezmoi, shellcheck, shfmt and
+# gitleaks would all report as not installed and the strict test run would be
+# impossible. Every chezmoi run script solves it the same way, so this does too.
+#
+# Both prefixes are tried because the test machine may be Intel (/usr/local)
+# while the target is Apple Silicon (/opt/homebrew).
+remote_command() {
+  local command="$*"
+  ssh -p "$PORT" -t "$HOST" "
+    for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+      [ -x \"\$b\" ] && { eval \"\$(\$b shellenv)\"; break; }
+    done
+    cd '$REMOTE_DIR' || exit 1
+    $command
+  "
+}
+
+if [[ "$FETCH" == true ]]; then
+  fetch_path "${1:-}" "${2:-}"
+  exit 0
+fi
+
+log "Syncing $ROOT to $HOST:$REMOTE_DIR (port $PORT)"
+sync_tree
+
+if [[ "$DRY_RUN" == true ]]; then
+  log "Dry run only; nothing was transferred."
+  exit 0
+fi
+
+verify_transfer
+success "Synced, with .git and executable bits intact."
+
+if (($# > 0)); then
+  log "Running on $HOST: $*"
+  # The exit status is forwarded on purpose, so a failing remote test fails this
+  # command and the fix/sync/test loop cannot report a false pass.
+  remote_command "$@"
+fi

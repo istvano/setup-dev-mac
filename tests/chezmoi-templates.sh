@@ -141,6 +141,37 @@ for CONFIG in "${CONFIGS[@]}"; do
   done
 done
 
+# --- A failed package install must not abort the whole apply.
+#
+# run_onchange_before_10 runs BEFORE any file is written, so a non-zero exit
+# takes the dotfiles, the macOS defaults and the browser profiles down with it.
+# Observed for real: nine formulae had no bottle on macOS 13, brew bundle exited
+# non-zero, and the machine ended up with 195 packages and zero configuration.
+packages_hook="$ROOT/chezmoi/run_onchange_before_10_install-packages.sh.tmpl"
+if grep -qE '^brew bundle check .*\|\| brew bundle install' "$packages_hook"; then
+  echo 'run_onchange_before_10 lets brew bundle fail the apply.' >&2
+  echo 'It is a run_before hook, so that costs every dotfile, not just packages.' >&2
+  echo 'Report the failure and continue; ./script/verify still catches the drift.' >&2
+  exit 1
+fi
+assert_match 'The apply continues so' "$packages_hook"
+
+# --- The chezmoi diff configuration must not set diff.command.
+#
+# Setting it makes chezmoi invoke the tool per FILE, and delta opens a pager each
+# time, so reviewing a multi-file apply meant quitting one pager after another
+# with no way to see the whole thing. `diff.pager` alone pipes one unified diff
+# through delta, which is what --no-pager can also disable. Both writers of this
+# config are checked, since bootstrap writes it too.
+for config_writer in "$ROOT/chezmoi/.chezmoi.toml.tmpl" "$ROOT/bootstrap"; do
+  if grep -qE '^command = "delta"' "$config_writer"; then
+    echo "$(basename "$config_writer") sets diff.command = delta." >&2
+    echo "That runs delta per file and opens a pager for each one. Use only" >&2
+    echo "diff.pager, which pipes a single unified diff through delta." >&2
+    exit 1
+  fi
+done
+
 # --- .chezmoiignore is a template too, but has no .tmpl suffix.
 #
 # The selector above finds files by extension, so this file is invisible to it.
@@ -197,6 +228,23 @@ for CONFIG in "${CONFIGS[@]}"; do
     echo "shell=$selected: .zshrc must always be managed." >&2
     exit 1
   }
+
+  # The Ghostty command line must render to a real absolute path.
+  #
+  # It is the one place the Homebrew prefix cannot be discovered at runtime — a
+  # terminal config is a static string, not a shell — so it is resolved at apply
+  # time. A broken template would leave `command = /bin/fish --login`, which is a
+  # path that exists on macOS and is the wrong shell entirely.
+  if [[ "$selected" == fish ]]; then
+    ghostty_command="$(render <"$ROOT/chezmoi/dot_config/ghostty/config.tmpl" |
+      grep '^command = ' || true)"
+    [[ "$ghostty_command" =~ ^command\ =\ (/opt/homebrew|/usr/local)/bin/fish\ --login$ ]] || {
+      echo "ghostty config.tmpl rendered an unexpected command line:" >&2
+      echo "  ${ghostty_command:-<none>}" >&2
+      echo "Expected a Homebrew prefix followed by /bin/fish --login." >&2
+      exit 1
+    }
+  fi
 
   # Every managed file or directory must be a dotfile.
   #

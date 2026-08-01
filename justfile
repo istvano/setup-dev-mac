@@ -19,6 +19,19 @@ render:
   ./script/render-brewfile --output /tmp/workstation.Brewfile
   cat /tmp/workstation.Brewfile
 
+# What this machine's architecture cannot install, and which profiles to drop.
+gaps:
+  ./script/platform-gaps
+
+# Push this working tree to the macOS test VM.
+# Needs MAC_TEST_HOST and MAC_TEST_PORT; see script/sync-to-mac --help.
+sync:
+  ./script/sync-to-mac
+
+# Sync, then run the test suite on the VM. The remote exit status is forwarded.
+sync-test:
+  ./script/sync-to-mac './script/test'
+
 # Network check: confirms every Homebrew token in profiles/ still exists.
 tokens:
   ./script/check-tokens

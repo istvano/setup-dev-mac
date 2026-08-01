@@ -22,8 +22,44 @@
 [diff]
   algorithm = histogram
   colorMoved = default
+{{- if lookPath "code" }}
+  tool = vscode
+{{- end }}
 [merge]
   conflictstyle = zdiff3
+{{- if lookPath "code" }}
+  tool = vscode
+{{- end }}
+{{- if lookPath "code" }}
+
+# VS Code for interactive diffs and three-way merges.
+#
+# This does NOT replace delta. `git diff` goes through core.pager, which stays
+# delta in the terminal; `git difftool` and `git mergetool` are separate commands
+# that launch an external tool on demand. The two are complementary, and reading
+# a diff in the pager remains the common case.
+#
+# Both need a graphical session. Over a plain SSH connection `code --wait` has
+# nothing to open and will hang, so use the terminal tools there.
+#
+# The absolute path is deliberate, for the same reason as gpg.program below: a
+# GUI Git client does not inherit the shell PATH and would not find `code`.
+[difftool]
+  prompt = false
+[difftool "vscode"]
+  cmd = {{ lookPath "code" | quote }} --wait --diff $LOCAL $REMOTE
+[mergetool]
+  prompt = false
+  # No .orig files left behind after a resolved conflict.
+  keepBackup = false
+[mergetool "vscode"]
+  # `code --merge` takes path1, path2, base, result — verified against VS Code's
+  # own argument definition, where the two modified versions come first and the
+  # output file last. $LOCAL is placed first so the side that is already yours
+  # appears where git puts it everywhere else: ours before theirs, as in the
+  # conflict markers zdiff3 writes above.
+  cmd = {{ lookPath "code" | quote }} --wait --merge $LOCAL $REMOTE $BASE $MERGED
+{{- end }}
 [rerere]
   enabled = true
 [pull]

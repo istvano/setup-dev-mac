@@ -66,3 +66,15 @@ as you would a package, not as a configuration value:
 
 No secrets belong in this repository. Use short-lived cloud sessions, hardware
 security keys, password-manager references and SOPS/age-encrypted project files.
+
+## Recorded terminal sessions
+
+`script` captures everything that reaches the terminal, including prompts that
+echo. Casks installing a privileged component prompt for an administrator
+password through Homebrew rather than through `sudo`, so it is written into the
+recording in clear text — observed during a real install of `oversight`.
+
+Run `sudo -v` before starting a recording so the credential is already cached,
+and treat any recording made across a privileged install as containing one until
+checked with `grep -c "Password:"`. Destroy such a file rather than editing it;
+an edited copy leaves the original blocks on disk.

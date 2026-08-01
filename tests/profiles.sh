@@ -118,4 +118,62 @@ for caller in "${RENDER_CALLERS[@]}"; do
   done
 done
 
+# --- script/platform-gaps must still recognise the marker the fragments use.
+#
+# The two carry the same pattern in different files, so they can drift apart:
+# platform-gaps would report nothing, and an Intel install would fail with a raw
+# brew error rather than a named gap.
+#
+# This is asserted against a FIXTURE rather than against profiles/, because
+# deriving the expectation from the same files being checked makes the test
+# vacuous — remove every marker and both sides agree on nothing. Whether a real
+# package is correctly marked is a question only upstream can answer, and
+# script/check-tokens verifies that against Homebrew in both directions.
+gaps_fixture="$(mktemp -d)"
+trap 'rm -rf "$gaps_fixture"' EXIT
+mkdir -p "$gaps_fixture/profiles" "$gaps_fixture/script" "$gaps_fixture/bin"
+cp "$ROOT/script/platform-gaps" "$gaps_fixture/script/"
+cp -R "$ROOT/script/lib" "$gaps_fixture/script/"
+cat >"$gaps_fixture/profiles/core.Brewfile" <<'FIXTURE'
+cask "fixture-arm-only" # arm64-only. Fixture package, never installed.
+cask "fixture-portable" # Fixture package with no architecture constraint.
+FIXTURE
+# The $1 and $@ belong to the stub being written, not to this shell, so single
+# quotes are required rather than merely tidy.
+# shellcheck disable=SC2016
+printf '#!/bin/sh\n[ "$1" = "-m" ] && { echo x86_64; exit 0; }\nexec /usr/bin/uname "$@"\n' \
+  >"$gaps_fixture/bin/uname"
+chmod +x "$gaps_fixture/bin/uname"
+
+gaps_output="$(PATH="$gaps_fixture/bin:$PATH" "$gaps_fixture/script/platform-gaps" 2>&1 || true)"
+grep -q 'fixture-arm-only' <<<"$gaps_output" ||
+  fail "script/platform-gaps did not report a package marked arm64-only.
+Its pattern and the marker used in profiles/*.Brewfile have drifted:
+$gaps_output"
+# `if`, not `grep ... && fail`: errexit exempts the left side of an AND list, so
+# that form works, but only by a subtlety this file has been caught by before.
+if grep -q 'fixture-portable' <<<"$gaps_output"; then
+  fail "script/platform-gaps reported an unmarked package as a gap."
+fi
+
+# --- `--profiles all` expands from the catalogue, not from a copied list.
+#
+# A literal string here would silently stop tracking VALID_PROFILES: a profile
+# added later would never be selected by `all`, and nothing would say so.
+arm_stub="$(mktemp -d)"
+trap 'rm -rf "$gaps_fixture" "$arm_stub"' EXIT
+# shellcheck disable=SC2016
+printf '#!/bin/sh\n[ "$1" = "-m" ] && { echo arm64; exit 0; }\nexec /usr/bin/uname "$@"\n' \
+  >"$arm_stub/uname"
+chmod +x "$arm_stub/uname"
+all_arm="$(PATH="$arm_stub:$PATH" "$ROOT/bootstrap" plan --profiles all 2>/dev/null |
+  sed -n 's/^  profiles: *//p')"
+for profile in "${VALID_PROFILES[@]}"; do
+  case ",$all_arm," in
+    *",$profile,"*) ;;
+    *) fail "--profiles all omitted '$profile' on arm64. It expands from
+VALID_PROFILES, so every profile must appear." ;;
+  esac
+done
+
 echo "Profile catalogue: OK (${#VALID_PROFILES[@]} profiles)"

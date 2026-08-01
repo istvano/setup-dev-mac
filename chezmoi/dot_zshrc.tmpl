@@ -6,7 +6,17 @@
 # --- PATH --------------------------------------------------------------------
 
 [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] || export PATH="$HOME/.local/bin:$PATH"
-if [[ -x /opt/homebrew/bin/brew ]]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi
+# Homebrew's prefix is architecture-dependent: /opt/homebrew on Apple Silicon,
+# /usr/local on Intel. Resolved at shell start rather than baked in at apply time,
+# so the same file works on either. Apple Silicon first, so a Mac with both
+# installs gets the native one rather than a translated one.
+for __brew in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+  if [[ -x "$__brew" ]]; then
+    eval "$("$__brew" shellenv)"
+    break
+  fi
+done
+unset __brew
 # Rust comes from mise, which shims cargo and rustc; no Homebrew keg on PATH.
 
 # --- Completion --------------------------------------------------------------

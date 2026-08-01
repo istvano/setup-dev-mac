@@ -297,6 +297,29 @@ ghostty +show-config | grep font
 ghostty +list-fonts | grep -i nerd
 ```
 
+## Git diff and merge tools
+
+Two tools, deliberately, for two different jobs. `delta` is `core.pager`, so
+`git diff`, `git log -p` and `git show` stay in the terminal — the common case.
+VS Code is registered as `diff.tool` and `merge.tool`, which only `git difftool`
+and `git mergetool` invoke:
+
+```bash
+git difftool HEAD~1             # side-by-side
+git difftool --dir-diff HEAD~1  # the whole changeset in one window
+git mergetool                   # three-way editor, per conflicted file
+```
+
+`mergetool.keepBackup` is false, so a resolved conflict leaves no `.orig` file,
+and `prompt` is false on both so they do not ask before launching each file.
+
+The block is emitted only when `code` is on PATH at apply time, and records its
+absolute path: a GUI Git client does not inherit the shell PATH. Neither tool
+works over a plain SSH session, where `code --wait` has nothing to open.
+
+`merge.conflictstyle` is `zdiff3`, so conflict markers include the common
+ancestor. That is what makes a three-way merge readable whichever tool opens it.
+
 ## Interactive shell
 
 `--shell` selects zsh (default) or fish. The choice is a mutually exclusive
@@ -314,8 +337,9 @@ Ghostty configuration.
 
 ### The login shell is not changed
 
-Selecting fish configures Ghostty to run it (`command = /opt/homebrew/bin/fish
---login`). The account login shell stays zsh, deliberately:
+Selecting fish configures Ghostty to run it (`command = <brew prefix>/bin/fish
+--login`, resolved at apply time). The account login shell stays zsh,
+deliberately:
 
 - A fish configuration that fails to parse costs a terminal tab, not the ability
   to log in.

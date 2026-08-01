@@ -17,6 +17,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=script/lib/common.sh
 source "$ROOT/script/lib/common.sh"
 
+require_developer_tools
 command_exists python3 || die "python3 is required."
 
 DECLARED="$ROOT/vscode/extensions.list"

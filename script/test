@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+# Five of the tests below run python3, which on a clean macOS is a stub that
+# opens the Command Line Tools installer instead of executing. Checked once here
+# rather than in each test: this is the documented entry point, and the failure
+# is the same for all of them.
+require_developer_tools
 
 # tests/lib.sh holds shared assertions and is sourced, not run.
 TESTS=(

@@ -1,0 +1,15 @@
+{{- /*
+  The Homebrew prefix, resolved at apply time.
+
+  For configuration files that cannot run a command to find it — Ghostty's
+  `command` is a static string, not a shell. Apple Silicon is checked first so a
+  Mac with both installs gets the native one, and /opt/homebrew is the fallback
+  when neither exists yet, which keeps the Apple Silicon target correct.
+*/ -}}
+{{- if stat "/opt/homebrew/bin/brew" -}}
+/opt/homebrew
+{{- else if stat "/usr/local/bin/brew" -}}
+/usr/local
+{{- else -}}
+/opt/homebrew
+{{- end -}}
