@@ -317,6 +317,26 @@ refute_match 'Pass --yes to answer' "$ROOT/script/lib/common.sh"
 assert_match '^ *--yes \| -y\)' "$ROOT/bootstrap"
 assert_match '^ *--yes \| -y\)' "$ROOT/script/macos-defaults"
 
+# Existing was not enough: the hook has to PASS it.
+#
+# The flag existed and the hook did not use it, so `macos-defaults apply` from a chezmoi
+# apply with no terminal on stdin hit confirm(), failed closed, and wrote NOTHING — not
+# just the four sudo-scoped keys, all fifty. It looked correct only because
+# `./bootstrap --yes` exports ASSUME_YES=1 and chezmoi's child inherits it; any apply
+# that bypassed bootstrap (`ssh host chezmoi apply` without -t, launchd, stdin
+# redirected) silently applied no defaults at all while reporting one WARN.
+assert_match 'script/macos-defaults" \| quote \}\} apply --yes' \
+  "$ROOT/chezmoi/run_onchange_after_40_macos-defaults.sh.tmpl"
+
+# ~/.docker only applies under colima, because every file in it needs a formula that only
+# profiles/runtime-colima.Brewfile declares. Ungated, a --runtime rancher or orbstack
+# machine got symlinks to /opt/homebrew/opt/docker-compose paths that never exist, written
+# over the plugin links Rancher and OrbStack put in that same directory, so `docker
+# compose` stopped resolving; and credsStore = osxkeychain without
+# docker-credential-helper turned `docker login` into "executable file not found".
+assert_match '\.docker' "$ROOT/chezmoi/.chezmoiignore"
+assert_match 'ne \.runtime "colima"' "$ROOT/chezmoi/.chezmoiignore"
+
 # The macOS defaults and the firewall are on by default, and each needs a way out.
 # Asserted rather than commented because the whole point is that forgetting a flag no
 # longer silently downgrades the machine — a revert to `=false` must break the suite.

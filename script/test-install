@@ -80,16 +80,9 @@ Requires a sealed golden image. Build one once with:
 EOF
 }
 
-# Rejects a missing value AND a value that is itself an option. Without the second
-# check, `--profiles --shell fish` silently sets the profile list to "--shell" and
-# then fails on "fish" — an error that names the wrong argument and sends you
-# looking in the wrong place.
-require_value() {
-  local flag="$1" value="${2-}"
-  [[ -n "$value" ]] || die "$flag requires a value."
-  [[ "$value" != --* ]] ||
-    die "$flag requires a value, but got the option '$value'."
-}
+# require_value now lives in script/lib/common.sh, so bootstrap and render-brewfile get
+# the same guard. It was defined here and tested here only, which is why `./bootstrap
+# install --git-email --yes` silently set the commit address to "--yes".
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
@@ -290,22 +283,44 @@ Stop the substrate first if you are not testing against it:
 # `modify_` script legitimately rewrites its target on every apply and would otherwise
 # fail every run. Scripts are the ones that carry the configuration work.
 assert_chezmoi_settled() {
-  local status_output
-  # The guest tags each status line, and only tagged lines are kept.
+  local raw status_output exit_line
+  # The guest tags its output, and reports its own exit status as a tagged line.
   #
-  # remote() is script/sync-to-mac, which prints its own progress to STDOUT: "[INFO]
-  # Syncing...", "[OK] Synced", "[INFO] Running on ...". Capturing the command's output
-  # therefore captures that chatter too, and the first version of this check tested the
-  # combined text. It could never be empty, so the settled branch below was dead code and
-  # every run warned; worse, `grep '^.?R'` was matching against harness prose rather than
-  # only chezmoi's own output.
+  # Two separate hazards, both already met head-on in this function's history:
+  #
+  # 1. remote() is script/sync-to-mac, which prints progress to STDOUT ("[INFO]
+  #    Syncing...", "[OK] Synced"). The first version captured that chatter along with
+  #    chezmoi's output, so the text was never empty, the settled branch was dead code,
+  #    and the pending-hook grep ran against harness prose. Hence the CHEZMOI| tag.
+  #
+  # 2. Tagging alone then made it WORSE. With stderr sent to /dev/null and the exit
+  #    status dropped by `|| true`, an unreachable guest, a failed rsync and a settled
+  #    chezmoi all produced the same empty string — and empty was the PASS. A gate built
+  #    to catch an unfinished install would happily certify an install it never saw.
+  #    Verified at the time by pointing the transfer at an unreachable address.
+  #
+  # So the guest emits CHEZMOI-RC| carrying chezmoi's real exit status. Its ABSENCE means
+  # the command never ran to completion, which is a failure and not a pass. "Could not
+  # inspect" must never render as "correct" — the same inversion tests/vm.sh guards
+  # against for `vm seal`.
   #
   # shellcheck disable=SC2016
-  # Single-quoted: the chezmoi path and the pipeline must resolve in the GUEST.
-  status_output="$(
-    remote sh -c '/opt/homebrew/bin/chezmoi status 2>&1 | sed "s/^/CHEZMOI|/"' 2>/dev/null |
-      sed -n 's/^CHEZMOI|//p' || true
+  # Single-quoted: every expansion below must resolve in the GUEST, not here.
+  raw="$(
+    remote sh -c 'out="$(/opt/homebrew/bin/chezmoi status 2>&1)"; rc=$?
+      printf "%s\n" "$out" | sed "s/^/CHEZMOI|/"
+      echo "CHEZMOI-RC|$rc"' 2>/dev/null || true
   )"
+
+  exit_line="$(printf '%s\n' "$raw" | sed -n 's/^CHEZMOI-RC|//p' | tail -1)"
+  [[ -n "$exit_line" ]] ||
+    die 'Could not read chezmoi status from the guest, so whether the apply finished is
+unknown. This is a failure, not a pass: check the VM is running and reachable with
+./script/vm status && ./script/vm ssh true'
+  [[ "$exit_line" == 0 ]] ||
+    die "chezmoi status failed in the guest (exit $exit_line), so the apply cannot be confirmed."
+
+  status_output="$(printf '%s\n' "$raw" | sed -n 's/^CHEZMOI|//p')"
 
   if [[ -z "${status_output//[[:space:]]/}" ]]; then
     success 'chezmoi status is empty: every file and hook is applied.'

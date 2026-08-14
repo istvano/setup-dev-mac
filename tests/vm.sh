@@ -126,16 +126,31 @@ done
 # needs M3 or later" — but that only ever justified not CREATING the substrate, never
 # skipping the provisioning of the runtime itself.
 assert_match '^RUNTIME="colima"$' "$TEST_INSTALL"
-assert_match 'exercise_guest_substrate' "$TEST_INSTALL"
-# How far it can go is detected from the GUEST, not assumed from the host.
-assert_match 'kern\.hv_support' "$TEST_INSTALL"
+
+# The definition AND the call, each anchored.
+#
+# `assert_match 'exercise_guest_substrate'` matched the prose at test-install:16, so the
+# function and its only call site could both be deleted — taking all fourteen guest_check
+# assertions with them — and this file stayed green off a comment. An unanchored name is
+# not evidence that the code exists.
+assert_match '^exercise_guest_substrate\(\) \{$' "$TEST_INSTALL"
+assert_match '^ *exercise_guest_substrate$' "$TEST_INSTALL"
+
+# How far it can go is detected from the GUEST, not assumed from the host. Anchored to
+# the live sysctl call for the same reason: the bare string appears in two comments.
+assert_match 'sysctl -n kern\.hv_support' "$TEST_INSTALL"
 
 # --- The destructive driver must be able to fail.
 #
 # It pipes everything through tee for the transcript, and a pipeline reports tee's
 # status. Without PIPESTATUS the driver would exit 0 whatever happened, which is
 # the one defect that makes a test suite worse than none.
-assert_match 'PIPESTATUS\[0\]' "$TEST_INSTALL"
+#
+# Anchored to the assignment. `PIPESTATUS\[0\]` alone also matched the explanatory comment
+# directly above it in test-install, so `status=$?` could have replaced the real line with
+# this test none the wiser — the driver would then have reported success for every failed
+# install, which is precisely the defect the paragraph above calls unforgivable.
+assert_match '^ *status="\$\{PIPESTATUS\[0\]\}"$' "$TEST_INSTALL"
 
 # --- seal must check both halves.
 #
@@ -268,8 +283,10 @@ assert_match 'container-substrate' "$hook"
 # interrupted inside a run_onchange hook leaves the rest pending, and without this gate a
 # half-configured guest passed the whole suite — the visible symptom was a broken
 # terminal, which pointed the investigation at Ghostty rather than the unfinished apply.
-assert_match 'assert_chezmoi_settled' "$ROOT/script/test-install"
-assert_match 'chezmoi status' "$ROOT/script/test-install"
+# Definition and call site, anchored — the bare name also appears in this gate's own log
+# strings, so an unanchored match proved neither.
+assert_match '^assert_chezmoi_settled\(\) \{$' "$ROOT/script/test-install"
+assert_match '^ *assert_chezmoi_settled$' "$ROOT/script/test-install"
 
 # And it must read chezmoi's output ALONE. remote() is script/sync-to-mac, which prints
 # "[INFO] Syncing..." and "[OK] Synced" to stdout; capturing those made the output never
@@ -279,5 +296,23 @@ assert_match 'chezmoi status' "$ROOT/script/test-install"
 # 'CHEZMOI|/' would assert "CHEZMOI" OR "/" and match nearly every line in the file.
 assert_match 'sed "s/\^/CHEZMOI\|/"' "$ROOT/script/test-install"
 assert_match "sed -n 's/\\^CHEZMOI\\|//p'" "$ROOT/script/test-install"
+
+# The gate must FAIL CLOSED when it cannot inspect the guest.
+#
+# Tagging alone was not enough and briefly made things worse: with stderr discarded and
+# the exit status dropped, an unreachable guest produced the same empty string as a
+# settled one, and empty was the PASS — so a destructive run could report "every file and
+# hook is applied" about a guest it never reached. The guest now reports its own exit
+# status, and the ABSENCE of that line is a failure. Both halves are asserted because
+# either one alone restores the inversion.
+# Both sides, separately. Asserting the tag alone matched the host-side extraction, so the
+# guest could stop emitting it and this stayed green — leaving a gate that can only ever
+# die. Fail-closed rather than falsely green, but still broken, and still unnoticed.
+# shellcheck disable=SC2016
+# The single quotes are correct: $rc is part of the pattern being searched for in
+# test-install, where it must stay unexpanded so it resolves in the guest.
+assert_match 'echo "CHEZMOI-RC\|\$rc"' "$ROOT/script/test-install"
+assert_match "sed -n 's/\\^CHEZMOI-RC\\|//p'" "$ROOT/script/test-install"
+assert_match 'Could not read chezmoi status from the guest' "$ROOT/script/test-install"
 
 echo 'Local macOS VM and container substrate: OK'

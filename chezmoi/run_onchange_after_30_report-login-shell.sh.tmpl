@@ -22,7 +22,16 @@ ACCOUNT={{ .chezmoi.username | quote }}
 
 # dscl reads the account record. $SHELL only reports the shell that happens to be
 # running this script, which is bash, and would always look like a mismatch.
-current="$(dscl . -read "/Users/$ACCOUNT" UserShell 2>/dev/null | awk '{print $2}')"
+#
+# `|| true` is load-bearing, for the same reason as the one on selected_path below.
+# This script runs under `set -Eeuo pipefail`, so a failing dscl makes the pipeline
+# non-zero, the assignment fails, and errexit kills the script BEFORE the `-z` guard
+# written to handle exactly that case. `dscl .` reads only the local node, so on a
+# directory-bound Mac (AD, LDAP, a mobile account) the record is genuinely absent and
+# dscl genuinely exits non-zero. chezmoi stops at the first failing script, so without
+# this the whole rest of the apply — hooks 35, 40, 45 and 90 — never runs, and stderr
+# has already gone to /dev/null so nothing says why.
+current="$(dscl . -read "/Users/$ACCOUNT" UserShell 2>/dev/null | awk '{print $2}')" || true
 
 if [[ -z "$current" ]]; then
   echo "[WARN] Could not read the login shell for $ACCOUNT; skipping the check." >&2

@@ -3,6 +3,47 @@
 This file contains unfinished work only. Recurring installation, verification
 and hardening procedures are documented in `docs/OPERATIONS.md`.
 
+## QA review, ten fixes applied
+
+A QA pass over the whole repository found 25 defects; ten were fixed. Each fix has a
+regression guard that was checked to FAIL when the fix is reverted, so none of them is a
+comment pretending to be a test.
+
+- [x] **False greens.** `hardening-check` compared `$1` to `--strict` positionally, so
+      `--stict`, `-s` and `--verbose --strict` all reported their FAILs and exited 0 — the
+      gate that exists to run before granting a machine credentials. `macos-defaults
+      --section <typo>` matched no rows, examined nothing, and printed "All declared macOS
+      defaults are in effect"; the valid names now come from the declarations themselves,
+      so the zero-match case cannot exist. `test-install`'s chezmoi gate treated an
+      unreachable guest as a settled apply; the guest now reports its own exit status and
+      the absence of that line is a failure.
+- [x] **Vacuous tests.** `tests/vm.sh` satisfied its `PIPESTATUS[0]` and
+      `exercise_guest_substrate` assertions from comments in `test-install`, so the
+      destructive driver could have been made unable to fail, and all fourteen guest
+      checks deleted, with the suite green. Both are anchored now.
+      `tests/chezmoi-templates.sh` ran four purely-static checks *after* its
+      chezmoi-not-installed exit — including the unguarded-hook-tail check whose own
+      comment records three incidents where one failing hook cost every later hook. They
+      now run before it.
+- [x] **Silent misconfiguration.** `bootstrap` had eleven unguarded `"$2"; shift 2` arms,
+      so `--git-email --yes` wrote `--yes` as the commit address and lost the flag;
+      `require_value` moved from `test-install` into `script/lib/common.sh` and is called
+      from `bootstrap` and `render-brewfile`. Hook 30 lost the whole apply chain on a
+      directory-bound Mac, because `pipefail` killed the assignment before the guard
+      written for that case. Hook 40 applied zero defaults on any apply without a TTY, and
+      only looked correct because `bootstrap --yes` exports `ASSUME_YES`. `~/.docker` is
+      now ignored unless colima is selected, verified by rendering `.chezmoiignore` for all
+      four runtimes.
+
+Not fixed, deliberately — see the QA report for the full list with `file:line`:
+`container-substrate --verify` passing with no registry because its checks are gated on
+`k3d` (declared only in the `kubernetes` profile), the MCP policy test being vacuous
+against an empty allowlist, `sync-to-mac --dryrun` performing a real `rsync --delete`,
+`install-toolhive` installing on any unrecognised argument, the dry-run/apply
+`--mount-type` divergence, and the documentation drift (`README.md` and `docs/TESTING.md`
+both claim `--runtime none` is the `test-install` default; it is colima).
+`user.signingkey` being written raw needs a real signing test before anyone acts on it.
+
 ## Run the new test harness
 
 The local macOS VM (ADR-036) exists but has not yet been exercised end to end.

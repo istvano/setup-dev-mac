@@ -5,6 +5,13 @@
 set -Eeuo pipefail
 # Reported, not fatal. A key this macOS version rejects must not stop the
 # remaining apply hooks; `script/macos-defaults --verify` is what reports drift.
-{{ joinPath $repo "script/macos-defaults" | quote }} apply ||
+# --yes is required, not cosmetic. `macos-defaults apply` builds the list of privileged
+# commands and calls confirm() BEFORE writing anything, and confirm() fails closed with
+# no terminal on stdin. chezmoi passes its own stdin to scripts, so an apply driven by
+# `ssh host chezmoi apply` (no -t), by launchd, or with stdin redirected would decline
+# the prompt and write NOTHING — not merely the four sudo-scoped keys. It only appeared
+# to work because `./bootstrap --yes` exports ASSUME_YES=1, which the child inherits;
+# any apply that bypasses bootstrap had this silently doing nothing at all.
+{{ joinPath $repo "script/macos-defaults" | quote }} apply --yes ||
   echo "[WARN] Some macOS defaults could not be applied; run script/macos-defaults --verify." >&2
 {{- end }}

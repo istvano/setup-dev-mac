@@ -174,6 +174,43 @@ selected() {
   [[ -z "$SECTION_FILTER" || "$1" == "$SECTION_FILTER" ]]
 }
 
+# The sections that actually exist, read out of the declarations themselves.
+#
+# Derived rather than listed because a hardcoded list is a second place to update, and
+# the usage text already drifted into being the only record of these names. Deriving it
+# also makes the zero-match case impossible by construction: any name this accepts is a
+# name at least one row carries.
+#
+# SETTINGS rows are section|scope|domain|key|type|value, so the section is the first
+# field. ACTIONS rows are name|section|needs_sudo, so the section is the second.
+valid_sections() {
+  local entry rest
+  for entry in "${SETTINGS[@]}"; do
+    printf '%s\n' "${entry%%|*}"
+  done
+  for entry in "${ACTIONS[@]}"; do
+    rest="${entry#*|}"
+    printf '%s\n' "${rest%%|*}"
+  done
+}
+
+# Refuse a --section that names nothing.
+#
+# Without this, an unrecognised name matched no rows, every mode examined zero settings,
+# and the "0 failures" path printed success — so `--verify --section dcok` reported
+# "All declared macOS defaults are in effect" while checking nothing, and
+# `apply --section dcok` wrote nothing, skipped the sudo confirm, still restarted Finder
+# and the Dock, and reported that it had applied the defaults. A verifier that passes
+# without verifying is worse than no verifier, and --profiles has been validated by
+# validate_profiles all along; --section was the one free-text filter with no check.
+validate_section() {
+  [[ -n "$SECTION_FILTER" ]] || return 0
+  if ! valid_sections | sort -u | grep -qxF -- "$SECTION_FILTER"; then
+    die "Unknown section: $SECTION_FILTER
+Valid sections: $(valid_sections | sort -u | tr '\n' ' ')"
+  fi
+}
+
 # Distinguishes "the key is not set" from "this domain cannot be read at all".
 #
 # `defaults read` gives the SAME message for both — "The domain/default pair of (x, y)
@@ -420,6 +457,8 @@ reports both identically, so this does not say which."
 
 main() {
   parse_args "$@"
+  # Before any mode runs, so a bad --section cannot reach a success path.
+  validate_section
 
   # --dry-run is useful off-Darwin for reviewing exactly what would change.
   if [[ "$MODE" != "dry-run" ]]; then

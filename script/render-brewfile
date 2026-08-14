@@ -16,26 +16,34 @@ OUTPUT="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation/Brewfile"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profiles)
+      require_value "$1" "${2:-}"
       PROFILES="$2"
       shift 2
       ;;
     --shell)
+      require_value "$1" "${2:-}"
       SHELL_CHOICE="$2"
       shift 2
       ;;
     --runtime)
+      require_value "$1" "${2:-}"
       RUNTIME="$2"
       shift 2
       ;;
     --password-manager)
+      require_value "$1" "${2:-}"
       PASSWORD_MANAGER="$2"
       shift 2
       ;;
     --firewall)
+      require_value "$1" "${2:-}"
       FIREWALL="$2"
       shift 2
       ;;
+    # --output most of all: unguarded, `--output --profiles core` wrote the rendered
+    # Brewfile to a file literally named "--profiles".
     --output)
+      require_value "$1" "${2:-}"
       OUTPUT="$2"
       shift 2
       ;;

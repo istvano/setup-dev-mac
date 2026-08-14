@@ -183,6 +183,31 @@ nested_virtualization_supported() {
 # Automation is expected to pass --yes, which is why ASSUME_YES is checked first and
 # a missing terminal is refused rather than assumed. AGENTS.md: fail closed on
 # ambiguous state.
+
+# Rejects a missing value AND a value that is itself an option.
+#
+# Here rather than in one script because it was defined in script/test-install and used
+# only there, while `bootstrap` — the script an operator actually types — had eleven
+# unguarded `"$2"; shift 2` arms. The consequences differ in kind:
+#
+#   ./bootstrap install --git-email --yes
+#
+# absorbed the flag, wrote gitEmail = "--yes" into ~/.config/chezmoi/chezmoi.toml and
+# ~/.gitconfig, and lost --yes — so every commit the workstation authored carried that
+# address, and the run reported success. A missing value was no better: `set -u` turned
+# it into `line 77: $2: unbound variable`, the raw failure AGENTS.md requires a guard
+# against.
+#
+# The second check is what makes the error name the right argument. Without it,
+# `--profiles --shell fish` sets the profile list to "--shell" and then fails on "fish",
+# sending you looking in the wrong place.
+require_value() {
+  local flag="$1" value="${2-}"
+  [[ -n "$value" ]] || die "$flag requires a value."
+  [[ "$value" != --* ]] ||
+    die "$flag requires a value, but got the option '$value'."
+}
+
 confirm() {
   local prompt="$1" answer
   if [[ "${ASSUME_YES:-0}" == "1" ]]; then

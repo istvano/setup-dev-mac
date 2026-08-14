@@ -36,14 +36,88 @@ for template in "${TEMPLATES[@]}"; do
   done <"$template"
 done
 
+# --- No apply hook may abort the ones after it.
+#
+# chezmoi runs scripts in order and stops at the first non-zero exit, so a hook
+# that fails takes every later hook with it. Seen three times on real hardware:
+# brew bundle failing cost every dotfile; rdctl returning 500 cost the VS Code
+# extensions, the macOS defaults, the browser profiles and the reminder.
+#
+# These hooks CONFIGURE things. Failing to configure one is worth reporting, not
+# worth abandoning the rest of the configuration — ./script/verify and
+# script/macos-defaults --verify are what report the resulting drift.
+#
+# Matched on the last executable line, which is the one whose status chezmoi sees.
+for hook in "$ROOT"/chezmoi/run_*_after_*.sh.tmpl; do
+  name="$(basename "$hook")"
+  # 30 reports and 90 prints a reminder; both end in a plain command that cannot
+  # meaningfully fail, and 15 exits 0 on every branch.
+  case "$name" in
+    *_30_* | *_90_* | *_15_*) continue ;;
+  esac
+  last="$(grep -vE '^\s*#|^\s*$|^\{\{-? ?end \}\}$' "$hook" | tail -n 1)"
+  # Anchored regexes, not globs. `*fi*` matched "browser-profile" and passed a
+  # genuinely unguarded hook — the test looked like it worked and did not.
+  if [[ "$last" =~ \|\|[[:space:]]*echo ]] ||
+    [[ "$last" =~ ^[[:space:]]*fi$ ]] ||
+    [[ "$last" =~ ^[[:space:]]*exit[[:space:]]+0$ ]] ||
+    [[ "$last" =~ \>\&2$ ]]; then
+    continue
+  fi
+  echo "$name ends in an unguarded command:" >&2
+  echo "  $last" >&2
+  echo 'A non-zero exit here aborts every later apply hook. Report the' >&2
+  echo 'failure and continue instead.' >&2
+  exit 1
+done
+
+# --- A failed package install must not abort the whole apply.
+#
+# run_onchange_before_10 runs BEFORE any file is written, so a non-zero exit
+# takes the dotfiles, the macOS defaults and the browser profiles down with it.
+# Observed for real: nine formulae had no bottle on macOS 13, brew bundle exited
+# non-zero, and the machine ended up with 195 packages and zero configuration.
+packages_hook="$ROOT/chezmoi/run_onchange_before_10_install-packages.sh.tmpl"
+if grep -qE '^brew bundle check .*\|\| brew bundle install' "$packages_hook"; then
+  echo 'run_onchange_before_10 lets brew bundle fail the apply.' >&2
+  echo 'It is a run_before hook, so that costs every dotfile, not just packages.' >&2
+  echo 'Report the failure and continue; ./script/verify still catches the drift.' >&2
+  exit 1
+fi
+assert_match 'The apply continues so' "$packages_hook"
+
+# --- The chezmoi diff configuration must not set diff.command.
+#
+# Setting it makes chezmoi invoke the tool per FILE, and delta opens a pager each
+# time, so reviewing a multi-file apply meant quitting one pager after another
+# with no way to see the whole thing. `diff.pager` alone pipes one unified diff
+# through delta, which is what --no-pager can also disable. Both writers of this
+# config are checked, since bootstrap writes it too.
+for config_writer in "$ROOT/chezmoi/.chezmoi.toml.tmpl" "$ROOT/bootstrap"; do
+  if grep -qE '^command = "delta"' "$config_writer"; then
+    echo "$(basename "$config_writer") sets diff.command = delta." >&2
+    echo "That runs delta per file and opens a pager for each one. Use only" >&2
+    echo "diff.pager, which pipes a single unified diff through delta." >&2
+    exit 1
+  fi
+done
+
 # --- Dynamic: execute every template and prove the paths it emits exist.
+#
+# Everything above this line is deliberately positioned above it. Those four checks read
+# files and need no chezmoi, but they used to sit BELOW this early exit, so on the default
+# local ./script/test run — the path AGENTS.md documents, where chezmoi is usually absent —
+# they never executed while the suite printed "static guard OK". The unguarded-hook-tail
+# check was among them: the one whose comment records three separate incidents where a
+# single failing hook cost every hook after it. It could have been broken with the suite
+# green. Adding a static check below this point silently un-runs it; add it above.
 
 if ! command -v chezmoi >/dev/null 2>&1; then
   if [[ "${REQUIRE_CHEZMOI:-0}" == "1" ]]; then
     echo 'chezmoi is required when REQUIRE_CHEZMOI=1.' >&2
     exit 1
   fi
-  echo 'Chezmoi templates: static guard OK; chezmoi not installed, execution skipped'
+  echo 'Chezmoi templates: 4 static checks OK; chezmoi not installed, template execution skipped'
   exit 0
 fi
 
@@ -139,72 +213,6 @@ for CONFIG in "${CONFIGS[@]}"; do
       }
     done < <(grep -oE '/[^"'"'"' ]*/script/[a-z-]+' <<<"$rendered" | sort -u)
   done
-done
-
-# --- No apply hook may abort the ones after it.
-#
-# chezmoi runs scripts in order and stops at the first non-zero exit, so a hook
-# that fails takes every later hook with it. Seen three times on real hardware:
-# brew bundle failing cost every dotfile; rdctl returning 500 cost the VS Code
-# extensions, the macOS defaults, the browser profiles and the reminder.
-#
-# These hooks CONFIGURE things. Failing to configure one is worth reporting, not
-# worth abandoning the rest of the configuration — ./script/verify and
-# script/macos-defaults --verify are what report the resulting drift.
-#
-# Matched on the last executable line, which is the one whose status chezmoi sees.
-for hook in "$ROOT"/chezmoi/run_*_after_*.sh.tmpl; do
-  name="$(basename "$hook")"
-  # 30 reports and 90 prints a reminder; both end in a plain command that cannot
-  # meaningfully fail, and 15 exits 0 on every branch.
-  case "$name" in
-    *_30_* | *_90_* | *_15_*) continue ;;
-  esac
-  last="$(grep -vE '^\s*#|^\s*$|^\{\{-? ?end \}\}$' "$hook" | tail -n 1)"
-  # Anchored regexes, not globs. `*fi*` matched "browser-profile" and passed a
-  # genuinely unguarded hook — the test looked like it worked and did not.
-  if [[ "$last" =~ \|\|[[:space:]]*echo ]] ||
-    [[ "$last" =~ ^[[:space:]]*fi$ ]] ||
-    [[ "$last" =~ ^[[:space:]]*exit[[:space:]]+0$ ]] ||
-    [[ "$last" =~ \>\&2$ ]]; then
-    continue
-  fi
-  echo "$name ends in an unguarded command:" >&2
-  echo "  $last" >&2
-  echo 'A non-zero exit here aborts every later apply hook. Report the' >&2
-  echo 'failure and continue instead.' >&2
-  exit 1
-done
-
-# --- A failed package install must not abort the whole apply.
-#
-# run_onchange_before_10 runs BEFORE any file is written, so a non-zero exit
-# takes the dotfiles, the macOS defaults and the browser profiles down with it.
-# Observed for real: nine formulae had no bottle on macOS 13, brew bundle exited
-# non-zero, and the machine ended up with 195 packages and zero configuration.
-packages_hook="$ROOT/chezmoi/run_onchange_before_10_install-packages.sh.tmpl"
-if grep -qE '^brew bundle check .*\|\| brew bundle install' "$packages_hook"; then
-  echo 'run_onchange_before_10 lets brew bundle fail the apply.' >&2
-  echo 'It is a run_before hook, so that costs every dotfile, not just packages.' >&2
-  echo 'Report the failure and continue; ./script/verify still catches the drift.' >&2
-  exit 1
-fi
-assert_match 'The apply continues so' "$packages_hook"
-
-# --- The chezmoi diff configuration must not set diff.command.
-#
-# Setting it makes chezmoi invoke the tool per FILE, and delta opens a pager each
-# time, so reviewing a multi-file apply meant quitting one pager after another
-# with no way to see the whole thing. `diff.pager` alone pipes one unified diff
-# through delta, which is what --no-pager can also disable. Both writers of this
-# config are checked, since bootstrap writes it too.
-for config_writer in "$ROOT/chezmoi/.chezmoi.toml.tmpl" "$ROOT/bootstrap"; do
-  if grep -qE '^command = "delta"' "$config_writer"; then
-    echo "$(basename "$config_writer") sets diff.command = delta." >&2
-    echo "That runs delta per file and opens a pager for each one. Use only" >&2
-    echo "diff.pager, which pipes a single unified diff through delta." >&2
-    exit 1
-  fi
 done
 
 # --- .chezmoiignore is a template too, but has no .tmpl suffix.

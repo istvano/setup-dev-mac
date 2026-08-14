@@ -16,8 +16,35 @@ source "$ROOT/script/lib/common.sh"
 
 [[ "$(uname -s)" == Darwin ]] || die "macOS is required."
 
+usage() {
+  cat <<'EOF'
+Usage: script/hardening-check [--strict]
+
+  --strict   exit non-zero when any check fails; otherwise failures are reported
+             and the command still exits 0
+EOF
+}
+
+# A real argument loop, because the previous one-line form was a positional string
+# compare: `[[ "${1:-}" == "--strict" ]]`. Anything that was not exactly --strict in
+# position 1 left STRICT=false, and the last statement is a warn, so the command
+# exited 0. `--stict`, `-s`, `--strict=1` and even `--verbose --strict` all reported
+# their FAILs and then passed. This is the script whose whole purpose is to gate a
+# machine before it is given credentials, so a one-character typo in a CI step turned
+# a disabled firewall into a green light. An explicit reject arm is what makes that
+# impossible; AGENTS.md requires one on every parser for this reason.
 STRICT=false
-[[ "${1:-}" == "--strict" ]] && STRICT=true
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --strict) STRICT=true ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    *) die "Unknown option: $1" ;;
+  esac
+  shift
+done
 
 failures=0
 

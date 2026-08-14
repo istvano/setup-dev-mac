@@ -16,8 +16,24 @@
   and ADR-031 — so its configuration has to keep working. Every activation in it
   is guarded by `command -v` or a readability test, so it degrades cleanly on a
   machine where the zsh plugin formulae were never installed.
+
+  ~/.docker is excluded unless colima is the selected runtime, because everything
+  in it depends on formulae only profiles/runtime-colima.Brewfile declares:
+  docker-compose and docker-buildx for the two CLI-plugin symlinks, and
+  docker-credential-helper for the credsStore in config.json. Ungated, a
+  --runtime rancher or orbstack machine got symlinks into
+  /opt/homebrew/opt/docker-compose that will never exist — written into
+  ~/.docker/cli-plugins, which is exactly where Rancher Desktop and OrbStack put
+  their own plugin links, so `docker compose` and `docker buildx` stopped
+  resolving on every apply. credsStore was the same shape with a worse symptom:
+  `docker login` failing with "executable file not found" instead of writing to
+  the Keychain, turning a security control into a login failure. Directory-level
+  rather than per-file so a fourth entry cannot be added ungated by accident.
 */ -}}
 AGENTS.md
 {{ if ne .shell "fish" }}
 .config/fish
+{{ end }}
+{{ if ne .runtime "colima" }}
+.docker
 {{ end }}

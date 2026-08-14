@@ -73,47 +73,62 @@ parse_args() {
   fi
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      # Every value option is guarded by require_value (script/lib/common.sh). The
+      # identity options need it most: they have no validator downstream, so an absorbed
+      # flag used to reach ~/.gitconfig as the commit address and the run still reported
+      # success.
       --profiles)
+        require_value "$1" "${2:-}"
         PROFILES="$2"
         shift 2
         ;;
       --shell)
+        require_value "$1" "${2:-}"
         SHELL_CHOICE="$2"
         shift 2
         ;;
       --runtime)
+        require_value "$1" "${2:-}"
         RUNTIME="$2"
         shift 2
         ;;
       --password-manager)
+        require_value "$1" "${2:-}"
         PASSWORD_MANAGER="$2"
         shift 2
         ;;
       --firewall)
+        require_value "$1" "${2:-}"
         FIREWALL="$2"
         shift 2
         ;;
       --git-name)
+        require_value "$1" "${2:-}"
         GIT_NAME="$2"
         shift 2
         ;;
       --git-email)
+        require_value "$1" "${2:-}"
         GIT_EMAIL="$2"
         shift 2
         ;;
       --git-signing-method)
+        require_value "$1" "${2:-}"
         GIT_SIGNING_METHOD="$2"
         shift 2
         ;;
       --git-signing-key)
+        require_value "$1" "${2:-}"
         GIT_SIGNING_KEY="$2"
         shift 2
         ;;
       --work-git-dir)
+        require_value "$1" "${2:-}"
         WORK_GIT_DIR="$2"
         shift 2
         ;;
       --work-git-email)
+        require_value "$1" "${2:-}"
         WORK_GIT_EMAIL="$2"
         shift 2
         ;;
