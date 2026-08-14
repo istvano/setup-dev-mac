@@ -14,7 +14,7 @@ PROFILES="$DEFAULT_PROFILES"
 # programs, so assigning to it here would misreport this process to everything
 # bootstrap invokes.
 SHELL_CHOICE="zsh"
-RUNTIME="rancher"
+RUNTIME="colima"
 PASSWORD_MANAGER="bitwarden"
 FIREWALL="lulu"
 GIT_NAME="${GIT_AUTHOR_NAME:-}"
@@ -26,18 +26,28 @@ GIT_SIGNING_KEY=""
 # shellcheck disable=SC2088
 WORK_GIT_DIR="~/work"
 WORK_GIT_EMAIL=""
-APPLY_MACOS_DEFAULTS=false
+# The macOS defaults and the firewall are on by default. Both were opt-in while they
+# were unproven, which meant an install that forgot the flag produced an unhardened
+# machine with none of the declared defaults — the failure mode is silent, and the
+# whole point of a declarative workstation is that the declared state is what you get.
+# Both are cheap and reversible: macos-defaults records every previous value before
+# writing (see --diff and the macos-defaults-before.* transcript), and the firewall is
+# two socketfilterfw calls. Opt out with --no-macos-defaults / --no-hardening.
+#
+# Touch ID for sudo and OS updates stay opt-in: the first edits /etc/pam.d/sudo_local
+# and the second can reboot.
+APPLY_MACOS_DEFAULTS=true
 WITH_TOUCHID_SUDO=false
-WITH_HARDENING=false
+WITH_HARDENING=true
 INSTALL_UPDATES=false
 ASSUME_YES=0
 
 usage() {
   cat <<'EOF'
 Usage: ./bootstrap plan|install [options]
-  --profiles LIST|all          'all' means every profile this machine supports
+  --profiles LIST|all          'all' means every declared profile
   --shell zsh|fish
-  --runtime rancher|orbstack|colima|none
+  --runtime colima|rancher|orbstack|none
   --password-manager bitwarden|1password|none
   --firewall lulu|little-snitch|none
   --git-name VALUE
@@ -46,8 +56,10 @@ Usage: ./bootstrap plan|install [options]
   --git-signing-key VALUE      GPG key ID, or SSH public key for the ssh method
   --work-git-dir PATH          directory holding work repositories
   --work-git-email VALUE       Git identity used inside that directory
-  --with-macos-defaults
-  --with-hardening
+  --no-macos-defaults          skip the declared macOS defaults (applied by default)
+  --no-hardening               leave the firewall alone (enabled by default)
+  --with-macos-defaults        accepted and redundant; both are the default now
+  --with-hardening             accepted and redundant; both are the default now
   --with-touchid-sudo          enable Touch ID for sudo via /etc/pam.d/sudo_local
   --install-updates
   --yes
@@ -105,12 +117,24 @@ parse_args() {
         WORK_GIT_EMAIL="$2"
         shift 2
         ;;
+      # --with-* are kept rather than removed: they appear in this repository's own
+      # docs, in evidence transcripts and in anything a reader copied from them, and
+      # silently rejecting a flag that asks for the behaviour already in effect would
+      # fail an install for no reason.
       --with-macos-defaults)
         APPLY_MACOS_DEFAULTS=true
         shift
         ;;
+      --no-macos-defaults)
+        APPLY_MACOS_DEFAULTS=false
+        shift
+        ;;
       --with-hardening)
         WITH_HARDENING=true
+        shift
+        ;;
+      --no-hardening)
+        WITH_HARDENING=false
         shift
         ;;
       --with-touchid-sudo)
@@ -135,30 +159,23 @@ parse_args() {
   done
 }
 
-# `--profiles all` means every profile this machine can actually install.
+# `--profiles all` means every declared profile.
 #
-# It is not a convenience alias for a long string: the exclusions come from
-# script/platform-gaps, so there is one source of truth for what this
-# architecture supports, and the selection widens by itself on the Apple Silicon
-# machine without anyone editing a list. What it expanded to is always printed,
-# because "all" quietly meaning "all but one" would otherwise be a surprise.
+# It expands from VALID_PROFILES rather than from a copied string, so a profile
+# added later is selected without anyone editing a second list;
+# tests/profiles.sh asserts that. What it expanded to is always printed, because a
+# selection this broad should be visible in the plan rather than implied by a word.
+#
+# There is no longer an exclusion step. Every declared package installs on Apple
+# Silicon, which is now the only supported platform (ADR-036).
 expand_profile_selection() {
   [[ "$PROFILES" == all ]] || return 0
-  local excluded expanded="" profile
-  excluded="$("$ROOT/script/platform-gaps" --list-gap-profiles)"
+  local expanded="" profile
   for profile in "${VALID_PROFILES[@]}"; do
-    case ",$excluded," in
-      *",$profile,"*) continue ;;
-    esac
     expanded="${expanded:+$expanded,}$profile"
   done
   PROFILES="$expanded"
-  if [[ -n "$excluded" ]]; then
-    warn "--profiles all excludes $excluded: this machine's architecture cannot
-install it. Every other profile is selected."
-  else
-    log "--profiles all selected every profile (${#VALID_PROFILES[@]})."
-  fi
+  log "--profiles all selected every profile (${#VALID_PROFILES[@]})."
 }
 
 validate_choices() {
@@ -166,7 +183,7 @@ validate_choices() {
   expand_profile_selection
   validate_profiles "$PROFILES"
   [[ "$SHELL_CHOICE" =~ ^(zsh|fish)$ ]] || die "Invalid shell"
-  [[ "$RUNTIME" =~ ^(rancher|orbstack|colima|none)$ ]] || die "Invalid runtime"
+  [[ "$RUNTIME" =~ ^(colima|rancher|orbstack|none)$ ]] || die "Invalid runtime"
   [[ "$PASSWORD_MANAGER" =~ ^(bitwarden|1password|none)$ ]] || die "Invalid password manager"
   [[ "$FIREWALL" =~ ^(lulu|little-snitch|none)$ ]] || die "Invalid firewall"
   [[ "$GIT_SIGNING_METHOD" =~ ^(gpg|ssh|none)$ ]] || die "Invalid commit signing method"
@@ -200,18 +217,6 @@ Workstation bootstrap plan
 Bootstrap trust set:
   Xcode Command Line Tools, Homebrew, Git, GitHub CLI, age, git-delta and chezmoi
 EOF
-  report_platform_gaps || true
-}
-
-# Names what this machine's architecture cannot install, at plan time and again
-# before the install commits to anything.
-#
-# Without it the only signal is a `brew bundle` failure partway through a long
-# install, which reads as a broken repository rather than as a known limit of the
-# hardware. Reported rather than silently dropped: the point is to know which
-# parts remain unproven until the Apple Silicon machine exists (ADR-034).
-report_platform_gaps() {
-  "$ROOT/script/platform-gaps" --profiles "$PROFILES" --strict
 }
 
 ensure_xcode_clt() {
@@ -244,10 +249,26 @@ ensure_homebrew() {
     rm -f "$installer"
     die "Homebrew is required."
   }
-  /bin/bash "$installer"
+  # NONINTERACTIVE is required for an unattended run, and only under --yes.
+  #
+  # The installer ends with `if [[ -z "${NONINTERACTIVE-}" ]]; then wait_for_user`,
+  # which prints "Press RETURN/ENTER to continue" and reads one character. It sets
+  # NONINTERACTIVE itself only when $CI is set or stdin is not a TTY — and
+  # script/test-install reaches this over `ssh -t`, so there IS a tty and the prompt
+  # appears. An unattended install therefore hung here with no indication why.
+  #
+  # Passed only when --yes was given, so an interactive install keeps the prompt.
+  # That prompt is the last chance to stop after reviewing the digest printed above,
+  # and suppressing it unconditionally would remove a deliberate review step from
+  # the one remote script this repository executes (SECURITY.md).
+  if [[ "$ASSUME_YES" == "1" ]]; then
+    NONINTERACTIVE=1 /bin/bash "$installer"
+  else
+    /bin/bash "$installer"
+  fi
   rm -f "$installer"
-  # The installer picks the prefix from the architecture, so it is discovered
-  # rather than assumed: /opt/homebrew on Apple Silicon, /usr/local on Intel.
+  # Discovered rather than assumed, through brew_prefix, so the prefix has exactly
+  # one definition and it lives in script/lib/common.sh.
   activate_homebrew || die "Homebrew installed but no brew binary was found in
 $(printf '%s ' "${HOMEBREW_PREFIXES[@]}")."
 }
@@ -332,7 +353,7 @@ write_chezmoi_config() {
   # builtin assigns any of them, so a later value cannot reference an earlier one.
   local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/chezmoi"
   local config="$config_dir/chezmoi.toml"
-  local profiles_toml="" profile
+  local profiles_toml="" profile profile_array
   IFS=',' read -r -a profile_array <<<"$PROFILES"
   for profile in "${profile_array[@]}"; do
     [[ -n "$profiles_toml" ]] && profiles_toml+=", "
@@ -340,8 +361,22 @@ write_chezmoi_config() {
   done
   mkdir -p "$config_dir"
   [[ -e "$config" ]] && backup_file "$config"
-  umask 077
-  cat >"$config" <<EOF
+  # A SUBSHELL, not a bare `umask 077`. The umask builtin changes the process,
+  # not the block, so setting it here leaked into everything main() runs next —
+  # including `chezmoi init --apply`, whose first hook is `brew bundle install`
+  # for the whole selection. Both shell configurations in this repository already
+  # record why that is wrong: "Homebrew fails to build several formulae under
+  # umask 077." A first install could therefore lose packages to the umask this
+  # function set, and hook 10 reports a failed package install and continues, so
+  # the cause was two steps removed from the symptom.
+  #
+  # The umask is still needed: it closes the window between creating the file and
+  # the chmod below, during which the config holds the Git identity at whatever
+  # the inherited umask allowed. Scoping it to a subshell keeps that guarantee
+  # without exporting it to the rest of the bootstrap.
+  (
+    umask 077
+    cat >"$config" <<EOF
 sourceDir = $(toml_quote "$ROOT")
 
 [git]
@@ -373,7 +408,8 @@ passwordManager = $(toml_quote "$PASSWORD_MANAGER")
 firewall = $(toml_quote "$FIREWALL")
 applyMacOSDefaults = $APPLY_MACOS_DEFAULTS
 EOF
-  chmod 600 "$config"
+    chmod 600 "$config"
+  )
 }
 
 main() {
@@ -386,11 +422,6 @@ main() {
   print_plan
   [[ "$COMMAND" == plan ]] && exit 0
   require_supported_mac
-  # Asked rather than refused: everything outside the listed profiles still
-  # installs, and the choice of whether to drop them is the operator's.
-  report_platform_gaps ||
-    confirm "Continue anyway? brew bundle will fail on those packages." ||
-    die "Cancelled. Re-run without the profiles listed above."
   confirm "Proceed with bootstrap and chezmoi apply?" || die "Cancelled."
   ensure_xcode_clt
   ensure_homebrew

@@ -65,8 +65,9 @@ check 'Application firewall' 'enabled|state = 1' \
   /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
 check 'Firewall stealth mode' 'enabled|on' \
   /usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode
-check 'Firewall logging' 'enabled|on' \
-  /usr/libexec/ApplicationFirewall/socketfilterfw --getloggingmode
+# No firewall-logging check. macOS 26 removed --getloggingmode from socketfilterfw
+# altogether, so this reported a usage dump as if it were a failed state. See the note
+# in script/macos-defaults; there is no replacement mechanism.
 
 # systemsetup refuses without administrator rights by printing to STDOUT and
 # exiting 0, so the exit status cannot be used to detect the refusal. The `else`

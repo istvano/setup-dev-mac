@@ -1,0 +1,6 @@
+{{- /*
+  As for buildx: Homebrew installs compose as a standalone binary, so
+  `docker compose` is absent until it is linked in as a CLI plugin. See
+  symlink_docker-buildx.tmpl.
+*/ -}}
+{{ template "brew-prefix" . }}/opt/docker-compose/bin/docker-compose

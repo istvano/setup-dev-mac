@@ -4,7 +4,7 @@
 # list because it cannot source shell data.
 # Consumed by sourcing scripts (bootstrap, script/render-brewfile, tests).
 # shellcheck disable=SC2034
-DEFAULT_PROFILES="core,dev,security,productivity,backup"
+DEFAULT_PROFILES="core,dev,security,productivity,backup,kubernetes"
 VALID_PROFILES=(
   core
   dev

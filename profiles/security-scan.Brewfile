@@ -7,10 +7,15 @@
 # interactive use case is inspecting an artefact before deciding to trust it.
 #
 # Use the project's containerised scanners for anything reproducible.
-brew "trivy"        # Filesystem, image and IaC vulnerability and misconfiguration scanner.
 brew "syft"         # Generates an SBOM for an image, directory or archive.
 brew "grype"        # Matches an SBOM or image against vulnerability data.
 brew "osv-scanner"  # Checks lockfiles against the OSV vulnerability database.
 brew "trufflehog"   # Verifies discovered credentials rather than only pattern-matching them.
-brew "hadolint"     # Dockerfile linter used while authoring project images.
 brew "dive"         # Inspects container image layers and wasted space.
+
+# trivy and hadolint moved to profiles/dev.Brewfile in ADR-040: with containers and
+# Kubernetes in the default selection, scanning an image and linting a Dockerfile are
+# part of authoring rather than a specialist activity. What remains here is the wider
+# set — SBOM generation, a second vulnerability matcher, lockfile and credential
+# scanning, image layer inspection — which ADR-022 keeps out of the default because
+# each overlaps something already installed or is used occasionally rather than daily.

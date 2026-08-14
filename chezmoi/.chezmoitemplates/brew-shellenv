@@ -1,13 +1,13 @@
 # Vendor-generated shell initialisation. Chezmoi run scripts do not inherit an
 # interactive shell's PATH, so Homebrew has to be located explicitly.
 #
-# The prefix is architecture-dependent: /opt/homebrew on Apple Silicon,
-# /usr/local on Intel. Apple Silicon is checked first, so a Mac carrying both
-# resolves to the native install rather than a translated one.
-for __brew in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-  if [[ -x "$__brew" ]]; then
-    eval "$("$__brew" shellenv)"
-    break
-  fi
-done
+# /opt/homebrew only. It is the Apple Silicon prefix, and Apple Silicon is the only
+# supported platform (ADR-036). /usr/local is deliberately not a fallback: on this
+# hardware it holds an x86_64 Homebrew installed under Rosetta, so falling back to
+# it would put a translated toolchain on PATH — working, slower, wrong binaries,
+# and silent about it.
+__brew=/opt/homebrew/bin/brew
+if [[ -x "$__brew" ]]; then
+  eval "$("$__brew" shellenv)"
+fi
 unset __brew

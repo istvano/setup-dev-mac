@@ -1,0 +1,628 @@
+#!/usr/bin/env bash
+# Create or reconcile the container substrate for project containers and clusters.
+#
+# NOT needed to test this repository. Testing macOS provisioning in a VM uses tart,
+# ssh and rsync and never touches Docker or Colima on the host — see script/vm and
+# script/test-install, which reference neither. The two are unrelated jobs and running
+# them together only over-commits the machine.
+#
+# Not "always-on" either. An earlier version of this comment said so, which
+# contradicted the measurement: the VM never returns memory to macOS, so 14 GiB stays
+# committed until it is stopped. Start it when doing container work and stop it when
+# done — the four objects below persist inside the VM across colima stop/start, so
+# stopping costs nothing but the restart.
+#
+# Four objects, tuned once and shared:
+#
+#   the VM        a Colima instance on Virtualization.framework, sized deliberately
+#   the network   one Docker bridge with a pinned subnet
+#   the registry  a shared image cache on loopback
+#   the builder   a persistent BuildKit builder that survives cluster teardown
+#
+# This is the line ADR-037 draws against ADR-010, which says the repository does not
+# deploy a shared container stack and still does not. Everything here is stateless
+# or a cache: a network, an image cache, a build cache. Services with data —
+# databases, queues, observability — remain project-local, and nothing in this file
+# creates one.
+#
+#   container-substrate [apply]     create or reconcile (default)
+#   container-substrate --dry-run   print what would run, change nothing
+#   container-substrate --status    what exists now
+#   container-substrate --verify    non-zero when the substrate has drifted
+#
+# Idempotent by design: every step checks for its object first, so running it after
+# a Colima upgrade eats the profile rebuilds only what is missing.
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+# Sizing. The VM never returns memory to macOS, so this is a standing cost and the
+# only expensive object here. The defaults suit the 32 GB build machine and leave
+# macOS 18 GB; raise them on the 128 GB target. Do not exceed roughly 60% of
+# physical memory.
+VM_CPUS="${SUBSTRATE_VM_CPUS:-8}"
+VM_MEMORY_GB="${SUBSTRATE_VM_MEMORY_GB:-14}"
+# 100 GiB, which is also Colima's own default, so this declares what an untouched
+# profile already has and a fresh machine gets without an oversized allocation.
+#
+# It is the safe direction, because a Colima disk can only GROW. Declaring 150 here
+# would force every existing 100 GiB profile to be destroyed and rebuilt to match —
+# `colima delete` takes every image, volume and cluster with it — whereas declaring
+# 100 leaves room to raise it later, per machine, with no data loss. The 128 GB target
+# should raise it; the 32 GB build machine has 514 GB free and does not need to.
+VM_DISK_GB="${SUBSTRATE_VM_DISK_GB:-100}"
+# Mount only what is needed. Every bind mount is a virtiofs path to traverse, so
+# mounting all of $HOME taxes every lookup in every container.
+VM_MOUNT="${SUBSTRATE_VM_MOUNT:-$HOME/workspace}"
+# virtiofs, not sshfs. This is the largest filesystem performance difference
+# available and it CANNOT be changed on an existing profile, so it is verified by
+# read-back rather than trusted to the flag. See vm_mount_type.
+VM_MOUNT_TYPE="${SUBSTRATE_VM_MOUNT_TYPE:-virtiofs}"
+# Rosetta is OPT-IN and off by default. AGENTS.md forbids automatic Rosetta
+# installation, and --vz-rosetta requires it. Set this only when a project needs
+# amd64-only images.
+VM_ROSETTA="${SUBSTRATE_VM_ROSETTA:-false}"
+VM_PROFILE="${SUBSTRATE_VM_PROFILE:-default}"
+
+# A pinned subnet, so a future host route covers every cluster forever. Left to
+# Docker, the bridge takes whatever is free and the address changes under you.
+NETWORK="${SUBSTRATE_NETWORK:-k3d-lan}"
+NETWORK_SUBNET="${SUBSTRATE_NETWORK_SUBNET:-172.30.0.0/16}"
+
+# LOOPBACK, explicitly. A Docker port mapping without a host part binds 0.0.0.0, so
+# `--port 5000` publishes the registry to every network this laptop joins. The
+# repository's own invariant is that container ports bind to 127.0.0.1, and an
+# unauthenticated image registry is exactly the wrong thing to get that wrong on.
+REGISTRY="${SUBSTRATE_REGISTRY:-shared-registry}"
+REGISTRY_HOST="${SUBSTRATE_REGISTRY_HOST:-127.0.0.1}"
+REGISTRY_PORT="${SUBSTRATE_REGISTRY_PORT:-5000}"
+
+BUILDER="${SUBSTRATE_BUILDER:-dev}"
+
+MODE="apply"
+
+usage() {
+  cat <<'EOF'
+Usage: script/container-substrate [apply|--dry-run|--status|--verify]
+
+  apply       create or reconcile the substrate (default)
+  --dry-run   print the commands that would run, change nothing
+  --status    report what exists now
+  --verify    non-zero when the substrate is missing or has drifted
+
+Environment (all optional):
+  SUBSTRATE_VM_CPUS        VM CPUs                        (8)
+  SUBSTRATE_VM_MEMORY_GB   VM memory in GiB               (14)
+  SUBSTRATE_VM_DISK_GB     VM disk in GiB                 (100)
+  SUBSTRATE_VM_MOUNT       directory mounted writable     ($HOME/workspace)
+  SUBSTRATE_VM_MOUNT_TYPE  virtiofs or sshfs              (virtiofs)
+  SUBSTRATE_VM_ROSETTA     true enables --vz-rosetta      (false)
+  SUBSTRATE_NETWORK        shared Docker network          (k3d-lan)
+  SUBSTRATE_NETWORK_SUBNET pinned subnet                  (172.30.0.0/16)
+  SUBSTRATE_REGISTRY       shared registry name           (shared-registry)
+  SUBSTRATE_REGISTRY_HOST  registry bind address          (127.0.0.1)
+  SUBSTRATE_REGISTRY_PORT  registry port                  (5000)
+  SUBSTRATE_BUILDER        buildx builder name            (dev)
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    apply) MODE="apply" ;;
+    --dry-run) MODE="dry-run" ;;
+    --status) MODE="status" ;;
+    --verify) MODE="verify" ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    *) die "Unknown option: $1" ;;
+  esac
+  shift
+done
+
+require_colima() {
+  command_exists colima ||
+    die "colima is not installed. It is in profiles/runtime-colima.Brewfile;
+select it with './bootstrap install --runtime colima', or run ./script/setup."
+}
+
+require_docker() {
+  command_exists docker || die "docker is not installed (profiles/runtime-colima.Brewfile)."
+}
+
+vm_running() {
+  colima status >/dev/null 2>&1
+}
+
+require_jq() {
+  command_exists jq || die "jq is required. It is in profiles/core.Brewfile."
+}
+
+# `colima list --json` emits one object per line, not an array, so this filters the
+# stream rather than indexing into it.
+vm_profile_json() {
+  require_jq
+  colima list --json 2>/dev/null |
+    jq -c --arg name "$VM_PROFILE" 'select(.name == $name)' 2>/dev/null || true
+}
+
+vm_profile_exists() {
+  [[ -n "$(vm_profile_json)" ]]
+}
+
+# An existing profile keeps the sizing it was created with. Starting it with new
+# --cpu/--memory/--disk values does not silently reconcile them: CPU and memory take
+# effect on the next start, but a disk can only ever GROW, so a profile created at
+# the 100 GiB default cannot be reduced and one created small stays small.
+#
+# Reported rather than worked around. The failure this prevents is the quiet one:
+# `colima start --memory 14` against a 2 GiB profile brings up a VM that runs, and
+# then every cluster on it is mysteriously slow.
+vm_sizing_report() {
+  local json cpus memory_gb disk_gb
+  json="$(vm_profile_json)"
+  [[ -n "$json" ]] || return 0
+  cpus="$(jq -r '.cpus' <<<"$json")"
+  # Bytes to GiB. Integer division is fine: these are always whole GiB.
+  memory_gb="$(jq -r '.memory / 1073741824 | floor' <<<"$json")"
+  disk_gb="$(jq -r '.disk / 1073741824 | floor' <<<"$json")"
+  printf '%s|%s|%s\n' "$cpus" "$memory_gb" "$disk_gb"
+}
+
+# The mount type Colima ACTUALLY uses, read back from the profile it wrote.
+#
+# This exists because `--mount-type=virtiofs` is silently discarded on a profile
+# created with something else. Colima says so once, in a line that scrolls past:
+#   level=warning msg="'volume mount type' cannot be updated after initial setup,
+#   discarded"
+# and then starts happily on sshfs. Observed on a real run here: the declared value
+# was virtiofs and the guest mounted `fuse.sshfs`.
+#
+# It is the ADR-016 failure exactly — a setting that is accepted, stored and
+# ignored — and it costs the largest filesystem performance lever there is, so it is
+# verified by read-back rather than assumed from the flag.
+#
+# Read from the YAML rather than `colima list --json`, which does not report it.
+vm_config_file() {
+  printf '%s\n' "$HOME/.colima/$VM_PROFILE/colima.yaml"
+}
+
+vm_mount_type() {
+  local config
+  config="$(vm_config_file)"
+  [[ -f "$config" ]] || return 0
+  awk '/^mountType:/ { print $2; exit }' "$config"
+}
+
+vm_mount_type_matches() {
+  local actual
+  actual="$(vm_mount_type)"
+  [[ -z "$actual" ]] && return 1
+  [[ "$actual" == "$VM_MOUNT_TYPE" ]]
+}
+
+warn_mount_type_drift() {
+  local actual
+  actual="$(vm_mount_type)"
+  [[ -n "$actual" ]] || return 0
+  warn "Profile '$VM_PROFILE' mounts with '$actual', but '$VM_MOUNT_TYPE' is declared."
+  log "Colima CANNOT change this after initial setup — it discards the flag with one
+warning line and starts anyway, so the declared value is not what runs. virtiofs
+replaces sshfs for host mounts and is the largest filesystem performance difference
+available, so this is worth fixing rather than accepting.
+Recreating the profile is the only way, and it DESTROYS every image, volume and
+cluster in it — but everything this repository puts there is declared and rebuilt by
+the next run:
+  colima delete $VM_PROFILE && ./script/container-substrate"
+}
+
+vm_sizing_matches() {
+  local report
+  report="$(vm_sizing_report)"
+  [[ -n "$report" ]] || return 1
+  [[ "$report" == "$VM_CPUS|$VM_MEMORY_GB|$VM_DISK_GB" ]]
+}
+
+warn_sizing_drift() {
+  local report actual_cpus actual_memory actual_disk
+  report="$(vm_sizing_report)"
+  [[ -n "$report" ]] || return 0
+  IFS='|' read -r actual_cpus actual_memory actual_disk <<<"$report"
+  warn "Profile '$VM_PROFILE' is ${actual_cpus} CPUs / ${actual_memory} GiB /
+${actual_disk} GiB, but ${VM_CPUS} / ${VM_MEMORY_GB} / ${VM_DISK_GB} is declared."
+  if ((actual_disk > VM_DISK_GB)); then
+    log "A Colima disk can only grow, so ${actual_disk} GiB cannot be reduced to
+${VM_DISK_GB} GiB in place. Either accept the larger disk by setting
+SUBSTRATE_VM_DISK_GB=${actual_disk}, or recreate the profile — which DESTROYS every
+image, volume and cluster in it:
+  colima delete $VM_PROFILE && ./script/container-substrate"
+  elif vm_running; then
+    log "CPU, memory and a larger disk take effect on the next start:
+  colima stop && ./script/container-substrate"
+  else
+    # Suggesting `colima stop` for a VM that is already stopped sends the reader to
+    # a command that does nothing and makes the advice look wrong.
+    log "CPU, memory and a larger disk take effect on the next start:
+  ./script/container-substrate"
+  fi
+}
+
+network_exists() {
+  docker network inspect "$NETWORK" >/dev/null 2>&1
+}
+
+network_subnet() {
+  docker network inspect "$NETWORK" \
+    --format '{{ range .IPAM.Config }}{{ .Subnet }}{{ end }}' 2>/dev/null || true
+}
+
+registry_container() {
+  # k3d prefixes the container name; both spellings are checked so a registry
+  # created by hand is found rather than duplicated.
+  #
+  # -E, not BRE with `\|`: alternation via backslash-pipe is a GNU extension and
+  # macOS ships BSD grep. The repository targets the BSD userland (ADR-033).
+  docker ps -a --format '{{ .Names }}' 2>/dev/null |
+    grep -qxE "k3d-$REGISTRY|$REGISTRY"
+}
+
+registry_publishes_loopback() {
+  local ports
+  ports="$(docker inspect "k3d-$REGISTRY" --format '{{ json .HostConfig.PortBindings }}' 2>/dev/null || true)"
+  [[ -n "$ports" ]] || return 1
+  # A binding with an empty or 0.0.0.0 HostIp is published to every interface.
+  case "$ports" in
+    *'"HostIp":"'"$REGISTRY_HOST"'"'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+builder_exists() {
+  docker buildx inspect "$BUILDER" >/dev/null 2>&1
+}
+
+# The commands, in one place, so --dry-run cannot drift from apply.
+vm_start_command() {
+  local args=(
+    colima start
+    --vm-type=vz
+    "--mount-type=$VM_MOUNT_TYPE"
+    --cpu "$VM_CPUS"
+    --memory "$VM_MEMORY_GB"
+    --disk "$VM_DISK_GB"
+    --network-address
+    --mount "$VM_MOUNT:w"
+  )
+  [[ "$VM_ROSETTA" == true ]] && args+=(--vz-rosetta)
+  # A loop, NOT `printf '%q' "${args[0]}"; printf ' %q' "${args[@]:1}"`.
+  #
+  # In bash 3.2 — which is what macOS ships and what this repository targets
+  # (ADR-033) — a quoted array SLICE does not expand to separate words. It joins
+  # them with IFS[0], which is a newline here, so printf received one argument and
+  # %q escaped the separators: `colima start\ --vm-type=vz\ --cpu\ 8`. On bash 5 the
+  # same line is correct, so Linux CI cannot see it.
+  local arg separator=''
+  for arg in "${args[@]}"; do
+    printf '%s%q' "$separator" "$arg"
+    separator=' '
+  done
+  printf '\n'
+}
+
+network_create_command() {
+  printf 'docker network create --subnet %q %q\n' "$NETWORK_SUBNET" "$NETWORK"
+}
+
+registry_create_command() {
+  printf 'k3d registry create %q --port %q\n' \
+    "$REGISTRY" "$REGISTRY_HOST:$REGISTRY_PORT"
+}
+
+builder_create_command() {
+  printf 'docker buildx create --name %q --driver docker-container --bootstrap\n' "$BUILDER"
+}
+
+do_dry_run() {
+  echo '# The VM. --vm-type=vz and --mount-type=virtiofs are already the defaults in'
+  echo '# Colima 0.10.x; stated so the configuration documents itself.'
+  vm_start_command
+  echo
+  echo '# The shared network, with a pinned subnet.'
+  network_create_command
+  echo
+  echo '# The shared image cache, on loopback.'
+  registry_create_command
+  echo
+  echo '# The persistent build cache.'
+  builder_create_command
+  echo
+  echo '# Nothing above is run in --dry-run mode.'
+}
+
+apply_vm() {
+  require_colima
+  if vm_running; then
+    log "The Colima VM is already running."
+    vm_sizing_matches || warn_sizing_drift
+    return 0
+  fi
+  # Only the UNFIXABLE case blocks.
+  #
+  # Starting with new --cpu/--memory values applies them, and a disk can grow, so
+  # most drift is resolved simply by proceeding. Only a declared disk SMALLER than
+  # the existing one cannot be reconciled in place, and fixing that means
+  # `colima delete` — which destroys every image, volume and cluster in the profile.
+  #
+  # The first version prompted for every kind of drift, with the words "with its
+  # current sizing". That was wrong twice: it blocked a reconciliation that would
+  # have worked, and it said the opposite of what starting actually does. It also
+  # contradicted the line printed immediately above it, which told the reader to run
+  # this very command.
+  if vm_profile_exists && ! vm_sizing_matches; then
+    local actual_disk
+    actual_disk="$(vm_sizing_report | cut -d'|' -f3)"
+    if ((actual_disk > VM_DISK_GB)); then
+      warn_sizing_drift
+      confirm "Start '$VM_PROFILE' anyway, keeping its ${actual_disk} GiB disk?" ||
+        die "Cancelled. Either set SUBSTRATE_VM_DISK_GB=$actual_disk to accept it, or
+recreate the profile with 'colima delete $VM_PROFILE' — which destroys its contents."
+    else
+      log "Profile '$VM_PROFILE' will be reconciled to ${VM_CPUS} CPUs /
+${VM_MEMORY_GB} GiB / ${VM_DISK_GB} GiB by this start."
+    fi
+  fi
+  # Said BEFORE the start, because Colima's own warning is one line in a wall of
+  # info output and is easy to miss entirely.
+  vm_mount_type_matches || warn_mount_type_drift
+  log "Starting the Colima VM: ${VM_CPUS} CPUs, ${VM_MEMORY_GB} GiB, ${VM_DISK_GB} GiB disk"
+  [[ "$VM_ROSETTA" == true ]] &&
+    warn "SUBSTRATE_VM_ROSETTA=true adds --vz-rosetta, which requires Rosetta to be
+installed. This repository does not install it for you (see AGENTS.md)."
+  # --save-config defaults to true, so a later bare `colima start` reuses all of
+  # this. That is also why ~/.colima/default/colima.yaml is NOT managed by chezmoi:
+  # Colima rewrites it on every start, and a chezmoi-managed file that the tool
+  # rewrites is the exact fight that made Rancher Desktop expensive (ADR-037).
+  # An array, because a conditional flag spliced into a command line as a string
+  # does not word-split under this file's IFS and arrives as one unknown option.
+  # script/AGENTS.md states the rule; this is the only optional flag here.
+  local args=(
+    --vm-type=vz
+    --mount-type=virtiofs
+    --cpu "$VM_CPUS"
+    --memory "$VM_MEMORY_GB"
+    --disk "$VM_DISK_GB"
+    --network-address
+    --mount "$VM_MOUNT:w"
+  )
+  [[ "$VM_ROSETTA" == true ]] && args+=(--vz-rosetta)
+  colima start "${args[@]}"
+  success "The Colima VM is running."
+}
+
+apply_network() {
+  require_docker
+  if network_exists; then
+    local current
+    current="$(network_subnet)"
+    if [[ "$current" == "$NETWORK_SUBNET" ]]; then
+      log "Network $NETWORK already exists on $current."
+    else
+      warn "Network $NETWORK exists on $current, not the declared $NETWORK_SUBNET.
+A Docker network's subnet cannot be changed in place. Recreate it deliberately,
+after checking nothing is attached:
+  docker network rm $NETWORK && ./script/container-substrate"
+    fi
+    return 0
+  fi
+  log "Creating network $NETWORK on $NETWORK_SUBNET"
+  docker network create --subnet "$NETWORK_SUBNET" "$NETWORK"
+}
+
+apply_registry() {
+  require_docker
+  if ! command_exists k3d; then
+    log "k3d is not installed, so the shared registry is skipped."
+    log "It is in profiles/kubernetes.Brewfile; select that profile to get it."
+    return 0
+  fi
+  if registry_container; then
+    if registry_publishes_loopback; then
+      log "Registry $REGISTRY already exists on $REGISTRY_HOST:$REGISTRY_PORT."
+      return 0
+    fi
+    # Offered rather than only reported, because this one is a live exposure and the
+    # object is a cache.
+    #
+    # The first version just warned and printed a two-step `k3d registry delete &&
+    # re-run` for the operator to type. That made "run apply to fix it" fail to fix
+    # the one condition here that is a security defect rather than a preference —
+    # and a converging tool that declines to converge on exactly the dangerous case
+    # is the wrong way round.
+    #
+    # Recreating loses cached images. They are re-pullable by definition, which is
+    # what makes this safe to offer when the same offer would be wrong for a volume.
+    warn "Registry $REGISTRY is published on all interfaces, not $REGISTRY_HOST.
+A Docker port mapping without a host part binds 0.0.0.0, so this unauthenticated
+image registry is reachable from every network this machine joins."
+    if confirm "Recreate it on $REGISTRY_HOST? Cached images are lost but re-pullable."; then
+      k3d registry delete "$REGISTRY"
+      log "Recreating registry $REGISTRY on $REGISTRY_HOST:$REGISTRY_PORT"
+      k3d registry create "$REGISTRY" --port "$REGISTRY_HOST:$REGISTRY_PORT"
+      return 0
+    fi
+    # Declined, or no terminal to ask. Left alone deliberately, and --verify still
+    # fails on it, so this cannot be mistaken for an accepted state.
+    warn "Left as it is. './script/container-substrate --verify' will keep failing:
+  k3d registry delete $REGISTRY && ./script/container-substrate"
+    return 0
+  fi
+  log "Creating registry $REGISTRY on $REGISTRY_HOST:$REGISTRY_PORT"
+  k3d registry create "$REGISTRY" --port "$REGISTRY_HOST:$REGISTRY_PORT"
+}
+
+apply_builder() {
+  require_docker
+  if builder_exists; then
+    log "Buildx builder $BUILDER already exists."
+    return 0
+  fi
+  log "Creating buildx builder $BUILDER"
+  docker buildx create --name "$BUILDER" --driver docker-container --bootstrap
+}
+
+do_apply() {
+  require_supported_mac
+  apply_vm
+  apply_network
+  apply_registry
+  apply_builder
+  echo
+  success "Substrate ready."
+  cat <<EOF
+
+Per-project clusters are not created here. Keep a k3d.yaml in the project repo so
+its shape is version-controlled, and point it at this substrate:
+
+  network: $NETWORK
+  registries:
+    use:
+      - k3d-$REGISTRY:$REGISTRY_PORT
+
+Bind cluster host ports to loopback too — "$REGISTRY_HOST:8080:80" rather than
+"8080:80" — for the same reason the registry above does.
+EOF
+}
+
+report() {
+  local label="$1" state="$2"
+  printf '  %-22s %s\n' "$label" "$state"
+}
+
+do_status() {
+  echo '== Container substrate =='
+  if ! command_exists colima; then
+    report 'colima' 'not installed'
+  elif vm_running; then
+    report 'VM' 'running'
+  else
+    report 'VM' 'stopped'
+  fi
+  if command_exists colima && vm_profile_exists; then
+    if vm_mount_type_matches; then
+      report 'VM mount type' "$(vm_mount_type) (as declared)"
+    else
+      report 'VM mount type' "$(vm_mount_type) — DECLARED $VM_MOUNT_TYPE, NOT APPLIED"
+    fi
+    # Fields are read out rather than substituted into: a `${x//|/ ... }` global
+    # replacement gave every separator the same label and printed
+    # "2 CPUs / 2 CPUs / 100 GiB".
+    local actual_cpus actual_memory actual_disk actual
+    IFS='|' read -r actual_cpus actual_memory actual_disk <<<"$(vm_sizing_report)"
+    actual="${actual_cpus} CPUs / ${actual_memory} GiB / ${actual_disk} GiB disk"
+    if vm_sizing_matches; then
+      report 'VM sizing' "$actual (as declared)"
+    else
+      report 'VM sizing' \
+        "$actual — DECLARED ${VM_CPUS} CPUs / ${VM_MEMORY_GB} GiB / ${VM_DISK_GB} GiB"
+    fi
+  fi
+
+  if ! command_exists docker || ! vm_running; then
+    report 'network' 'unknown (VM not running)'
+    report 'registry' 'unknown (VM not running)'
+    report 'builder' 'unknown (VM not running)'
+    return 0
+  fi
+
+  if network_exists; then
+    report "network $NETWORK" "$(network_subnet)"
+  else
+    report "network $NETWORK" 'absent'
+  fi
+
+  if ! command_exists k3d; then
+    report "registry $REGISTRY" 'k3d not installed'
+  elif registry_container; then
+    if registry_publishes_loopback; then
+      report "registry $REGISTRY" "$REGISTRY_HOST:$REGISTRY_PORT"
+    else
+      report "registry $REGISTRY" 'PUBLISHED ON ALL INTERFACES'
+    fi
+  else
+    report "registry $REGISTRY" 'absent'
+  fi
+
+  if builder_exists; then
+    report "builder $BUILDER" 'present'
+  else
+    report "builder $BUILDER" 'absent'
+  fi
+
+  # Sizing comes from colima's own output rather than being reformatted here, so
+  # this cannot disagree with the VM's actual configuration.
+  if command_exists colima; then
+    echo
+    colima list 2>/dev/null || true
+  fi
+}
+
+# Reports drift and exits non-zero, so it can gate work. A verification command that
+# always exits 0 gates nothing (script/AGENTS.md).
+do_verify() {
+  local failures=0
+  require_colima
+  require_docker
+
+  vm_running || {
+    warn 'The Colima VM is not running.'
+    failures=$((failures + 1))
+  }
+
+  if vm_profile_exists && ! vm_sizing_matches; then
+    warn_sizing_drift
+    failures=$((failures + 1))
+  fi
+
+  if vm_running; then
+    network_exists || {
+      warn "Network $NETWORK is absent."
+      failures=$((failures + 1))
+    }
+    if network_exists && [[ "$(network_subnet)" != "$NETWORK_SUBNET" ]]; then
+      warn "Network $NETWORK is on $(network_subnet), not $NETWORK_SUBNET."
+      failures=$((failures + 1))
+    fi
+    if command_exists k3d; then
+      if ! registry_container; then
+        warn "Registry $REGISTRY is absent."
+        failures=$((failures + 1))
+      elif ! registry_publishes_loopback; then
+        warn "Registry $REGISTRY is not published on $REGISTRY_HOST; it is reachable
+from every network this machine joins."
+        failures=$((failures + 1))
+      fi
+    fi
+    builder_exists || {
+      warn "Buildx builder $BUILDER is absent, so builds have no persistent cache."
+      failures=$((failures + 1))
+    }
+  fi
+
+  if vm_profile_exists && ! vm_mount_type_matches; then
+    warn_mount_type_drift
+    failures=$((failures + 1))
+  fi
+
+  ((failures == 0)) || die "$failures substrate check(s) failed. Run ./script/container-substrate"
+  success 'Substrate matches the declared state.'
+}
+
+case "$MODE" in
+  apply) do_apply ;;
+  dry-run) do_dry_run ;;
+  status) do_status ;;
+  verify) do_verify ;;
+esac

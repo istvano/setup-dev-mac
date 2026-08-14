@@ -114,6 +114,8 @@ Usage: script/macos-defaults [apply|--dry-run|--diff|--verify] [--section NAME]
 
   --section   restrict to one section: security, hygiene, dev, finder, dock,
               screenshots, misc
+  --yes, -y   answer the privileged-commands prompt yes; required when there is no
+              terminal on stdin, such as over ssh or from the chezmoi hook
 EOF
 }
 
@@ -124,6 +126,12 @@ parse_args() {
       --dry-run) MODE="dry-run" ;;
       --diff) MODE="diff" ;;
       --verify) MODE="verify" ;;
+      # The privileged block calls confirm(), which fails closed with no terminal on
+      # stdin — the state this script is normally in, since the chezmoi hook and
+      # script/test-install both reach it over ssh. confirm() told the caller to
+      # "pass --yes", but only bootstrap implemented that flag, so the advice was
+      # impossible to follow here and the sudo-scoped defaults were silently skipped.
+      --yes | -y) ASSUME_YES=1 ;;
       --section)
         [[ $# -ge 2 ]] || die "--section requires a name."
         SECTION_FILTER="$2"
@@ -164,6 +172,21 @@ normalise() {
 
 selected() {
   [[ -z "$SECTION_FILTER" || "$1" == "$SECTION_FILTER" ]]
+}
+
+# Distinguishes "the key is not set" from "this domain cannot be read at all".
+#
+# `defaults read` gives the SAME message for both — "The domain/default pair of (x, y)
+# does not exist" — whether the domain is missing, the key is missing, or TCC denied
+# access. An empty result therefore establishes nothing about the cause.
+#
+# The tcc branch in do_verify used to assert one anyway: "this terminal likely lacks
+# Full Disk Access". On a fresh guest that was simply wrong — the Safari keys were
+# unset, not unreadable, and applying them worked. Reporting an unestablished cause is
+# the failure ADR-016 exists to prevent, so this reads the DOMAIN to tell the two
+# apart: if the domain answers, access is fine and the key is merely unset.
+domain_readable() {
+  defaults read "$1" >/dev/null 2>&1
 }
 
 read_setting() {
@@ -222,18 +245,21 @@ action_screenshot_dir_describe() { printf 'mkdir -p %q' "$HOME/Pictures/Screensh
 action_screenshot_dir_apply() { mkdir -p "$HOME/Pictures/Screenshots"; }
 action_screenshot_dir_verify() { [[ -d "$HOME/Pictures/Screenshots" ]]; }
 
-action_firewall_logging_describe() { printf 'sudo socketfilterfw --setloggingmode on'; }
-action_firewall_logging_apply() {
-  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setloggingmode on >/dev/null
-}
-action_firewall_logging_verify() {
-  # macOS answers "Log mode is on", not "enabled". Matching only the latter made
-  # a correctly applied setting report as drifted forever, and disagreed with
-  # script/hardening-check, which matches 'enabled|on' and passed the same
-  # machine. Two checks of one setting must not be able to disagree.
-  /usr/libexec/ApplicationFirewall/socketfilterfw --getloggingmode 2>/dev/null |
-    grep -qiE 'enabled|on'
-}
+# The firewall_logging action was removed here. macOS 26 dropped the options it used:
+# `socketfilterfw -h` no longer lists --getloggingmode or --setloggingmode, and
+# /Library/Preferences/com.apple.alf.plist does not exist either, so the whole
+# preference domain is gone. There is no replacement among the fifteen options the tool
+# still offers.
+#
+# It was kept working through one earlier macOS quirk — the verifier matched "enabled"
+# while macOS answered "Log mode is on" — which is why removing it rather than fixing
+# it again is the right call: the setting is not configurable on the supported
+# platform, so declaring it would be declaring a wish.
+#
+# Found by ./script/test-install on a macOS 26.6.1 guest, where the check reported a
+# usage dump instead of a state. Exactly the drift ADR-016 exists to catch, and the
+# outcome TASKS.md predicted: "a newer macOS is the more likely one to have dropped a
+# key."
 
 action_guest_account_describe() { printf 'sudo sysadminctl -guestAccount off'; }
 action_guest_account_apply() { sudo sysadminctl -guestAccount off 2>/dev/null; }
@@ -244,7 +270,6 @@ action_guest_account_verify() {
 # name|section|needs_sudo
 ACTIONS=(
   "screenshot_dir|screenshots|no"
-  "firewall_logging|security|yes"
   "guest_account|security|yes"
 )
 
@@ -354,8 +379,10 @@ do_verify() {
     current="$(read_setting "$scope" "$domain" "$key" || true)"
 
     if [[ -z "$current" ]]; then
-      if [[ "$scope" == tcc ]]; then
-        warn "$domain.$key is unreadable; this terminal likely lacks Full Disk Access."
+      if [[ "$scope" == tcc ]] && ! domain_readable "$domain"; then
+        warn "$domain.$key could not be read, and neither could the $domain domain.
+Either it has never been written or this terminal lacks Full Disk Access; 'defaults'
+reports both identically, so this does not say which."
         tcc_skipped=$((tcc_skipped + 1))
       else
         warn "$domain.$key is unset."

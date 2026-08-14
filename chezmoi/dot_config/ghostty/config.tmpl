@@ -64,7 +64,7 @@ shell-integration = {{ .shell }}
 #
 # The prefix is resolved at apply time by the brew-prefix template, because
 # `command` is a static string rather than a shell and cannot ask brew --prefix
-# itself. That is /opt/homebrew on Apple Silicon and /usr/local on Intel.
+# itself. That is /opt/homebrew, the Apple Silicon prefix (ADR-036).
 command = {{ template "brew-prefix" . }}/bin/fish --login
 {{ end }}
 

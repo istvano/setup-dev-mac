@@ -1,0 +1,648 @@
+#!/usr/bin/env bash
+# Manage the local macOS test VM.
+#
+# The repository declares a first-install procedure that nothing could exercise:
+# `./bootstrap install` runs once on a real machine, and re-running it proves
+# nothing because the machine is no longer fresh. This provides a disposable one.
+#
+# The model is a golden image built once and cloned per run. Cloning is what makes
+# the test repeatable: Tart clones are APFS copy-on-write, so a fresh guest costs
+# a second and almost no disk, while reinstalling macOS from the IPSW costs half
+# an hour. Lima cannot do this — `limactl snapshot` is implemented over qemu-img
+# and does not support the `vz` driver, which macOS guests require. See ADR-036.
+#
+#   vm build      create the golden VM from Apple's IPSW (interactive, once)
+#   vm seal       prove the golden is both pristine and usable
+#   vm reset      discard the test VM and re-clone it from the golden
+#   vm up         boot the test VM and wait for SSH (a window opens; --headless to not)
+#   vm down       shut the test VM down
+#   vm destroy    delete the test VM; --golden deletes the golden too
+#   vm status     what exists, how big it is, what is running
+#   vm ip         the test VM's IP address
+#   vm ssh-config the path to the generated SSH configuration
+#   vm ssh        open a shell, or run a command, in the test VM
+#
+# Everything is overridable by environment variable so no machine-specific value
+# is committed, matching the rule script/sync-to-mac already follows:
+#
+#   WORKSTATION_VM_GOLDEN    golden image name        (workstation-golden)
+#   WORKSTATION_VM_NAME      test VM name             (workstation-test)
+#   WORKSTATION_VM_USER      account created in Setup Assistant   (admin)
+#   WORKSTATION_VM_SSH_KEY   dedicated key for the guest  (~/.ssh/workstation-vm)
+#   WORKSTATION_VM_IPSW      IPSW path, URL or "latest"   (latest)
+#   WORKSTATION_VM_DISK_FORMAT  raw or asif; asif needs macOS 26  (raw)
+#   WORKSTATION_VM_GRAPHICS  false boots without a window   (true)
+#
+# Guest sizing. These suit the 32 GB build machine rather than the 128 GB target,
+# because that is where most runs happen. Raise them on the M5 Max:
+#
+#   WORKSTATION_VM_MEMORY_GB guest memory in GB           (8)
+#   WORKSTATION_VM_CPUS      guest CPUs                   (4)
+#   WORKSTATION_VM_DISK_GB   guest disk in GB             (80)
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+GOLDEN="${WORKSTATION_VM_GOLDEN:-workstation-golden}"
+NAME="${WORKSTATION_VM_NAME:-workstation-test}"
+VM_USER="${WORKSTATION_VM_USER:-admin}"
+# A DEDICATED key, not the personal identity.
+#
+# Two reasons. Unattended SSH needs a key with no passphrase, and a personal key
+# either has one — breaking BatchMode — or should not be passphraseless. And the
+# guest is disposable and re-cloned constantly: a key that only opens a throwaway VM
+# is the right blast radius for one kept unencrypted on disk.
+#
+# `vm build` offers to generate it, so this is not a manual prerequisite.
+SSH_KEY="${WORKSTATION_VM_SSH_KEY:-$HOME/.ssh/workstation-vm}"
+MEMORY_GB="${WORKSTATION_VM_MEMORY_GB:-8}"
+CPUS="${WORKSTATION_VM_CPUS:-4}"
+DISK_GB="${WORKSTATION_VM_DISK_GB:-80}"
+IPSW="${WORKSTATION_VM_IPSW:-latest}"
+DISK_FORMAT="${WORKSTATION_VM_DISK_FORMAT:-raw}"
+# A window, not headless. See start_vm: the properties hardest to verify in a guest are
+# the visual ones. `vm up --headless` overrides it for unattended runs.
+GRAPHICS="${WORKSTATION_VM_GRAPHICS:-true}"
+
+STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation/vm"
+SSH_CONFIG="$STATE_DIR/ssh_config"
+SSH_ALIAS="workstation-vm"
+BOOT_WAIT=180
+
+usage() {
+  cat <<'EOF'
+Usage: script/vm <command> [options]
+
+  build            create the golden VM from Apple's IPSW (interactive, once)
+  seal             prove the golden is both pristine and usable
+  reset            discard the test VM and re-clone it from the golden
+  up [--headless]  boot the test VM and wait for SSH; a window opens by default
+  down             shut the test VM down
+  destroy [--golden]
+                   delete the test VM; --golden deletes the golden as well
+  status           what exists, how big it is, what is running
+  ip               print the test VM's IP address
+  ssh-config       print the path to the generated SSH configuration
+  ssh [command...] open a shell, or run a command, in the test VM
+
+See the header of this script for the environment variables that override the
+VM names, guest sizing and SSH identity.
+EOF
+}
+
+require_tart() {
+  command_exists tart ||
+    die "tart is not installed. Install the pinned release first:
+  ./script/install-tart"
+}
+
+require_jq() {
+  command_exists jq || die "jq is required. It is in profiles/core.Brewfile."
+}
+
+# Local VMs only. An OCI entry is a cached remote image, not something this script
+# may boot, clone or delete, and the two namespaces can hold the same name.
+vm_exists() {
+  require_jq
+  tart list --source local --format json |
+    jq -e --arg name "$1" 'any(.[]; .Name == $name)' >/dev/null 2>&1
+}
+
+vm_running() {
+  require_jq
+  tart list --source local --format json |
+    jq -e --arg name "$1" 'any(.[]; .Name == $name and .Running == true)' >/dev/null 2>&1
+}
+
+require_vm() {
+  vm_exists "$1" || die "No VM named '$1'. Run ./script/vm build first."
+}
+
+# Boots detached, WITH a window by default. `nohup ... &` rather than a plain
+# background job: `tart run` has to outlive this script, because `up`, the rsync that
+# follows and the install itself are separate processes.
+#
+# Graphics are on by default because the things a guest is least able to prove over SSH
+# are visual. Ghostty is GPU-accelerated and may not start at all in a VM; the Nerd
+# Font either renders glyphs or shows replacement boxes; the starship prompt either
+# lines up or does not. None of that is visible to `vm ssh`, and TASKS.md has carried
+# "does Ghostty run in a VZ guest at all?" as an open question precisely because every
+# run so far was headless.
+#
+# --headless remains available for a run nobody is watching.
+start_vm() {
+  local vm="$1" logfile
+  mkdir -p "$STATE_DIR"
+  logfile="$STATE_DIR/$vm.log"
+  if vm_running "$vm"; then
+    log "$vm is already running."
+    return 0
+  fi
+  local args=(run --no-audio --no-clipboard)
+  # --no-audio and --no-clipboard regardless: a test guest has no use for either, and
+  # clipboard sharing is a host/guest channel this boundary does not need.
+  if [[ "$GRAPHICS" == true ]]; then
+    log "Booting $vm with a window; console output goes to $logfile"
+    log "Log in as '$VM_USER' in that window to inspect Ghostty, fonts and the prompt."
+  else
+    args+=(--no-graphics)
+    log "Booting $vm headless; console output goes to $logfile"
+  fi
+  nohup tart "${args[@]}" "$vm" >"$logfile" 2>&1 &
+  disown
+}
+
+# `tart ip --wait` is the vendor's own boot wait, so this does not reimplement
+# polling. It resolves through the host's DHCP lease file.
+vm_ip() {
+  local vm="$1" ip
+  ip="$(tart ip "$vm" --wait "$BOOT_WAIT" 2>/dev/null || true)"
+  [[ -n "$ip" ]] || return 1
+  printf '%s\n' "$ip"
+}
+
+# A self-contained SSH configuration, used through `ssh -F`, rather than an entry
+# in the user's ~/.ssh/config.
+#
+# Two reasons. The repository's own ~/.ssh/config sets `IdentitiesOnly yes` and
+# `StrictHostKeyChecking ask` for `Host *`, both correct for real hosts and both
+# wrong here: the guest's host key changes with every clone, so `ask` would block
+# an unattended run and accepting it would fill known_hosts with keys that are
+# stale by the next reset. And this file must work on a machine where the
+# repository has never been applied, so it cannot depend on that config existing.
+#
+# StrictHostKeyChecking=no is therefore scoped to one throwaway VM on a local NAT
+# network, in a file that says so, instead of being loosened globally.
+write_ssh_config() {
+  local ip="$1"
+  mkdir -p "$STATE_DIR"
+  cat >"$SSH_CONFIG" <<EOF
+# Generated by script/vm. Do not edit; it is rewritten on every 'vm up'.
+Host $SSH_ALIAS
+  HostName $ip
+  User $VM_USER
+  IdentityFile $SSH_KEY
+  IdentitiesOnly yes
+  # Scoped to this disposable local VM: its host key is regenerated by every
+  # clone, so verification would fail by design rather than detect anything.
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  LogLevel ERROR
+  ConnectTimeout 10
+  ServerAliveInterval 30
+EOF
+  chmod 600 "$SSH_CONFIG"
+}
+
+ssh_ready() {
+  ssh -F "$SSH_CONFIG" -o BatchMode=yes "$SSH_ALIAS" true >/dev/null 2>&1
+}
+
+wait_for_ssh() {
+  local waited=0
+  while ((waited < BOOT_WAIT)); do
+    if ssh_ready; then
+      success "SSH is answering as $VM_USER@$SSH_ALIAS"
+      return 0
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+  die "SSH did not answer within ${BOOT_WAIT}s.
+Check the console log, and confirm Remote Login is enabled in the golden image:
+  $STATE_DIR/$NAME.log"
+}
+
+# Runs a command in the guest, QUOTING each argument for the remote shell.
+#
+# ssh does not execute argv remotely. It joins the arguments with spaces into one
+# string and hands that to the remote login shell, which parses it again — so any
+# quoting the local shell already removed is gone, and anything the remote shell
+# treats as syntax is reinterpreted.
+#
+# That silently broke two seal checks. `sh -c '[ "$(uname -m)" = arm64 ]'` arrived as
+#   sh -c [ "$(uname -m)" = arm64 ]
+# so `sh -c` received just `[` and the rest became positional parameters:
+#   arm64: line 0: [: missing `]'
+# The architecture check therefore failed on every guest regardless of architecture.
+# Worse, the Homebrew check had the same shape, and check_absent treats failure as
+# absence — so "Homebrew is absent" passed even when Homebrew was installed.
+#
+# printf '%q' re-quotes each argument so one round of remote parsing reproduces the
+# original words. A loop, not "${args[@]:1}": bash 3.2 joins quoted array slices.
+vm_ssh() {
+  [[ -f "$SSH_CONFIG" ]] ||
+    die "No SSH configuration yet. Run ./script/vm up first."
+  if (($# == 0)); then
+    ssh -F "$SSH_CONFIG" "$SSH_ALIAS"
+    return
+  fi
+  local arg command='' separator=''
+  for arg in "$@"; do
+    command+="$separator$(printf '%q' "$arg")"
+    separator=' '
+  done
+  ssh -F "$SSH_CONFIG" "$SSH_ALIAS" "$command"
+}
+
+# Creates the dedicated VM key if it does not exist. Passphraseless on purpose: an
+# unattended install cannot answer a prompt, and this key opens nothing but a guest
+# that is destroyed and re-cloned on every run. It is NOT added to the agent and not
+# offered to any other host — script/vm reaches the guest through its own ssh -F
+# configuration with IdentitiesOnly.
+ensure_vm_ssh_key() {
+  [[ -f "$SSH_KEY.pub" ]] && return 0
+  warn "No key at $SSH_KEY.pub."
+  log "This is a dedicated key for the disposable test VM, separate from any"
+  log "personal identity, and it must have no passphrase so unattended runs work."
+  confirm "Generate a passphraseless ed25519 key at $SSH_KEY?" ||
+    die "Cancelled. Generate one yourself, or point at an existing passphraseless
+key with WORKSTATION_VM_SSH_KEY:
+  ssh-keygen -t ed25519 -f $SSH_KEY -N '' -C 'workstation test VM'"
+  mkdir -p "$(dirname "$SSH_KEY")"
+  chmod 700 "$(dirname "$SSH_KEY")"
+  ssh-keygen -t ed25519 -f "$SSH_KEY" -N '' -C 'workstation test VM' >/dev/null
+  success "Created $SSH_KEY."
+}
+
+do_build() {
+  require_tart
+  [[ "$DISK_FORMAT" =~ ^(raw|asif)$ ]] ||
+    die "WORKSTATION_VM_DISK_FORMAT must be raw or asif, not '$DISK_FORMAT'."
+  ensure_vm_ssh_key
+
+  if vm_exists "$GOLDEN"; then
+    warn "A golden image named '$GOLDEN' already exists."
+    log "Rebuilding it discards it and costs another macOS install."
+    confirm "Delete and rebuild '$GOLDEN'?" || die "Cancelled."
+    vm_running "$GOLDEN" && tart stop "$GOLDEN" >/dev/null 2>&1
+    tart delete "$GOLDEN"
+  fi
+
+  log "Creating '$GOLDEN' from IPSW '$IPSW' (${DISK_GB} GB, $DISK_FORMAT)"
+  log "Apple's IPSW is the image source, so the trust boundary stays with Apple"
+  log "rather than a third-party prebuilt guest. This downloads several GB."
+  tart create --from-ipsw "$IPSW" \
+    --disk-size "$DISK_GB" --disk-format "$DISK_FORMAT" "$GOLDEN"
+
+  # --memory is in MEGABYTES. Passing GB here silently produces a guest with a
+  # few megabytes of RAM that fails to boot with no useful message.
+  tart set "$GOLDEN" --cpu "$CPUS" --memory "$((MEMORY_GB * 1024))"
+
+  cat <<EOF
+
+The golden image exists but is not yet usable. macOS boots into Setup Assistant,
+which is the one step no script may click. A window will open now; work through
+it, then leave the guest running and come back here.
+
+  1. Complete Setup Assistant. Create the account '$VM_USER'.
+     Skip Apple Account, Screen Time, Siri and analytics.
+  2. Enable Remote Login, in the GUI:
+       System Settings > General > Sharing > Remote Login = on
+
+     Use the toggle, not 'systemsetup -setremotelogin on'. That command needs the
+     calling terminal to hold Full Disk Access and fails with "requires Full Disk
+     Access privileges" until it does — a TCC grant no script may click. The
+     Settings app already holds the privilege.
+
+     If you prefer the command line, load the daemon directly instead, which needs
+     no TCC grant:
+       sudo launchctl enable system/com.openssh.sshd
+       sudo launchctl bootstrap system /System/Library/LaunchDaemons/ssh.plist
+     That starts sshd, though the Sharing pane may still show Remote Login as off
+     because only systemsetup updates that preference. 'vm seal' connects rather
+     than reading the toggle, so it tests the thing that matters.
+  3. In a second terminal ON THIS HOST, install your key:
+       ssh-copy-id -i $SSH_KEY.pub $VM_USER@\$(tart ip $GOLDEN)
+
+     Then grant passwordless sudo. Note -t and -i, both required: sudo needs a
+     terminal to ask for the password it still wants at this point, and plain ssh
+     tries only default key names so it would ignore the key just installed and fall
+     back to asking for the account password.
+       ssh -t -i $SSH_KEY -o IdentitiesOnly=yes $VM_USER@\$(tart ip $GOLDEN) \\
+         "echo '$VM_USER ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/$VM_USER >/dev/null \\
+          && sudo chmod 0440 /etc/sudoers.d/$VM_USER \\
+          && sudo visudo -c -f /etc/sudoers.d/$VM_USER"
+
+     The chmod and visudo are not ceremony: tee creates the file 0644, and a
+     malformed file in sudoers.d breaks sudo entirely — validate it while a working
+     password is still available.
+
+     Confirm it took. This must print SUDO-OK with no prompt:
+       ssh -i $SSH_KEY -o IdentitiesOnly=yes -o BatchMode=yes \\
+         $VM_USER@\$(tart ip $GOLDEN) 'sudo -n true && echo SUDO-OK'
+
+     Passwordless sudo is required, not a shortcut: bootstrap calls sudo for the
+     firewall, softwareupdate and the system-scope macOS defaults, and an
+     unattended run has no way to answer a password prompt.
+  4. Shut the guest down from the Apple menu. A clone of a running VM is not a
+     clean image.
+  5. Then prove it is ready:
+       ./script/vm seal
+
+EOF
+  confirm "Open the guest window now?" || {
+    log "Skipped. Start it yourself when ready:  tart run $GOLDEN"
+    return 0
+  }
+  tart run "$GOLDEN"
+  log "Guest window closed. Next: ./script/vm seal"
+}
+
+# The golden image decides whether every later test result means anything, so it
+# is verified by read-back rather than assumed — the same reasoning as ADR-016.
+#
+# Both halves matter. A golden that is not USABLE fails every run for a reason
+# that looks like a repository bug. A golden that is not PRISTINE is worse: the
+# install appears to succeed while never exercising the code path under test,
+# because Homebrew or the Command Line Tools were already there.
+do_seal() {
+  require_tart
+  require_vm "$GOLDEN"
+  local failures=0 ip
+
+  start_vm "$GOLDEN"
+  ip="$(vm_ip "$GOLDEN")" || die "Could not determine the IP of '$GOLDEN'."
+  write_ssh_config "$ip"
+  log "Golden image is at $ip"
+
+  local waited=0
+  while ((waited < BOOT_WAIT)) && ! ssh_ready; do
+    sleep 5
+    waited=$((waited + 5))
+  done
+
+  check_usable() {
+    local description="$1"
+    shift
+    if vm_ssh "$@" >/dev/null 2>&1; then
+      printf '%s[PASS]%s %s\n' "$C_GREEN" "$C_RESET" "$description"
+    else
+      printf '%s[FAIL]%s %s\n' "$C_RED" "$C_RESET" "$description"
+      failures=$((failures + 1))
+    fi
+  }
+
+  # Inverted: the command is expected to FAIL, because the thing it looks for
+  # must be absent.
+  check_absent() {
+    local description="$1"
+    shift
+    if vm_ssh "$@" >/dev/null 2>&1; then
+      printf '%s[FAIL]%s %s\n' "$C_RED" "$C_RESET" "$description"
+      failures=$((failures + 1))
+    else
+      printf '%s[PASS]%s %s\n' "$C_GREEN" "$C_RESET" "$description"
+    fi
+  }
+
+  echo '== Usable =='
+  check_usable 'SSH authenticates with the configured key' true
+  check_usable 'Passwordless sudo works' sudo -n true
+  # The architecture is compared HERE, against output, rather than evaluated by a
+  # remote shell. `sh -c '[ "$(uname -m)" = arm64 ]'` needs its quoting to survive
+  # ssh's argument joining, and when it did not the check failed on every guest.
+  # Reading one word back cannot fail that way.
+  local guest_arch
+  guest_arch="$(vm_ssh uname -m 2>/dev/null | tr -d '\r')"
+  if [[ "$guest_arch" == arm64 ]]; then
+    printf '%s[PASS]%s %s\n' "$C_GREEN" "$C_RESET" "Guest is arm64"
+  else
+    printf '%s[FAIL]%s %s\n' "$C_RED" "$C_RESET" \
+      "Guest reports '${guest_arch:-unknown}', not arm64"
+    failures=$((failures + 1))
+  fi
+
+  echo
+  echo '== Pristine =='
+  # Gated on SSH working, and that is not defensiveness — it is the difference
+  # between a check and a lie.
+  #
+  # check_absent reports PASS when the command FAILS, so with SSH broken every
+  # absence check passes for the wrong reason: the connection failed, not the thing
+  # was missing. Observed on this very image before Setup Assistant was completed —
+  # "Homebrew is absent [PASS]" against a guest nothing could even log into.
+  #
+  # That is ADR-016's failure inverted: "cannot inspect" reported as "correctly
+  # absent". A golden image carrying Homebrew but with broken SSH would have been
+  # declared pristine, which is worse than either fault alone.
+  if ! ssh_ready; then
+    printf '%s[SKIP]%s %s\n' "$C_YELLOW" "$C_RESET" \
+      'Pristine checks CANNOT BE RUN: SSH is not working, and an absence check that'
+    printf '%s[SKIP]%s %s\n' "$C_YELLOW" "$C_RESET" \
+      'cannot connect would report every question as absent.'
+    failures=$((failures + 1))
+  else
+    check_absent 'Xcode Command Line Tools are absent' xcode-select -p
+    # TWO checks, not one `sh -c` with an ||. Both prefixes are tested because this
+    # is an ABSENCE check and more paths is stricter — a Rosetta x86_64 Homebrew
+    # under /usr/local makes a guest just as un-pristine as a native one — but each
+    # is a bare `test` so neither depends on remote shell syntax surviving ssh.
+    # The combined form silently passed for every guest, installed or not.
+    check_absent 'Homebrew is absent (/opt/homebrew)' test -x /opt/homebrew/bin/brew
+    check_absent 'Homebrew is absent (/usr/local)' test -x /usr/local/bin/brew
+    check_absent 'No chezmoi configuration' test -e '.config/chezmoi/chezmoi.toml'
+    check_absent 'No rendered Brewfile' test -e \
+      '.config/security-ai-workstation/Brewfile'
+  fi
+
+  echo
+  local guest_version
+  guest_version="$(vm_ssh sw_vers -productVersion 2>/dev/null || true)"
+  log "Guest macOS: ${guest_version:-unknown}"
+
+  log "Shutting the golden image down so it is a clean clone source."
+  tart stop "$GOLDEN" >/dev/null 2>&1 || true
+
+  echo
+  if ((failures == 0)); then
+    success "Golden image '$GOLDEN' is sealed: usable and pristine."
+    log "Run a destructive install test with:  ./script/test-install"
+    return 0
+  fi
+  die "$failures check(s) failed. Fix the golden image before testing against it.
+An image that is not USABLE fails every run for a reason that looks like a
+repository bug; one that is not PRISTINE is worse, because the install then reports
+success while never exercising the code path under test.
+If the Usable checks failed, Setup Assistant is probably unfinished — see
+'./script/vm build' or docs/TESTING.md."
+}
+
+do_reset() {
+  require_tart
+  require_vm "$GOLDEN"
+  if vm_running "$GOLDEN"; then
+    die "The golden image '$GOLDEN' is running. Stop it before cloning:
+  tart stop $GOLDEN"
+  fi
+  if vm_exists "$NAME"; then
+    vm_running "$NAME" && tart stop "$NAME" >/dev/null 2>&1
+    log "Discarding the previous test VM '$NAME'"
+    tart delete "$NAME"
+  fi
+  log "Cloning '$GOLDEN' to '$NAME' (copy-on-write; near-instant)"
+  tart clone "$GOLDEN" "$NAME"
+  # A clone inherits the golden's MAC address and serial number. Fresh ones avoid
+  # a DHCP lease collision if both are ever up at once, and stop the guest from
+  # looking like the same machine to anything that reads its serial.
+  tart set "$NAME" --random-mac --random-serial
+  rm -f "$SSH_CONFIG"
+  success "Test VM '$NAME' is a fresh clone of '$GOLDEN'."
+}
+
+do_up() {
+  require_tart
+  require_vm "$NAME"
+  local ip
+  start_vm "$NAME"
+  ip="$(vm_ip "$NAME")" || die "Could not determine the IP of '$NAME'.
+The guest may still be booting; check $STATE_DIR/$NAME.log"
+  write_ssh_config "$ip"
+  log "Test VM is at $ip"
+  wait_for_ssh
+  log "Reach it with:  ./script/vm ssh"
+}
+
+do_down() {
+  require_tart
+  require_vm "$NAME"
+  vm_running "$NAME" || {
+    log "'$NAME' is not running."
+    return 0
+  }
+  tart stop "$NAME"
+  success "Stopped '$NAME'."
+}
+
+do_destroy() {
+  local also_golden="$1"
+  require_tart
+  if vm_exists "$NAME"; then
+    vm_running "$NAME" && tart stop "$NAME" >/dev/null 2>&1
+    tart delete "$NAME"
+    success "Deleted '$NAME'."
+  else
+    log "No test VM named '$NAME'."
+  fi
+  rm -f "$SSH_CONFIG"
+  [[ "$also_golden" == true ]] || return 0
+
+  vm_exists "$GOLDEN" || {
+    log "No golden image named '$GOLDEN'."
+    return 0
+  }
+  warn "Deleting the golden image means another macOS install and another"
+  warn "manual Setup Assistant pass to rebuild it."
+  confirm "Delete the golden image '$GOLDEN'?" || {
+    log "Kept '$GOLDEN'."
+    return 0
+  }
+  vm_running "$GOLDEN" && tart stop "$GOLDEN" >/dev/null 2>&1
+  tart delete "$GOLDEN"
+  success "Deleted '$GOLDEN'."
+}
+
+do_status() {
+  require_tart
+  require_jq
+  printf '%-24s %-9s %-8s %-8s\n' NAME STATE 'SIZE/GB' 'DISK/GB'
+  local vm
+  for vm in "$GOLDEN" "$NAME"; do
+    if ! vm_exists "$vm"; then
+      printf '%-24s %-9s %-8s %-8s\n' "$vm" absent - -
+      continue
+    fi
+    tart list --source local --format json |
+      jq -r --arg name "$vm" \
+        '.[] | select(.Name == $name)
+         | [$name, .State, (.Size|tostring), (.Disk|tostring)]
+         | @tsv' |
+      awk -F'\t' '{printf "%-24s %-9s %-8s %-8s\n", $1, $2, $3, $4}'
+  done
+  echo
+  # Apple permits at most two macOS guests per host. The golden plus one running
+  # clone is exactly two, which is why the test matrix runs sequentially.
+  log "Apple's licence permits 2 macOS VMs per host; this design uses exactly 2."
+  if [[ -f "$SSH_CONFIG" ]]; then
+    log "SSH configuration: $SSH_CONFIG"
+  else
+    log "No SSH configuration yet; run ./script/vm up."
+  fi
+}
+
+main() {
+  local command="${1:-}"
+  [[ $# -gt 0 ]] && shift
+
+  case "$command" in
+    build)
+      [[ $# -eq 0 ]] || die "build takes no arguments."
+      do_build
+      ;;
+    seal)
+      [[ $# -eq 0 ]] || die "seal takes no arguments."
+      do_seal
+      ;;
+    reset)
+      [[ $# -eq 0 ]] || die "reset takes no arguments."
+      do_reset
+      ;;
+    up)
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --headless) GRAPHICS=false ;;
+          --graphics) GRAPHICS=true ;;
+          *) die "Unknown option: $1" ;;
+        esac
+        shift
+      done
+      do_up
+      ;;
+    down)
+      [[ $# -eq 0 ]] || die "down takes no arguments."
+      do_down
+      ;;
+    destroy)
+      local also_golden=false
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --golden) also_golden=true ;;
+          *) die "Unknown option: $1" ;;
+        esac
+        shift
+      done
+      do_destroy "$also_golden"
+      ;;
+    status)
+      [[ $# -eq 0 ]] || die "status takes no arguments."
+      do_status
+      ;;
+    ip)
+      require_tart
+      require_vm "$NAME"
+      vm_ip "$NAME" || die "Could not determine the IP of '$NAME'."
+      ;;
+    ssh-config)
+      printf '%s\n' "$SSH_CONFIG"
+      ;;
+    ssh)
+      require_tart
+      vm_ssh "$@"
+      ;;
+    help | -h | --help)
+      usage
+      ;;
+    "")
+      usage >&2
+      die "No command given."
+      ;;
+    *)
+      usage >&2
+      die "Unknown command: $command"
+      ;;
+  esac
+}
+
+main "$@"

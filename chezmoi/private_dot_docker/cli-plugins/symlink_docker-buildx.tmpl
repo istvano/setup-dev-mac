@@ -1,0 +1,16 @@
+{{- /*
+  Homebrew installs buildx as a standalone binary, not as a Docker CLI plugin, so
+  `docker buildx` does not exist until something links it into ~/.docker/cli-plugins.
+
+  chezmoi owns the link rather than a documented `ln -sfn` step. A manual step that
+  everything else depends on is a step that gets skipped, and the symptom —
+  "docker: 'buildx' is not a docker command" — reads as a broken Homebrew install
+  rather than a missing symlink.
+
+  private_ on the parent directory because ~/.docker holds credential
+  configuration; chezmoi applies 0700 to it.
+
+  The prefix comes from the brew-prefix template rather than a literal, so the
+  Homebrew location has one definition (ADR-036).
+*/ -}}
+{{ template "brew-prefix" . }}/opt/docker-buildx/bin/docker-buildx

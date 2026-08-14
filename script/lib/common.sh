@@ -31,15 +31,19 @@ die() {
 }
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
-# Homebrew's prefix depends on the architecture: /opt/homebrew on Apple Silicon,
-# /usr/local on Intel. Hardcoding the Apple Silicon path made every shell
-# activation, apply hook and terminal command a no-op on an Intel Mac.
+# Apple Silicon's Homebrew prefix, and deliberately the only one.
 #
-# ORDER MATTERS. Apple Silicon is checked first so a Mac carrying both — a native
-# arm64 install plus an x86_64 one under /usr/local reached through Rosetta —
-# resolves to the native one. Reversing these would silently put a translated
-# toolchain on PATH, which works, just slowly and with the wrong binaries.
-HOMEBREW_PREFIXES=(/opt/homebrew /usr/local)
+# /usr/local is NOT kept as a fallback, and not merely because Intel is no longer
+# supported (ADR-036). On Apple Silicon that path still exists whenever an x86_64
+# Homebrew has been installed under Rosetta, so a fallback would resolve to a
+# translated toolchain on exactly the machine where /opt/homebrew is missing — it
+# would work, slowly, with the wrong binaries, and report success. The right answer
+# there is "Homebrew is not installed", which is what an empty result says.
+#
+# Still a list and still discovered rather than hardcoded at the call sites: the
+# prefix belongs in one place, and brew_prefix's contract is "the prefix, or
+# nothing", which callers already handle.
+HOMEBREW_PREFIXES=(/opt/homebrew)
 
 brew_prefix() {
   local prefix
@@ -54,11 +58,12 @@ brew_prefix() {
 
 # Homebrew refuses to install ANYTHING when a directory inside its prefix is not
 # writable. It is a pre-flight check on its side, so a single bad directory fails
-# every package with the same message: on a real Intel install, one root-owned
+# every package with the same message: on a real install, one root-owned
 # /usr/local/share/man/man8 failed 70 of 108 dependencies.
 #
-# This is an Intel problem in practice. /usr/local is shared with the system and
-# with other installers, while /opt/homebrew belongs to Homebrew alone.
+# /opt/homebrew belongs to Homebrew alone, so this is rarer here than it was under
+# the shared /usr/local prefix — but it is not impossible, and the check is cheap
+# next to seventy identical errors.
 #
 # Reported, never repaired. `sudo chown -R` on a system directory is exactly the
 # privileged, hard-to-reverse operation AGENTS.md keeps manual — and the correct
@@ -128,29 +133,69 @@ python3_available() {
   command_exists python3 && developer_tools_installed
 }
 
-# Apple Silicon is the target this workstation is designed for. Intel is accepted
-# as a DEVELOPMENT platform so the configuration can be built and tested before
-# the arm64 machine exists — which is exactly when the troubleshooting is cheap.
-# It is a warning rather than a silent pass, because the two are not equivalent:
-# Homebrew uses a different prefix and some casks are arm64-only.
+# Apple Silicon only, and a hard failure rather than a warning.
+#
+# Intel used to be accepted as a development platform, because the configuration
+# had to be built before the arm64 machine existed (the superseded ADR-034). It now
+# exists, and the repository is tested against a local arm64 macOS guest instead
+# (ADR-036), so accepting x86_64 would only offer a configuration nothing verifies:
+# a different Homebrew prefix, casks that declare arch arm64, and no way to run the
+# VM that the test workflow depends on.
 require_supported_mac() {
   [[ "$(uname -s)" == "Darwin" ]] || die "macOS is required."
   [[ "$(id -u)" -ne 0 ]] || die "Do not run as root."
-  case "$(uname -m)" in
-    arm64) ;;
-    x86_64)
-      warn "Intel Mac. Apple Silicon is the supported target; this is a development
-configuration. Homebrew installs to /usr/local rather than /opt/homebrew, and
-arm64-only casks such as lm-studio cannot be installed here."
-      ;;
-    *) die "Unsupported architecture: $(uname -m)" ;;
-  esac
+  [[ "$(uname -m)" == "arm64" ]] || die "Apple Silicon is required; this machine
+reports $(uname -m). Intel support was removed in ADR-036: the workstation is now
+built and tested only on arm64, against a local macOS VM."
 }
 
+# Whether this Mac can run a VM inside a VM, which decides whether a container
+# runtime can be exercised inside the macOS test guest (ADR-036).
+#
+# Apple's Virtualization.framework supports nested virtualization only on M3 and
+# later. DETECTED rather than remembered, because this repository is built on an
+# M1 Pro and targets an M5 Max: a hardcoded answer would be wrong on one of the two
+# machines, and the interesting one is the machine you are standing at.
+#
+# FEAT_NV is the architectural feature register flag for nested virtualization. The
+# sysctl is ABSENT rather than 0 on hardware without it, which is why this tests the
+# value rather than the exit status.
+#
+# The negative branch is confirmed on M1 Pro. The positive branch has not been
+# observed here, so treat a "supported" answer as a claim to verify on the M5 Max
+# rather than a settled fact.
+nested_virtualization_supported() {
+  [[ "$(sysctl -n hw.optional.arm.FEAT_NV 2>/dev/null || echo 0)" == "1" ]]
+}
+
+# Asks, and fails CLOSED when it cannot ask.
+#
+# The TTY check is not cosmetic. Without it, `read` blocks forever whenever stdin is
+# open but nothing is going to answer — a pipeline, a CI step, an editor's task
+# runner. Observed here: `./script/container-substrate | grep ...` hung for ten
+# minutes on a confirmation prompt that no one could see, because the prompt went to
+# stdout and stdout was the pipe.
+#
+# It used to work by accident: with stdin at EOF, `read` returns non-zero, `answer`
+# stays empty and the match fails. That is the same fail-closed answer, but only when
+# EOF happens to arrive.
+#
+# Automation is expected to pass --yes, which is why ASSUME_YES is checked first and
+# a missing terminal is refused rather than assumed. AGENTS.md: fail closed on
+# ambiguous state.
 confirm() {
   local prompt="$1" answer
   if [[ "${ASSUME_YES:-0}" == "1" ]]; then
     return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    # ASSUME_YES rather than --yes: this message reaches every confirm() caller, and
+    # only bootstrap and macos-defaults parse a --yes flag. Naming the flag sent the
+    # other seven callers chasing an option that does not exist, which is worse than
+    # no advice at all. The environment variable is the one answer that always works.
+    warn "Not asking '$prompt' because there is no terminal on stdin; assuming no.
+Set ASSUME_YES=1 to answer yes without a prompt (some commands also accept --yes)."
+    return 1
   fi
   printf '%s [y/N] ' "$prompt"
   read -r answer

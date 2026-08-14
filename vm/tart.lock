@@ -1,0 +1,28 @@
+# Pinned Tart release. tart is installed outside Homebrew (ADR-036), so this
+# file is the only record of which build is trusted, and `brew upgrade` will
+# never move it.
+#
+# One digest, not one per architecture: unlike mcp/toolhive.lock, the release
+# publishes a single universal `tart.tar.gz`. There is no amd64 build, because
+# Virtualization.framework on Intel cannot host an Apple Silicon guest and tart
+# targets Apple Silicon only.
+#
+# The upstream repository moved from cirruslabs/tart to openai/tart in April
+# 2026. Both URLs resolve today because GitHub redirects transferred
+# repositories, but the canonical location is pinned here so review does not
+# depend on a redirect staying in place.
+#
+# `team_id` is the Apple Developer Team Identifier that signed tart.app. It is
+# checked in addition to the digest because the archive is a signed bundle
+# carrying com.apple.security.virtualization and com.apple.vm.networking: those
+# entitlements are what let it create VMs, and a bundle whose signature does not
+# verify cannot use them. Read it back with:
+#   codesign -dv <path>/tart.app
+#
+# To bump: change version, download the archive and its published
+# `tart_<version>_checksums.txt`, and replace the digest with the value from
+# THAT FILE. Verify against the upstream checksums rather than computing them
+# from whatever the download happened to return.
+version=2.35.0
+sha256=60c4df330c83f68f39fa0ab4d58d07c3d0728546f26280d607041cb5a0fea7df
+team_id=9M2P8L4D89

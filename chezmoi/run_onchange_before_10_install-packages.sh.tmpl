@@ -14,7 +14,7 @@ SOURCE={{ $repo | quote }}
 # Checked here as well as in ./bootstrap, because ./script/setup reaches this hook
 # without going through bootstrap at all. An unwritable directory inside the
 # Homebrew prefix makes `brew bundle` fail EVERY package with the same message —
-# one root-owned /usr/local/share/man/man8 failed 70 of 108 on a real install —
+# one root-owned directory failed 70 of 108 on a real install —
 # so it is worth one cheap check rather than seventy identical errors.
 # shellcheck source=script/lib/common.sh
 source "$SOURCE/script/lib/common.sh"

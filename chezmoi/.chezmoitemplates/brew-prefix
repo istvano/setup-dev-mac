@@ -1,15 +1,23 @@
 {{- /*
-  The Homebrew prefix, resolved at apply time.
+  The Homebrew prefix.
 
   For configuration files that cannot run a command to find it — Ghostty's
-  `command` is a static string, not a shell. Apple Silicon is checked first so a
-  Mac with both installs gets the native one, and /opt/homebrew is the fallback
-  when neither exists yet, which keeps the Apple Silicon target correct.
+  `command` is a static string, not a shell.
+
+  It is now a constant. Apple Silicon is the only supported platform (ADR-036), so
+  /opt/homebrew is the answer whether or not Homebrew is installed yet, and this
+  template no longer probes the filesystem. The Intel prefix is deliberately absent:
+  on Apple Silicon that path means an x86_64 Homebrew under Rosetta, and emitting it
+  here would bake a translated binary's path into a configuration file.
+
+  Kept as a template rather than inlined at the call sites so the prefix still has
+  exactly one definition; tests/chezmoi-templates.sh asserts what it renders to.
+
+  The trailing `{{- -}}` below is load-bearing. This template is interpolated INLINE
+  — `command = {{ template "brew-prefix" . }}/bin/fish --login` — so an emitted
+  trailing newline splits that into two lines and Ghostty receives
+  `command = /opt/homebrew`. That is a path which exists, so it fails the way ADR-030
+  warns about: quietly, with the wrong shell.
 */ -}}
-{{- if stat "/opt/homebrew/bin/brew" -}}
 /opt/homebrew
-{{- else if stat "/usr/local/bin/brew" -}}
-/usr/local
-{{- else -}}
-/opt/homebrew
-{{- end -}}
+{{- /* trims the newline above; see the note in the comment block */ -}}

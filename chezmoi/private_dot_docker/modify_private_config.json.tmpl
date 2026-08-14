@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Selects the macOS Keychain as Docker's credential store, without owning the file.
+#
+# `modify_` rather than a managed file, deliberately. Docker WRITES to
+# ~/.docker/config.json itself — `docker login` adds an `auths` entry, `docker context`
+# adds `currentContext` — so a fully managed file would be reported as modified outside
+# chezmoi's control on every apply, with a prompt to overwrite, and overwriting would
+# discard whatever Docker had just stored. That is precisely the Rancher Desktop
+# `rcfiles` fight ADR-037 exists to escape, and it would be self-inflicted here.
+#
+# A modify_ script receives the CURRENT file content on stdin and writes the new
+# content to stdout, so this reads whatever Docker has done and adds one key.
+#
+# Why it matters: with no credsStore, `docker login` stores
+#   {"auths":{"ghcr.io":{"auth":"<base64 of user:token>"}}}
+# and base64 is encoding, not encryption. The token is readable by anything that can
+# read the file. With credsStore set, Docker delegates to
+# docker-credential-osxkeychain and the token goes to the Keychain instead.
+#
+# private_ on both this entry and its parent directory: 0600 on the file, 0700 on
+# ~/.docker. The directory alone would be enough in practice, but the file holds
+# credential material whenever Docker has not yet been switched over, and defence
+# does not depend on the parent staying private.
+set -Eeuo pipefail
+
+{{ template "brew-shellenv" . }}
+
+current="$(cat)"
+
+# An absent or empty target arrives as empty input, which is not valid JSON.
+if [[ -z "${current//[[:space:]]/}" ]]; then
+  current='{}'
+fi
+
+# jq comes from profiles/core.Brewfile and the package hook runs before any dotfile is
+# written, so it is normally present. If it is not — a partial first install — pass the
+# content through UNCHANGED rather than risk truncating a file that may already hold
+# credentials. Reported, because silently skipping a security control is worse than
+# failing to apply it.
+if ! command -v jq >/dev/null 2>&1; then
+  printf '%s' "$current"
+  echo "[WARN] jq is unavailable, so credsStore was not set in ~/.docker/config.json." >&2
+  echo "       Registry logins would be stored base64-encoded. Re-run ./script/setup" >&2
+  echo "       once packages have installed." >&2
+  exit 0
+fi
+
+# Invalid JSON is passed through for the same reason. Docker wrote it; this script is
+# not the right place to decide the file is broken, and rewriting it would destroy
+# whatever is in there.
+if ! jq -e . >/dev/null 2>&1 <<<"$current"; then
+  printf '%s' "$current"
+  echo "[WARN] ~/.docker/config.json is not valid JSON; leaving it untouched." >&2
+  exit 0
+fi
+
+jq --arg store osxkeychain '.credsStore = $store' <<<"$current"

@@ -160,12 +160,17 @@ for "the machine is gone".
 useful once you have taught it what normal looks like, which takes a few days of
 answering prompts.
 
-The application firewall and stealth mode are separate, and opt-in:
+The application firewall and stealth mode are separate from LuLu, and are enabled
+by default. Verify, or decline them:
 
 ```bash
-./bootstrap install --with-hardening
+./bootstrap install                     # firewall and stealth mode on
+./bootstrap install --no-hardening      # leave the firewall untouched
 sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
 ```
+
+Stealth mode stops the machine answering `ping` and other unsolicited probes, so
+a host that has gone quiet on the network is the expected result, not a fault.
 
 **Careful over SSH.** Enabling these can end a remote session.
 

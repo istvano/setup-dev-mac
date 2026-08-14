@@ -21,6 +21,7 @@ TESTS=(
   yaml
   placement-policy
   vscode-extensions
+  vm
   idempotency
   browser-profiles
   agents

@@ -6,17 +6,19 @@
 # --- PATH --------------------------------------------------------------------
 
 [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] || export PATH="$HOME/.local/bin:$PATH"
-# Homebrew's prefix is architecture-dependent: /opt/homebrew on Apple Silicon,
-# /usr/local on Intel. Resolved at shell start rather than baked in at apply time,
-# so the same file works on either. Apple Silicon first, so a Mac with both
-# installs gets the native one rather than a translated one.
-for __brew in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-  if [[ -x "$__brew" ]]; then
-    eval "$("$__brew" shellenv)"
-    break
-  fi
-done
+# /opt/homebrew is the Apple Silicon prefix and the only one supported (ADR-036).
+# Still resolved at shell start rather than baked in at apply time, so this file
+# does not depend on Homebrew having existed when chezmoi rendered it.
+#
+# /usr/local is deliberately not a fallback: on Apple Silicon it holds an x86_64
+# Homebrew under Rosetta, so falling back would silently put translated binaries on
+# PATH instead of reporting that Homebrew is missing.
+__brew=/opt/homebrew/bin/brew
+if [[ -x "$__brew" ]]; then
+  eval "$("$__brew" shellenv)"
+fi
 unset __brew
+{{- if eq .runtime "rancher" }}
 # Rancher Desktop's shims (docker, nerdctl, rdctl), added here rather than by
 # Rancher itself: its "rcfiles" strategy appends an export block to this file,
 # which chezmoi then sees as an external modification on every apply.
@@ -26,9 +28,16 @@ unset __brew
 # APPENDED, not prepended. ~/.rd/bin also carries kubectl, helm and
 # docker-compose, and the declared Homebrew versions should win over whatever
 # Rancher happens to bundle (ADR-022). Rancher's own tools are still found.
+#
+# Emitted ONLY when Rancher is the selected runtime (ADR-037). Colima is the
+# default now, and on a Colima machine this block referred to a directory that
+# should not exist — harmless, but it invited the leftover ~/.rd/bin from a
+# previous Rancher install back onto PATH, silently reintroducing the second
+# docker client that the migration exists to remove.
 if [[ -d "$HOME/.rd/bin" ]]; then
   [[ ":$PATH:" == *":$HOME/.rd/bin:"* ]] || export PATH="$PATH:$HOME/.rd/bin"
 fi
+{{- end }}
 
 # Rust comes from mise, which shims cargo and rustc; no Homebrew keg on PATH.
 

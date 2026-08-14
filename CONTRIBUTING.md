@@ -10,14 +10,19 @@ Before changing this security-sensitive workstation baseline:
    analysis and licence classification.
 4. Keep scripts small and idempotent; keep `justfile` recipes as command aliases.
 5. Update behaviour, documentation and tests in the same patch.
-6. Run:
+6. Run, with every check required rather than silently skipped:
 
    ```bash
-   ./script/test
+   REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1 ./script/test
    ```
 
 7. On macOS, also render the selected Brewfile, verify current package tokens
    and inspect `chezmoi diff`.
+8. If the change touches installation, run it against a pristine guest:
+
+   ```bash
+   ./script/test-install
+   ```
 
 Broad repository work uses the repo-local `$workstation-maintainer` skill.
 Package decisions use `$add-workstation-tool`.

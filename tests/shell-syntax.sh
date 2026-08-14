@@ -46,6 +46,32 @@ done
   exit 1
 }
 
+# --- Reject quoted array SLICES, which behave differently on bash 3.2.
+#
+# `"${array[@]:1}"` expands to separate words on bash 4+, and on bash 3.2 it JOINS
+# them with IFS[0] instead. Every script here sets IFS=$'\n\t', so a slice passed to
+# a command arrives as ONE newline-joined argument.
+#
+# This is not a syntax error and not a missing builtin, so neither `bash -n` nor the
+# check above can see it, and Linux CI runs bash 5 where the line is correct. It was
+# found by reading od(1) output on real dry-run text, which is not a repeatable way
+# to catch it.
+#
+# Comments are excluded so the explanation of the hazard is not itself a match — the
+# same false positive tests/placement-policy.sh and tests/vm.sh record.
+slice_found=0
+for file in "${FILES[@]}"; do
+  offenders="$(awk '/^[[:space:]]*#/ { next } /\$\{[A-Za-z_][A-Za-z_0-9]*\[@\]:/ { printf "  %d: %s\n", FNR, $0 }' "$file")"
+  [[ -z "$offenders" ]] && continue
+  printf '%s: uses a quoted array slice, which joins on bash 3.2.\n' "$file" >&2
+  printf '%s\n' "$offenders" >&2
+  slice_found=1
+done
+((slice_found == 0)) || {
+  printf 'Iterate the array with a for loop instead; macOS ships bash 3.2.\n' >&2
+  exit 1
+}
+
 if command -v shellcheck >/dev/null 2>&1; then
   shellcheck -x "${FILES[@]}"
   echo "Shell syntax and shellcheck: OK (${#FILES[@]} files)"

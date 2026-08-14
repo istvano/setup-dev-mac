@@ -35,7 +35,16 @@ brew "trash"     # Moves files to the macOS Trash instead of unlinking them.
 #brew "dust"      # Visual disk-usage breakdown; `du -sh` covers occasional use.
 #brew "tealdeer"  # Offline tldr pages.
 #brew "watchexec" # Re-runs commands in response to host filesystem changes.
-#brew "git-lfs"   # Large-file storage; only needed when a repository actually uses LFS.
+# Enabled, and no longer "only when a repository uses LFS". Model repositories do —
+# Hugging Face stores weights in LFS — and this workstation exists partly for AI
+# development. Cloning such a repository without it silently yields pointer files
+# instead of weights, which presents as a corrupt model rather than a missing tool.
+#
+# Installing the package is only half of it: the clean/smudge/process filters must
+# exist in Git's configuration too. Those are declared in chezmoi/dot_gitconfig.tmpl
+# rather than left to a `git lfs install` run-once hook, because chezmoi already owns
+# that file and a hook would fight it. See ADR-039.
+brew "git-lfs"   # Large-file storage, used by model repositories.
 
 # Editing
 brew "neovim"    # Terminal editor for SSH, recovery and other no-GUI sessions.

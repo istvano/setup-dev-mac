@@ -1,10 +1,44 @@
-{{- if and (eq .chezmoi.os "darwin") (eq .runtime "rancher") -}}
+{{- if and (eq .chezmoi.os "darwin") (ne .runtime "none") -}}
+{{- /* Repository scripts live one level above .chezmoi.sourceDir; see .chezmoiroot. */ -}}
+{{- $repo := dir .chezmoi.sourceDir -}}
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Rancher Desktop can use containerd or Moby. The repository's Compose and
-# Testcontainers workflows require the Docker API, so select Moby and disable
-# Kubernetes until it is explicitly needed.
+{{ template "brew-shellenv" . }}
+{{ if eq .runtime "colima" }}
+# Colima is the default runtime (ADR-037). This hook deliberately does NOT start it.
+#
+# The substrate VM is 8 CPUs, 14 GiB and a 100 GiB disk. Creating it downloads a
+# guest image and takes minutes, and it is a standing memory cost that should begin
+# when the operator decides, not as a side effect of applying dotfiles. Every other
+# heavyweight or privileged step in this repository is opt-in for the same reason:
+# FileVault, Touch ID for sudo, macOS defaults, the MCP policy.
+#
+# So this reports the state and names the one command that changes it. It is also
+# why ~/.colima/default/colima.yaml is NOT chezmoi-managed: `colima start` rewrites
+# that file because --save-config defaults to true, and a chezmoi-managed file the
+# tool rewrites is the fight that made Rancher Desktop expensive.
+if ! command -v colima >/dev/null 2>&1; then
+  echo "[WARN] colima is not installed yet; skipping the substrate report." >&2
+  echo "       Re-run ./script/setup once packages have installed." >&2
+  exit 0
+fi
+
+if {{ joinPath $repo "script/container-substrate" | quote }} --verify >/dev/null 2>&1; then
+  echo "[OK] Container substrate is present and matches the declared state."
+else
+  echo "[INFO] The container substrate is not set up yet, or has drifted."
+  echo "       Nothing is started automatically: the VM is 14 GiB of standing"
+  echo "       memory and takes minutes to create."
+  echo "       Review it, then create it:"
+  echo "         ./script/container-substrate --dry-run"
+  echo "         ./script/container-substrate"
+fi
+{{ else if eq .runtime "rancher" }}
+# Rancher Desktop is no longer the default (ADR-037) but remains selectable, so this
+# branch is kept. Everything below exists because Rancher fights the configuration:
+# it needs a running GUI app to accept settings, and its default path-management
+# strategy rewrites the shell files chezmoi owns.
 open -gj -a "Rancher Desktop" || true
 
 find_rdctl() {
@@ -44,4 +78,15 @@ done
 
 echo "[WARN] Rancher Desktop was installed but could not be configured automatically." >&2
 echo "       Select Moby/Docker and disable Kubernetes in Preferences." >&2
+{{ else }}
+# OrbStack manages its own VM and needs no configuration from this repository. The
+# shared network, registry and build cache still apply, so the substrate is reported
+# the same way as for Colima.
+if command -v docker >/dev/null 2>&1 &&
+  {{ joinPath $repo "script/container-substrate" | quote }} --verify >/dev/null 2>&1; then
+  echo "[OK] Container substrate is present and matches the declared state."
+else
+  echo "[INFO] Container substrate not set up: ./script/container-substrate" >&2
+fi
+{{ end }}
 {{- end }}

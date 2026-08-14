@@ -37,8 +37,25 @@ project requires them.
 ### Project containers
 
 Each project owns its Compose files, service versions, scanners, volumes and
-lifecycle. This repository provides only the selected Docker-compatible runtime
-and does not deploy a shared workstation stack.
+lifecycle. This repository does not deploy a shared workstation stack of services.
+
+What it does provide is the **substrate** beneath them (ADR-037): the selected
+runtime — Colima by default — plus one Docker network with a pinned subnet, a shared
+image registry and a persistent BuildKit builder. `script/container-substrate` owns
+those idempotently.
+
+The line between the two is **state**. Substrate holds none: a network, an image
+cache, a build cache, each rebuildable from nothing. Services hold data, and they
+stay project-local. That is what keeps ADR-010 intact rather than widened, and
+`container-substrate` creates no service.
+
+Every host port the substrate publishes binds `127.0.0.1`. A Docker port mapping
+without a host part binds `0.0.0.0`, which would put an unauthenticated image
+registry on every network this laptop joins.
+
+Clusters are project-owned too. A `k3d.yaml` belongs in the project repository,
+because the k3s version, the pod and service CIDRs and the ingress ports are all
+project decisions, and CIDRs cannot be changed after a cluster is created.
 
 ### Isolated Linux VM
 
@@ -74,6 +91,32 @@ Chezmoi apply hooks reach back into the repository for scripts. `.chezmoiroot`
 resolves `.chezmoi.sourceDir` to `<repo>/chezmoi`, so those paths must be built
 with `dir .chezmoi.sourceDir`. `tests/chezmoi-templates.sh` enforces this and
 executes every template, including the macOS-only branches, on Linux CI.
+
+## The test VM is not an execution domain
+
+`vm/` and `script/vm` provide a disposable macOS guest for testing this repository
+against a pristine machine (ADR-036). It is **repository infrastructure, not a fifth
+execution domain**, and the distinction matters because the `lab` profile also
+provides VMs:
+
+| | `lab` profile (Lima, UTM) | `script/vm` (Tart) |
+|---|---|---|
+| Purpose | isolate hostile work from the host | prove `./bootstrap install` works |
+| Guest | Linux | macOS |
+| Owned by | the four-domain model above | the validation suite |
+
+Nothing in the placement matrix should ever route work to the test VM. It exists to
+be destroyed and rebuilt, holds no credentials, and its contents are asserted to be
+pristine before every run.
+
+Its blind spots are recorded in `TASKS.md` rather than left for a reader to
+discover, and one of them depends on which machine you are standing at. Nested
+virtualization requires M3 or later: on the M1 Pro build machine no container
+runtime runs inside the guest, so the container-runtime apply hook cannot be
+exercised there, while on the M5 Max target it can. That is detected by
+`nested_virtualization_supported` rather than assumed, because a flat "cannot"
+would be false on the target and would go stale silently. Apple's licence permits
+two macOS guests per host on both, so selections are tested sequentially.
 
 ## Verifying applied state
 

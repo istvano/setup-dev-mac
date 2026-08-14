@@ -1,0 +1,613 @@
+#!/usr/bin/env bash
+# Run a destructive first-install test in the local macOS VM.
+#
+# This is the check nothing else in the repository can make. `./script/test` is
+# static validation; `./script/verify` inspects a machine that is already
+# installed. Neither can answer the question this does: does `./bootstrap install`
+# take a pristine macOS to a configured workstation?
+#
+# It is destructive by design. The test VM is discarded and re-cloned from the
+# golden image first, so every run starts from the same pristine state and a pass
+# means something. Nothing touches the host.
+#
+# The workstation being provisioned is a Docker, Kubernetes and AI development machine,
+# so the container runtime is most of the deliverable rather than a detail. The guest
+# exists to rehearse all of it before the real machine is touched, which is why
+# --runtime defaults to colima and exercise_guest_substrate runs in the guest.
+#
+# Two hardware consequences are worth knowing before reading the results:
+#
+#   - Nested virtualization needs M3 or later. On earlier silicon the guest reports
+#     kern.hv_support=0 and Colima fails there with VZErrorDomain Code=2,
+#     "Virtualization is not available on this hardware." Installation and
+#     configuration are still verified; the runtime STARTING is not, and the run says
+#     so rather than skipping quietly. The final machine runs Colima natively, not
+#     nested, so this limits rehearsal and not the product.
+#   - Apple permits two macOS guests per host. The golden image plus this test VM
+#     is exactly two, so a matrix of selections runs one after another.
+#
+# The transcript is written to the state directory. Treat it the way SECURITY.md's
+# "Recorded terminal sessions" section requires: a privileged cask install can put
+# an administrator password prompt into a recording.
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+# shellcheck source=script/lib/profiles.sh
+source "$ROOT/script/lib/profiles.sh"
+
+PROFILES="$DEFAULT_PROFILES"
+# See bootstrap: SHELL names the running shell, so the selection needs its own name.
+SHELL_CHOICE="zsh"
+RUNTIME="colima"
+PASSWORD_MANAGER="bitwarden"
+FIREWALL="lulu"
+GIT_NAME="Workstation Test"
+GIT_EMAIL="test@example.invalid"
+KEEP=false
+# True by default, matching bootstrap. A test whose defaults differ from the defaults it
+# is testing proves the wrong thing: the eight-package-profile runs were all passing
+# while the macOS defaults and the firewall went untested.
+WITH_MACOS_DEFAULTS=true
+WITH_HARDENING=true
+
+STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation/vm"
+# Mirrors script/vm's WORKSTATION_VM_MEMORY_GB default, and honours the same override,
+# so the over-commit arithmetic below cannot disagree with what the guest is given.
+GUEST_MEMORY_GB="${WORKSTATION_VM_MEMORY_GB:-8}"
+
+usage() {
+  cat <<'EOF'
+Usage: script/test-install [options]
+
+  --profiles LIST            profile selection to install (default: the default set)
+  --shell zsh|fish
+  --runtime colima|rancher|orbstack|none
+                             default colima: the runtime is part of the deliverable
+  --password-manager bitwarden|1password|none
+  --firewall lulu|little-snitch|none
+  --git-name VALUE
+  --git-email VALUE
+  --no-macos-defaults        pass --no-macos-defaults to bootstrap (default: applied)
+  --no-hardening             pass --no-hardening to bootstrap (default: enabled)
+  --with-macos-defaults      accepted and redundant; both are the default now
+  --with-hardening           accepted and redundant; both are the default now
+  --keep                     do not reset; run against the current test VM state
+
+Requires a sealed golden image. Build one once with:
+  ./script/install-tart && ./script/vm build && ./script/vm seal
+EOF
+}
+
+# Rejects a missing value AND a value that is itself an option. Without the second
+# check, `--profiles --shell fish` silently sets the profile list to "--shell" and
+# then fails on "fish" — an error that names the wrong argument and sends you
+# looking in the wrong place.
+require_value() {
+  local flag="$1" value="${2-}"
+  [[ -n "$value" ]] || die "$flag requires a value."
+  [[ "$value" != --* ]] ||
+    die "$flag requires a value, but got the option '$value'."
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --profiles)
+        require_value "$1" "${2:-}"
+        PROFILES="$2"
+        shift 2
+        ;;
+      --shell)
+        require_value "$1" "${2:-}"
+        SHELL_CHOICE="$2"
+        shift 2
+        ;;
+      --runtime)
+        require_value "$1" "${2:-}"
+        RUNTIME="$2"
+        shift 2
+        ;;
+      --password-manager)
+        require_value "$1" "${2:-}"
+        PASSWORD_MANAGER="$2"
+        shift 2
+        ;;
+      --firewall)
+        require_value "$1" "${2:-}"
+        FIREWALL="$2"
+        shift 2
+        ;;
+      --git-name)
+        require_value "$1" "${2:-}"
+        GIT_NAME="$2"
+        shift 2
+        ;;
+      --git-email)
+        require_value "$1" "${2:-}"
+        GIT_EMAIL="$2"
+        shift 2
+        ;;
+      --with-macos-defaults)
+        WITH_MACOS_DEFAULTS=true
+        shift
+        ;;
+      --no-macos-defaults)
+        WITH_MACOS_DEFAULTS=false
+        shift
+        ;;
+      --with-hardening)
+        WITH_HARDENING=true
+        shift
+        ;;
+      --no-hardening)
+        WITH_HARDENING=false
+        shift
+        ;;
+      --keep)
+        KEEP=true
+        shift
+        ;;
+      --help | -h)
+        usage
+        exit 0
+        ;;
+      *) die "Unknown option: $1" ;;
+    esac
+  done
+}
+
+validate_choices() {
+  validate_profiles "$PROFILES"
+  [[ "$SHELL_CHOICE" =~ ^(zsh|fish)$ ]] || die "Invalid shell: $SHELL_CHOICE"
+  [[ "$RUNTIME" =~ ^(colima|rancher|orbstack|none)$ ]] || die "Invalid runtime: $RUNTIME"
+  [[ "$PASSWORD_MANAGER" =~ ^(bitwarden|1password|none)$ ]] ||
+    die "Invalid password manager: $PASSWORD_MANAGER"
+  [[ "$FIREWALL" =~ ^(lulu|little-snitch|none)$ ]] || die "Invalid firewall: $FIREWALL"
+  [[ -n "$GIT_NAME" && -n "$GIT_EMAIL" ]] || die "Git name and email are required."
+
+  # Whether a container runtime can be tested at all depends on THIS machine, so it
+  # is detected rather than assumed. The repository is built on an M1 Pro, which
+  # cannot nest, and targets an M5 Max, which can — a fixed message would be wrong
+  # on one of them, and wrong in the direction that matters: silently declaring an
+  # untestable thing untestable on the machine where it is finally testable.
+  # Three cases, and `none` must be excluded from the last one explicitly. Without
+  # that it fell through to the warning and reported "--runtime none selected, but
+  # this machine does not support nested virtualization" — advice about a runtime
+  # that was not selected.
+  if nested_virtualization_supported; then
+    if [[ "$RUNTIME" == none ]]; then
+      log "This machine supports nested virtualization, so the container runtime
+CAN be exercised in the guest. Re-run with --runtime colima to cover
+run_onchange_after_25_configure-container-runtime, which is otherwise unproven."
+    fi
+  elif [[ "$RUNTIME" == none ]]; then
+    log "--runtime none. Correct for this machine: nested virtualization needs M3 or
+later, so no container runtime can start inside the guest. Selecting colima would
+still cover hook 25 and container-substrate's failure path, which is worth doing."
+  elif [[ "$RUNTIME" == colima ]]; then
+    # Colima is worth selecting even here, and the distinction matters: hook 25's
+    # colima branch only REPORTS substrate state, it does not start a VM. So the
+    # packages install, the hook runs its real code path, and
+    # `container-substrate --verify` exercises its failure path — all of which is
+    # genuine coverage. The only untested part is starting the nested VM.
+    log "--runtime colima on a machine without nested virtualization. The packages
+install and hook 25 runs for real: it reports substrate state rather than starting
+anything, so this DOES cover the hook and container-substrate's failure path.
+What it cannot cover is starting the Colima VM inside the guest. Do that on the
+M5 Max, or on this host directly with ./script/container-substrate."
+  else
+    warn "--runtime $RUNTIME selected, but this machine does not support nested
+virtualization: Apple's Virtualization.framework requires M3 or later. The cask
+will install and the apply hook will report that it could not configure the
+runtime. That is a property of this hardware, not a repository failure — and a
+pass here is not evidence the runtime works. Test this on the M5 Max."
+  fi
+}
+
+# Every remote step goes through script/sync-to-mac, which already knows how to
+# put Homebrew on PATH for a non-interactive ssh session, cd into the checkout and
+# forward the remote exit status. Re-syncing before each step is an rsync delta
+# over an unchanged tree, so it costs nothing and keeps one transfer path rather
+# than a second copy of that logic here.
+remote() {
+  "$ROOT/script/sync-to-mac" "$@"
+}
+
+step() {
+  echo
+  printf '%s========== %s ==========%s\n' "$C_BOLD" "$1" "$C_RESET"
+}
+
+# Reports when the two VMs together over-commit the host.
+#
+# The substrate VM and the test guest were sized independently, each as though it were
+# the only one: 14 GiB and 8 GiB. Run at once on the 32 GB build machine that is 22 GiB
+# of guest memory, and neither VM returns memory to macOS. Observed on a real run —
+# 5 GB of a 6 GB swap file in use while the install was working.
+#
+# Reported rather than enforced. Both VMs running is a legitimate thing to want, the
+# install still completes, and which one to stop is the operator's call. But a slow
+# run whose cause is invisible is worth one line of arithmetic.
+warn_if_memory_overcommitted() {
+  command_exists colima || return 0
+  colima status >/dev/null 2>&1 || return 0
+  command_exists jq || return 0
+
+  local physical_gb substrate_gb committed_gb
+  physical_gb=$(($(sysctl -n hw.memsize) / 1073741824))
+  substrate_gb="$(colima list --json 2>/dev/null |
+    jq -r 'select(.status == "Running") | .memory / 1073741824 | floor' | head -1)"
+  [[ -n "$substrate_gb" ]] || return 0
+  committed_gb=$((substrate_gb + GUEST_MEMORY_GB))
+
+  # 60% of physical is the same ceiling script/container-substrate uses for one VM.
+  if ((committed_gb * 10 > physical_gb * 6)); then
+    warn "The Colima substrate VM is running with ${substrate_gb} GiB and this guest
+takes ${GUEST_MEMORY_GB} GiB — ${committed_gb} GiB of ${physical_gb} GB physical, and
+neither VM gives memory back to macOS. Expect swapping and a slow run.
+Stop the substrate first if you are not testing against it:
+  colima stop"
+  fi
+}
+
+# Exercises the container substrate INSIDE the guest, which is the point of the guest.
+#
+# The workstation this repository provisions is a Docker, Kubernetes and AI
+# development machine. The container runtime is therefore not an optional extra to be
+# checked on the host — it is a large part of the deliverable, and the guest exists to
+# rehearse it before the real machine is touched. This step was missing entirely: the
+# run stopped at `script/verify` and never established that the substrate the final
+# machine depends on actually works.
+#
+# How far it can go depends on the host silicon, so that is DETECTED rather than
+# assumed, and the two outcomes are reported differently:
+#
+#   M3 or later   Virtualization.framework is available inside the guest, so Colima
+#                 starts there and the whole substrate is exercised for real.
+#   earlier       It is not. The guest reports kern.hv_support=0 and Colima fails with
+#                 VZErrorDomain Code=2, "Virtualization is not available on this
+#                 hardware." Installation and configuration are still verified; the
+#                 runtime starting is not, and that is stated rather than skipped.
+#
+# The distinction matters for deployment: the final machine runs Colima NATIVELY, not
+# nested, so a limitation here is a limit on rehearsal and not on the product.
+# Prove `chezmoi apply` ran to completion, rather than merely exiting.
+#
+# `chezmoi status` prints one line per item still to be done: `R` for a run_onchange
+# script that has not run, `A`/`M`/`D` for a file yet to be created, changed or removed.
+# Silence means settled.
+#
+# This check exists because its absence cost a debugging session. An install was
+# interrupted inside hook 35, leaving `35_vscode-extensions`, `40_macos-defaults`,
+# `45_configure-browser-profiles` and `90_security-reminder` pending — and nothing in
+# this harness noticed, so a half-configured guest was indistinguishable from a finished
+# one. The visible symptom was a broken terminal, which sent the investigation after
+# Ghostty and the firewall instead of the unfinished apply.
+#
+# Pending scripts are fatal; pending FILES are reported but tolerated, because a
+# `modify_` script legitimately rewrites its target on every apply and would otherwise
+# fail every run. Scripts are the ones that carry the configuration work.
+assert_chezmoi_settled() {
+  local status_output
+  # The guest tags each status line, and only tagged lines are kept.
+  #
+  # remote() is script/sync-to-mac, which prints its own progress to STDOUT: "[INFO]
+  # Syncing...", "[OK] Synced", "[INFO] Running on ...". Capturing the command's output
+  # therefore captures that chatter too, and the first version of this check tested the
+  # combined text. It could never be empty, so the settled branch below was dead code and
+  # every run warned; worse, `grep '^.?R'` was matching against harness prose rather than
+  # only chezmoi's own output.
+  #
+  # shellcheck disable=SC2016
+  # Single-quoted: the chezmoi path and the pipeline must resolve in the GUEST.
+  status_output="$(
+    remote sh -c '/opt/homebrew/bin/chezmoi status 2>&1 | sed "s/^/CHEZMOI|/"' 2>/dev/null |
+      sed -n 's/^CHEZMOI|//p' || true
+  )"
+
+  if [[ -z "${status_output//[[:space:]]/}" ]]; then
+    success 'chezmoi status is empty: every file and hook is applied.'
+    return 0
+  fi
+
+  log 'chezmoi status is not empty:'
+  printf '%s\n' "$status_output"
+
+  # `^R` in either status column: a run_onchange script that never executed.
+  if printf '%s\n' "$status_output" | grep -qE '^.?R'; then
+    printf '%s\n' "$status_output" | grep -E '^.?R' >&2
+    die 'chezmoi left run_onchange hooks pending, so the install did not finish.'
+  fi
+
+  warn 'Files differ from the source state, but no hook is pending. See the list above.'
+}
+
+# shellcheck disable=SC2016
+# Every command string below is single-quoted ON PURPOSE: $PATH, $HOME and $t must
+# expand in the GUEST, not on this machine. Expanded here they would be the host's
+# values and every check would be meaningless.
+exercise_guest_substrate() {
+  if [[ "$RUNTIME" == none ]]; then
+    log "No runtime selected, so there is no substrate to exercise."
+    return 0
+  fi
+
+  # Installed AND wired correctly, which are different questions.
+  #
+  # Every check here works WITHOUT a running daemon, which is what makes the runtime
+  # setup verifiable on hardware that cannot nest. `docker buildx version` and
+  # `docker compose version` resolve the CLI plugin and print a version without
+  # talking to a socket, so they test the thing that actually breaks: Homebrew
+  # installs buildx and compose as standalone binaries, not as Docker plugins, and
+  # without the symlinks chezmoi manages `docker buildx` simply does not exist.
+  #
+  # A login shell is used for the PATH checks. A non-login ssh shell never reads
+  # ~/.zshrc, so testing PATH over plain ssh would prove nothing about what the
+  # developer gets at a prompt.
+  local failures=0
+  # Two named parameters, not "$*". Every script here sets IFS=$'\n\t', so joining
+  # arguments with "$*" would join on a NEWLINE — the bug that broke the remote
+  # bootstrap invocation. tests/vm.sh forbids the pattern and caught this one.
+  guest_check() {
+    local description="$1" command="$2"
+    if remote sh -c "$command" >/dev/null 2>&1; then
+      printf '%s[PASS]%s %s\n' "$C_GREEN" "$C_RESET" "$description"
+    else
+      printf '%s[FAIL]%s %s\n' "$C_RED" "$C_RESET" "$description"
+      failures=$((failures + 1))
+    fi
+  }
+
+  echo '-- installed --'
+  guest_check 'colima runs and reports a version' '/opt/homebrew/bin/colima version'
+  guest_check 'docker CLI runs' '/opt/homebrew/bin/docker --version'
+  guest_check 'lima is present (colima depends on it)' '/opt/homebrew/bin/limactl --version'
+  # k3d joined the default set with the kubernetes profile (ADR-038). The first
+  # substrate verification reported it absent, which was correct and also the signal
+  # that the default did not match what the machine is for.
+  guest_check 'k3d runs (needed for clusters and the shared registry)' \
+    '/opt/homebrew/bin/k3d version'
+  guest_check 'kubectl runs' '/opt/homebrew/bin/kubectl version --client'
+  guest_check 'helm runs' '/opt/homebrew/bin/helm version --short'
+  guest_check 'Homebrew records all four runtime packages' \
+    '/opt/homebrew/bin/brew list --formula | grep -qx colima &&
+     /opt/homebrew/bin/brew list --formula | grep -qx docker &&
+     /opt/homebrew/bin/brew list --formula | grep -qx docker-compose &&
+     /opt/homebrew/bin/brew list --formula | grep -qx docker-buildx'
+
+  echo '-- wired up --'
+  # Every expansion below must happen in the GUEST, so single quotes are required and
+  # SC2016 is wrong here. The paths named in the descriptions are display text.
+  # The plugin symlinks are the classic silent failure: present binaries, absent
+  # subcommands. chezmoi owns them (private_dot_docker/cli-plugins) precisely so this
+  # is not a manual step that gets skipped.
+  guest_check 'docker buildx exists as a subcommand' \
+    'PATH=/opt/homebrew/bin:$PATH docker buildx version'
+  guest_check 'docker compose exists as a subcommand' \
+    'PATH=/opt/homebrew/bin:$PATH docker compose version'
+  guest_check 'the buildx CLI plugin symlink resolves' \
+    'test -x "$HOME/.docker/cli-plugins/docker-buildx"'
+  guest_check 'the compose CLI plugin symlink resolves' \
+    'test -x "$HOME/.docker/cli-plugins/docker-compose"'
+
+  echo '-- what the developer gets at a prompt --'
+  guest_check 'docker is on a login shell PATH' 'zsh -lc "command -v docker"'
+  guest_check 'colima is on a login shell PATH' 'zsh -lc "command -v colima"'
+
+  echo '-- declared state --'
+  guest_check "chezmoi data records runtime=$RUNTIME" \
+    "/opt/homebrew/bin/chezmoi data | /opt/homebrew/bin/jq -e '.runtime == \"$RUNTIME\"'"
+  guest_check 'the rendered Brewfile carries the runtime fragment' \
+    'grep -q "^brew \"colima\"" "$HOME/.config/security-ai-workstation/Brewfile"'
+
+  echo
+  if ((failures == 0)); then
+    success "Runtime is installed and wired correctly in the guest ($RUNTIME)."
+  else
+    die "$failures runtime setup check(s) failed in the guest. The packages may be
+installed while the setup is still wrong — an absent CLI plugin means 'docker buildx'
+does not exist even though the binary is on disk."
+  fi
+
+  log 'The substrate commands the guest would run:'
+  remote ./script/container-substrate --dry-run
+
+  # Read the GUEST's hypervisor support, not the host's. The host has it and the guest
+  # may not, which is the whole question.
+  local guest_hv
+  guest_hv="$(remote sh -c 'sysctl -n kern.hv_support 2>/dev/null || echo 0' 2>/dev/null |
+    tr -dc '0-9' | tail -c 1)"
+
+  if [[ "$guest_hv" == 1 ]]; then
+    log 'The guest supports virtualization, so the substrate is created for real.'
+    remote ./script/container-substrate
+    remote ./script/container-substrate --verify
+    # shellcheck disable=SC2016  # $PATH must expand in the guest
+    remote sh -c 'export PATH=/opt/homebrew/bin:$PATH; docker run --rm hello-world' ||
+      warn "The substrate verified but 'docker run' failed; investigate in the guest."
+    success 'Substrate created and verified inside the guest.'
+    return 0
+  fi
+
+  warn "The guest reports kern.hv_support=0: nested virtualization needs M3 or later,
+so Colima cannot start in it and the substrate cannot be created here.
+
+What this run DID establish: the runtime packages install, and
+container-substrate runs and produces the right commands.
+What it did NOT: that Colima starts, that the network, registry and build cache are
+created, or that a cluster comes up.
+
+Those need the M5 Max, where the guest does support virtualization. The final machine
+runs Colima natively rather than nested, so this is a limit on rehearsal only."
+
+  # --verify must FAIL here, and that is the correct answer. Asserted rather than
+  # skipped: if it passed with no runtime available it would be reporting nothing.
+  if remote ./script/container-substrate --verify >/dev/null 2>&1; then
+    die "container-substrate --verify PASSED in a guest that cannot run a VM.
+It is reporting success without checking anything."
+  fi
+  log 'container-substrate --verify correctly fails here, rather than passing blindly.'
+}
+
+# Installs the Xcode Command Line Tools in the guest, standing in for the human.
+#
+# `./bootstrap install` cannot do this itself, by design: `ensure_xcode_clt` runs
+# `xcode-select --install` and stops with "Complete the Apple installer, then rerun".
+# That is right for a person at a keyboard — the Apple installer is a GUI dialog — and
+# it is a wall for an unattended run, which is where the first destructive test
+# stopped dead.
+#
+# So the harness does what the documented flow tells the operator to do between the
+# two bootstrap passes. It is a separate, logged step rather than a change to
+# bootstrap, because bootstrap's fail-fast is correct behaviour and removing it would
+# make the product worse to test the product.
+#
+# The sentinel file is what makes the on-demand package visible: without it
+# `softwareupdate -l` reports "No new software available" even on a machine with no
+# Command Line Tools at all.
+#
+# One consequence to be honest about: this means the test does NOT exercise
+# ensure_xcode_clt's trigger-and-stop path. That path ends in a GUI dialog, so no
+# unattended harness can cover it; everything after it is what this run proves.
+ensure_guest_clt() {
+  if "$ROOT/script/vm" ssh xcode-select -p >/dev/null 2>&1; then
+    log "The guest already has the Command Line Tools."
+    return 0
+  fi
+  log "Installing them the way a person would be told to, then continuing."
+  # Single quotes are required and the warning is wrong here: every expansion in this
+  # snippet must happen in the GUEST. Expanded locally, $sentinel and $label would be
+  # empty and the install would target nothing.
+  # shellcheck disable=SC2016
+  "$ROOT/script/vm" ssh sh -c '
+    set -e
+    sentinel=/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+    sudo touch "$sentinel"
+    label="$(softwareupdate -l 2>/dev/null |
+      sed -n "s/^ *\* Label: \(Command Line Tools for Xcode.*\)$/\1/p" | tail -1)"
+    if [ -z "$label" ]; then
+      sudo rm -f "$sentinel"
+      echo "No Command Line Tools package was offered by softwareupdate." >&2
+      exit 1
+    fi
+    echo "Installing: $label"
+    sudo softwareupdate -i "$label"
+    sudo rm -f "$sentinel"
+  ' || die "Could not install the Command Line Tools in the guest."
+
+  # Verified by read-back rather than trusting the installer's exit status, because
+  # everything after this depends on it and the failure would surface as something
+  # unrelated: /usr/bin/git and /usr/bin/python3 are stubs until it is present.
+  "$ROOT/script/vm" ssh xcode-select -p >/dev/null 2>&1 ||
+    die "softwareupdate reported success but xcode-select -p still fails."
+  success "Command Line Tools are installed in the guest."
+}
+
+run_install_test() {
+  local bootstrap_args=(
+    install
+    --yes
+    --profiles "$PROFILES"
+    --shell "$SHELL_CHOICE"
+    --runtime "$RUNTIME"
+    --password-manager "$PASSWORD_MANAGER"
+    --firewall "$FIREWALL"
+    --git-name "$GIT_NAME"
+    --git-email "$GIT_EMAIL"
+  )
+  # Both directions are passed explicitly. Omitting the flag used to mean "off" because
+  # bootstrap defaulted to false; now that bootstrap defaults to true, silence means
+  # "on", so --no-hardening here would have produced a hardened guest and a test that
+  # quietly asserted the opposite of what was asked for.
+  if [[ "$WITH_MACOS_DEFAULTS" == true ]]; then
+    bootstrap_args+=(--with-macos-defaults)
+  else
+    bootstrap_args+=(--no-macos-defaults)
+  fi
+  if [[ "$WITH_HARDENING" == true ]]; then
+    bootstrap_args+=(--with-hardening)
+  else
+    bootstrap_args+=(--no-hardening)
+  fi
+
+  warn_if_memory_overcommitted
+
+  if [[ "$KEEP" == true ]]; then
+    step 'Reusing the current test VM (--keep)'
+    warn "The guest is not pristine, so a pass does not prove first-install."
+  else
+    step 'Resetting the test VM to a pristine clone'
+    "$ROOT/script/vm" reset
+  fi
+
+  step 'Booting the test VM'
+  "$ROOT/script/vm" up
+
+  step 'Transferring the working tree'
+  "$ROOT/script/sync-to-mac"
+
+  step 'bootstrap plan'
+  remote ./bootstrap plan
+
+  step 'Xcode Command Line Tools'
+  ensure_guest_clt
+
+  step 'bootstrap install'
+  log "Selection: profiles=$PROFILES shell=$SHELL_CHOICE runtime=$RUNTIME"
+  log "This installs Xcode Command Line Tools, Homebrew and the whole selection."
+  remote ./bootstrap "${bootstrap_args[@]}"
+
+  step 'chezmoi finished applying'
+  assert_chezmoi_settled
+
+  step 'script/verify'
+  remote ./script/verify
+
+  # The guest now has what the host was missing. On this machine ./script/test
+  # skips shellcheck, shfmt, actionlint, gitleaks, the chezmoi template execution
+  # and YAML because none of them are installed; the dev profile installs all of
+  # them, so the guest is the first place the suite can run without skips.
+  case ",$PROFILES," in
+    *,dev,*)
+      step 'script/test with every check required'
+      remote env REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1 ./script/test
+      ;;
+    *)
+      step 'script/test skipped'
+      log "The dev profile is not selected, so the linters are not installed."
+      ;;
+  esac
+
+  step 'Container substrate in the guest'
+  exercise_guest_substrate
+
+  step 'script/hardening-check'
+  # Not --strict. A fresh guest has no FileVault and no reviewed TCC state, so
+  # failures here are expected and the report is the point.
+  remote ./script/hardening-check || true
+
+  step 'Result'
+  success "Destructive install test completed against a pristine guest."
+  log "The VM is left running so it can be inspected:"
+  log "  ./script/vm ssh"
+  log "Shut it down with:  ./script/vm down"
+}
+
+# Argument parsing and validation run OUTSIDE the transcript, so --help and a
+# rejected option do not create a log file for a run that never happened.
+parse_args "$@"
+validate_choices
+command_exists tart || die "tart is not installed. Run ./script/install-tart"
+
+mkdir -p "$STATE_DIR"
+LOG="$STATE_DIR/test-install-$(date +%Y%m%d-%H%M%S).log"
+
+# The transcript is captured without losing the exit status: PIPESTATUS[0] is
+# run_install_test's, not tee's. A test driver that always exits 0 gates nothing.
+run_install_test 2>&1 | tee "$LOG"
+status="${PIPESTATUS[0]}"
+chmod 600 "$LOG"
+printf '\nTranscript: %s\n' "$LOG"
+exit "$status"

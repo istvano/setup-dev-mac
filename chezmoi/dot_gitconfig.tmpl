@@ -60,6 +60,20 @@
   # conflict markers zdiff3 writes above.
   cmd = {{ lookPath "code" | quote }} --wait --merge $LOCAL $REMOTE $BASE $MERGED
 {{- end }}
+# Git LFS. Declared here rather than left to `git lfs install`, which writes exactly
+# these four keys into this file — a file chezmoi owns, so a run-once hook doing it
+# would be reported as an external modification on every apply.
+#
+# `required = true` is what makes a missing git-lfs binary an ERROR rather than a
+# silent pass-through. Without it, cloning a model repository on a machine where
+# git-lfs is absent quietly produces pointer files instead of weights, and the symptom
+# looks like a corrupt model. Failing loudly is the whole point.
+[filter "lfs"]
+  clean = git-lfs clean -- %f
+  smudge = git-lfs smudge -- %f
+  process = git-lfs filter-process
+  required = true
+
 [rerere]
   enabled = true
 [pull]

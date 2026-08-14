@@ -264,6 +264,33 @@ for CONFIG in "${CONFIGS[@]}"; do
     exit 1
   }
 
+  # Rancher Desktop's ~/.rd/bin must appear on PATH only when Rancher is the
+  # selected runtime (ADR-037).
+  #
+  # Emitting it unconditionally was harmless-looking: the guard tests for the
+  # directory, so on a Colima machine it does nothing. But a machine migrating OFF
+  # Rancher still has ~/.rd/bin on disk, and it carries its own docker client. Two
+  # docker clients competing for one socket is a correctness problem before it is a
+  # performance one, which is the whole reason for the migration.
+  selected_runtime="$(grep -E '^runtime = ' "$CONFIG" | sed -E 's/.*"(.*)".*/\1/')"
+  for shell_config in dot_zshrc.tmpl dot_config/fish/config.fish.tmpl; do
+    rd_mentions="$(render <"$ROOT/chezmoi/$shell_config" | grep -c '\.rd/bin' || true)"
+    if [[ "$selected_runtime" == rancher ]]; then
+      ((rd_mentions > 0)) || {
+        echo "runtime=rancher but $shell_config does not add ~/.rd/bin," >&2
+        echo "so Rancher's own docker and rdctl are not on PATH." >&2
+        exit 1
+      }
+    else
+      ((rd_mentions == 0)) || {
+        echo "runtime=$selected_runtime but $shell_config still references" >&2
+        echo "the ~/.rd/bin shims. A leftover Rancher install would put a second" >&2
+        echo "docker client on PATH, competing for the socket." >&2
+        exit 1
+      }
+    fi
+  done
+
   # The Ghostty command line must render to a real absolute path.
   #
   # It is the one place the Homebrew prefix cannot be discovered at runtime — a
@@ -273,13 +300,39 @@ for CONFIG in "${CONFIGS[@]}"; do
   if [[ "$selected" == fish ]]; then
     ghostty_command="$(render <"$ROOT/chezmoi/dot_config/ghostty/config.tmpl" |
       grep '^command = ' || true)"
-    [[ "$ghostty_command" =~ ^command\ =\ (/opt/homebrew|/usr/local)/bin/fish\ --login$ ]] || {
+    # One prefix, not an alternation. The Intel prefix was removed with Intel
+    # support (ADR-036), so accepting /usr/local here would let the brew-prefix
+    # template silently regress to emitting a Rosetta path.
+    [[ "$ghostty_command" == 'command = /opt/homebrew/bin/fish --login' ]] || {
       echo "ghostty config.tmpl rendered an unexpected command line:" >&2
       echo "  ${ghostty_command:-<none>}" >&2
-      echo "Expected a Homebrew prefix followed by /bin/fish --login." >&2
+      echo "Expected exactly: command = /opt/homebrew/bin/fish --login" >&2
       exit 1
     }
   fi
+
+  # No managed target may still carry a chezmoi attribute prefix in its NAME.
+  #
+  # Attribute order matters and chezmoi does not complain when it is wrong. Written as
+  # `private_modify_config.json`, chezmoi consumed `private_` and treated `modify_` as
+  # part of the filename — then created a literal ~/.docker/modify_config.json
+  # containing the script's own source, 3304 bytes of shell where a 34-byte JSON file
+  # was intended. The credential store was silently never configured. Correct is
+  # `modify_private_config.json`: modify_ comes first.
+  #
+  # This is the "declared but not applied" failure again, and the existing dotfile
+  # check could not see it because modify_config.json is not a dotfile at the top
+  # level — it sits inside .docker, so it passed.
+  attribute_leak="$(chezmoi managed --config "$scoped" --source "$ROOT" 2>/dev/null |
+    awk -F/ '{ print $NF }' |
+    grep -E '^(encrypted|private|readonly|empty|executable|symlink|create|modify|remove|run|literal)_' ||
+    true)"
+  [[ -z "$attribute_leak" ]] || {
+    echo "shell=$selected: these managed targets still carry an attribute prefix in" >&2
+    echo "their name, so chezmoi did not parse it — check the prefix ORDER:" >&2
+    printf '  %s\n' "$attribute_leak" >&2
+    exit 1
+  }
 
   # Every managed file or directory must be a dotfile.
   #

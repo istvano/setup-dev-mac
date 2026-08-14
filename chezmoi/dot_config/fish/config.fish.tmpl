@@ -30,21 +30,24 @@ fish_add_path -g $HOME/.local/bin
 # rather than eval'd. It prints nothing once Homebrew's bin and sbin are already
 # first and second in PATH, so re-running it cannot reorder anything.
 #
-# The prefix is architecture-dependent: /opt/homebrew on Apple Silicon,
-# /usr/local on Intel. Apple Silicon is checked first so a Mac with both installs
-# gets the native one.
-for __brew in /opt/homebrew/bin/brew /usr/local/bin/brew
-    if test -x $__brew
-        $__brew shellenv fish | source
-        break
-    end
+# /opt/homebrew is the Apple Silicon prefix and the only one supported (ADR-036).
+# /usr/local is deliberately not a fallback: on Apple Silicon it holds an x86_64
+# Homebrew under Rosetta, and falling back would put translated binaries on PATH
+# rather than reporting that Homebrew is missing.
+set -l __brew /opt/homebrew/bin/brew
+if test -x $__brew
+    $__brew shellenv fish | source
 end
 set -e __brew
+{{- if eq .runtime "rancher" }}
 # Rancher Desktop's shims, for the reasons given in dot_zshrc.tmpl: Rancher's own
 # "rcfiles" strategy would edit a chezmoi-managed file. -a appends, so the
 # declared Homebrew kubectl, helm and docker-compose win over Rancher's copies.
 # No existence guard is needed — fish_add_path skips a directory that is absent.
+#
+# Emitted only when Rancher is selected (ADR-037); Colima is the default.
 fish_add_path -ga $HOME/.rd/bin
+{{- end }}
 
 # Rust comes from mise, which shims cargo and rustc; no Homebrew keg on PATH.
 

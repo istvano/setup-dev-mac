@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 # Push this working tree to the macOS test VM and optionally run a command there.
 #
-# Cloning is not an option: the test VM cannot reach the git remote, and a clean
-# macOS has no git at all until Xcode Command Line Tools are installed. The
-# working tree goes over ssh instead.
+# Cloning is not an option, and the reason survived the move to a local VM
+# unchanged: a pristine macOS guest has no git at all until the Xcode Command Line
+# Tools are installed, which is the very thing under test. The working tree goes
+# over ssh instead.
 #
 #   sync-to-mac                       sync only
 #   sync-to-mac ./script/test         sync, then run that in the remote checkout
 #   sync-to-mac --dry-run             list what would transfer, change nothing
 #   sync-to-mac --fetch REMOTE LOCAL  copy a path back off the VM
 #
-# The target is deliberately not hardcoded. AGENTS.md forbids machine-specific
-# addresses in tracked files, so this reads the environment and refuses to guess:
+# By default the target is the local macOS VM managed by script/vm, which is how
+# this repository is tested (ADR-036). No address is hardcoded: script/vm resolves
+# the guest's address and writes the SSH configuration used to reach it.
+#
+# A remote Mac still works, and overrides the local VM when named. AGENTS.md
+# forbids machine-specific addresses in tracked files, so that comes from the
+# environment and is never guessed:
 #
 #   export MAC_TEST_HOST=user@host
 #   export MAC_TEST_PORT=22220
@@ -43,8 +49,9 @@ Usage: script/sync-to-mac [--dry-run] [command...]
   --fetch          copy a path back off the VM, for recording results
 
 Environment:
-  MAC_TEST_HOST    required, e.g. user@host
-  MAC_TEST_PORT    default 22
+  MAC_TEST_HOST    optional, e.g. user@host. Unset means the local macOS VM
+                   managed by script/vm.
+  MAC_TEST_PORT    default 22; ignored for the local VM
   MAC_TEST_DIR     default workspace/mac-os-setup, relative to the remote home
 EOF
 }
@@ -64,17 +71,59 @@ case "${1:-}" in
     ;;
 esac
 
-[[ -n "$HOST" ]] || die "MAC_TEST_HOST is not set. Export MAC_TEST_HOST and
-MAC_TEST_PORT rather than editing this file; a hardcoded address would be a
-machine-specific value in a tracked file. See script/sync-to-mac --help."
+# Two targets, one transfer path. The local VM is reached through the SSH
+# configuration script/vm generates, which carries the guest's address, the
+# identity file and the host-key handling a VM that is re-cloned on every reset
+# needs. A named remote host keeps the original port-and-address form.
+#
+# SSH_ARGS is an ARRAY, and SSH_COMMAND a separately built string for rsync's -e.
+# Not one converted into the other: this file sets IFS=$'\n\t', so "${SSH_ARGS[*]}"
+# would join on a newline and rsync would receive one unusable argument.
+SSH_ARGS=()
+SSH_COMMAND=""
+if [[ -n "$HOST" ]]; then
+  SSH_ARGS=(-p "$PORT")
+  SSH_COMMAND="ssh -p $PORT"
+  log "Target: $HOST (MAC_TEST_HOST)"
+else
+  vm_ssh_config="$("$ROOT/script/vm" ssh-config)"
+  [[ -f "$vm_ssh_config" ]] || die "No local VM is up, and MAC_TEST_HOST is not set.
+Start the test VM first, or name a remote Mac:
+  ./script/vm up
+  export MAC_TEST_HOST=user@host"
+  # rsync word-splits the -e string on spaces itself, so a path containing one
+  # cannot be passed through it. Refused rather than mangled, the same way
+  # script/shell-files refuses a script path with whitespace.
+  case "$vm_ssh_config" in
+    *[[:space:]]*)
+      die "The generated SSH configuration path contains whitespace, which rsync
+cannot be given through -e: $vm_ssh_config"
+      ;;
+  esac
+  HOST="workstation-vm"
+  SSH_ARGS=(-F "$vm_ssh_config")
+  SSH_COMMAND="ssh -F $vm_ssh_config"
+  log "Target: the local macOS VM via $vm_ssh_config"
+fi
 
-ssh_run() { ssh -p "$PORT" "$HOST" "$@"; }
+# Client-side expansion is the point, not an oversight. Callers pass a pre-composed
+# string such as "test -d '$REMOTE_DIR/.git'", where REMOTE_DIR is a LOCAL variable
+# that must be resolved here — the guest has no such variable. shellcheck cannot
+# tell that from the array expansion, so it is silenced deliberately.
+# shellcheck disable=SC2029
+ssh_run() { ssh "${SSH_ARGS[@]}" "$HOST" "$@"; }
 
 fetch_path() {
   local remote="$1" local_path="$2"
   [[ -n "$remote" && -n "$local_path" ]] || die "--fetch needs REMOTE_PATH and LOCAL_PATH"
   mkdir -p "$(dirname "$local_path")"
-  scp -P "$PORT" -r "$HOST:$remote" "$local_path"
+  # scp spells the port -P and the config -F, so the ssh argument array cannot be
+  # reused verbatim; -F is common to both and -p/-P is the one that differs.
+  if [[ -n "${MAC_TEST_HOST:-}" ]]; then
+    scp -P "$PORT" -r "$HOST:$remote" "$local_path"
+  else
+    scp "${SSH_ARGS[@]}" -r "$HOST:$remote" "$local_path"
+  fi
   success "Fetched $remote to $local_path"
 }
 
@@ -102,7 +151,7 @@ sync_tree() {
     # a fresh VM fails on the missing ~/workspace. --mkpath would cover it but
     # needs rsync 3.2.3+, and macOS ships an older rsync or openrsync.
     [[ "$DRY_RUN" == true ]] || ssh_run "mkdir -p '$REMOTE_DIR'"
-    rsync "${flags[@]}" -e "ssh -p $PORT" "$ROOT/" "$HOST:$REMOTE_DIR/"
+    rsync "${flags[@]}" -e "$SSH_COMMAND" "$ROOT/" "$HOST:$REMOTE_DIR/"
   else
     [[ "$DRY_RUN" == true ]] && die "--dry-run needs rsync."
     warn "rsync is not installed; falling back to tar over ssh (no deletions)."
@@ -129,12 +178,39 @@ and tests/chezmoi-templates.sh will report it as a chezmoi error."
 # gitleaks would all report as not installed and the strict test run would be
 # impossible. Every chezmoi run script solves it the same way, so this does too.
 #
-# Both prefixes are tried because the test machine may be Intel (/usr/local)
-# while the target is Apple Silicon (/opt/homebrew).
+# The command is assembled with a LOCAL IFS of a single space.
+#
+# "$*" joins on the first character of IFS, and this file sets IFS=$'\n\t' like
+# every other script here, so it joined on a NEWLINE: `sync-to-mac ./script/vm
+# down` arrived at the remote shell as two separate commands on two lines. The
+# documented invocations all pass a single word, which is why it went unnoticed —
+# but the failure could invert intent rather than merely break. `sync-to-mac
+# ./script/macos-defaults --dry-run` would have run ./script/macos-defaults, whose
+# default mode is apply, and then `--dry-run` as its own command.
+#
+# script/AGENTS.md already states the rule this violated; sync_tree above obeys it
+# for rsync's flags.
 remote_command() {
-  local command="$*"
-  ssh -p "$PORT" -t "$HOST" "
-    for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+  # Each argument is RE-QUOTED, not merely joined.
+  #
+  # `local IFS=' '` plus "$*" fixed the newline-joining bug but not the real one: ssh
+  # hands the joined string to the remote login shell, which parses it AGAIN. Any
+  # argument containing a space is therefore split back into several. Observed on the
+  # first real destructive run —
+  #   ./bootstrap install ... --git-name Workstation Test ...
+  #   [ERROR] Unknown option: Test
+  # — so the test could never have passed with a multi-word Git name, which is the
+  # normal case.
+  #
+  # printf '%q' per argument survives exactly one round of remote parsing. A loop
+  # rather than a quoted array slice: bash 3.2 joins those instead of expanding them.
+  local arg command='' separator=''
+  for arg in "$@"; do
+    command+="$separator$(printf '%q' "$arg")"
+    separator=' '
+  done
+  ssh "${SSH_ARGS[@]}" -t "$HOST" "
+    for b in /opt/homebrew/bin/brew; do
       [ -x \"\$b\" ] && { eval \"\$(\$b shellenv)\"; break; }
     done
     cd '$REMOTE_DIR' || exit 1
@@ -147,7 +223,7 @@ if [[ "$FETCH" == true ]]; then
   exit 0
 fi
 
-log "Syncing $ROOT to $HOST:$REMOTE_DIR (port $PORT)"
+log "Syncing $ROOT to $HOST:$REMOTE_DIR"
 sync_tree
 
 if [[ "$DRY_RUN" == true ]]; then
@@ -159,7 +235,11 @@ verify_transfer
 success "Synced, with .git and executable bits intact."
 
 if (($# > 0)); then
-  log "Running on $HOST: $*"
+  # A space-joined copy for the log only. Outside remote_command IFS is still
+  # $'\n\t', so "$*" here printed one argument per line and made the failure it was
+  # meant to illuminate harder to read.
+  printed="$(printf '%s ' "$@")"
+  log "Running on $HOST: ${printed% }"
   # The exit status is forwarded on purpose, so a failing remote test fails this
   # command and the fix/sync/test loop cannot report a false pass.
   remote_command "$@"

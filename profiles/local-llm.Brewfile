@@ -19,9 +19,8 @@
 # MLX itself is NOT installed here. It is a project-local Python dependency
 # (ADR-004); see docs/OPERATIONS.md#local-ai-models.
 #
-# The `arm64-only` marker below is machine-readable, not decoration.
-# script/platform-gaps reports every package carrying it that cannot install on
-# the current machine, and script/check-tokens verifies the marker against
-# Homebrew's own `depends_on arch` in both directions — so it cannot go stale or
-# be forgotten on a new package (ADR-034).
-cask "lm-studio" # arm64-only. GUI for discovering, downloading and running local LLMs via llama.cpp and MLX.
+# This cask declares `depends_on arch: arm64` upstream. That used to need a
+# machine-readable `arm64-only` marker here, so script/platform-gaps could exclude
+# this profile on an Intel machine. Apple Silicon is now the only supported
+# platform, so the constraint is always satisfied and the marker is gone (ADR-036).
+cask "lm-studio" # GUI for discovering, downloading and running local LLMs via llama.cpp and MLX.

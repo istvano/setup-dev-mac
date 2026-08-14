@@ -36,7 +36,7 @@ default and must not be presented as production-safe.
 
 ## ADR-005: Use Rancher Desktop with Moby as the free default runtime
 
-**Status:** accepted
+**Status:** superseded by ADR-037
 
 Moby provides the Docker API required by Compose and common development tools.
 OrbStack is the paid alternative; Colima is the CLI-only alternative. Only one
@@ -118,7 +118,12 @@ belong in the decision record rather than the operational backlog.
 
 ## ADR-013: Keep the default profile small and specialist capabilities opt-in
 
-**Status:** accepted
+**Status:** accepted, amended by ADR-038.
+
+ADR-038 moves `kubernetes` out of the specialist list and into the default set: this
+workstation exists for Docker and Kubernetes development, so a default that cannot do
+Kubernetes is incomplete rather than lean. The principle below is unchanged and still
+governs cloud CLIs, data clients, privileged monitors and personal applications.
 
 The default installation selects only `core`, `dev`, `security` and the minimal
 `productivity` profile. Cloud providers, Kubernetes, data clients, privileged
@@ -970,6 +975,16 @@ import is not a fallback chain — it is a hard dependency with extra steps.
 
 ## ADR-034: Discover the Homebrew prefix; support Intel as a development platform
 
+**Status:** superseded by ADR-036.
+
+Intel support was removed once the Apple Silicon machine existed and the test
+workflow moved to a local arm64 macOS VM. The prefix-discovery half of this
+decision survives in spirit — `brew_prefix` is still the single definition and
+nothing hardcodes a path at its call site — but it now has one candidate, and
+`/usr/local` is deliberately not a fallback because on Apple Silicon it means a
+Rosetta x86_64 Homebrew. The reasoning below is kept as the record of why the
+hardcoded prefix was a genuine bug.
+
 Apple Silicon remains the target. Intel macOS is now supported so the workstation
 can be built and tested before the arm64 machine exists — which is precisely when
 finding the defects is cheap, and the alternative is discovering them on the
@@ -1195,3 +1210,600 @@ It now uses anchored regular expressions, and every guarded hook was unguarded i
 turn to confirm each one is individually rejected. A test that has never been
 seen to fail has not been shown to work — which is the same argument ADR-030
 makes about configuration, applied to the tests themselves.
+
+## ADR-036: Test the repository in a local macOS VM; drop Intel entirely
+
+**Status:** accepted. Supersedes ADR-034.
+
+`./bootstrap install` is the most consequential code path here and the only one
+nothing could exercise. `./script/test` is static validation. `./script/verify`
+inspects a machine that is already installed. Neither answers the question the
+repository exists to answer: does a pristine macOS become a configured
+workstation? Running it on the real machine answers that once, after which the
+machine is no longer pristine and the answer cannot be reproduced.
+
+The workstation was built on Linux and validated against an Intel macOS VM reached
+over SSH. That arrangement has now outlived its purpose: Apple Silicon hardware
+exists, and an Intel result says nothing about it. `TASKS.md` carried roughly
+fifteen items whose only blocker was "requires the target Mac".
+
+### Two machines, one architecture
+
+The target is an M5 Max with 128 GB unified memory and 4 TB storage. The
+repository is built and tested on a second Apple Silicon machine, an M1 Pro with
+32 GB.
+
+This is the same shape as the Intel arrangement it replaces, with one decisive
+difference: both machines are `arm64`. Intel could not prove anything about the
+target because the architecture differed — a different Homebrew prefix, casks that
+declare `arch: arm64`, different bottles. The M1 Pro differs only in capacity and
+generation, so a passing result there is evidence about the target rather than
+merely evidence about a stand-in.
+
+Where the two machines genuinely differ, the difference is DETECTED rather than
+written down. Nested virtualization is the live case and the reason this section
+exists: a flat "the VM cannot test a container runtime" would be true of the build
+machine and false of the target, and it would go stale silently on the machine
+where it stops being true.
+
+### A golden image, cloned per run
+
+The test VM is discarded and re-cloned from a golden image before every run, so
+each run starts from the same pristine state.
+
+That cadence is only affordable because of copy-on-write. `tart clone` is an APFS
+clone: "a cloned VM won't actually claim all the space right away. Only changes to
+a cloned disk will be written." A fresh guest costs a second and almost no disk,
+against roughly half an hour to reinstall macOS from an IPSW. Without a cheap
+reset, "repeatable" degrades to "occasionally", and a first-install test that is
+run occasionally is a first-install test that is run once.
+
+### Why not Lima, which was already installed
+
+Lima was the obvious candidate — it is in homebrew-core, it is already in the
+`lab` profile, and it gained experimental macOS guest support in v2.1. It cannot
+do this job, for a reason that is structural rather than a rough edge:
+
+`limactl snapshot` is implemented over `qemu-img` and does not support the `vz`
+driver. macOS guests on Apple Silicon **require** `vz`. So there is no snapshot
+primitive for a macOS guest at all, and every destructive run would pay for a full
+reinstall.
+
+Three further limitations point the same way. Lima's macOS guest is not headless —
+its own template sets `video: display: "default"` with the note that the installer
+requires a display device, and the documentation states there is "no support for
+turning off the video display". There is no automatic port forwarding. And
+passwordless sudo is disabled, which an unattended install cannot answer.
+
+Lima stays in the `lab` profile. It remains the right tool for the Linux guests
+ADR-027 provisioned it for; it is simply not a macOS test harness.
+
+UTM was also considered and rejected for this purpose: it is already a declared
+cask, but creating a macOS guest is GUI-driven and `utmctl` is a thinner
+automation surface than a from-clean install test needs.
+
+### Why tart is pinned from its release, not tapped
+
+tart is carried only by a third-party tap, which is exactly what ADR-020 declined
+for AeroSpace and tflint. Rather than argue with that rule, this sidesteps it:
+`script/install-tart` installs a pinned release verified against `vm/tart.lock`,
+mirroring `script/install-toolhive` and `mcp/toolhive.lock`.
+
+Three things make the tap the worse route, independently of ADR-020:
+
+- Homebrew 6 refuses to load a formula from an untrusted tap at all, so
+  `brew bundle` cannot install it without a separate interactive `brew trust`
+  step. A package that needs a trust prompt cannot live in a Brewfile.
+- The formula depends on a second tap formula, `softnet`, widening the tap surface
+  for something this repository does not use.
+- The release is already pinnable, and better than most: a single universal
+  archive with an upstream-published `checksums.txt`.
+
+The pin is stronger than the tap would have been. `vm/tart.lock` records the
+version, the SHA-256 **and** the Apple Developer Team Identifier that signed
+`tart.app`, and the installer refuses on any mismatch. The signature is not
+decoration: the bundle carries `com.apple.security.virtualization` and
+`com.apple.vm.networking`, and those entitlements are only valid while the
+signature is intact — which is also why the whole `.app` is installed rather than
+the executable copied out of it.
+
+**Licensing:** tart is "Fair Source", not OSI open source. It is free for
+individual and small-organisation use with paid licensing above a threshold.
+Recorded here because the package rules in `AGENTS.md` require a licence
+classification, and "on GitHub" is not one.
+
+### Why the golden image comes from Apple's IPSW
+
+`tart create --from-ipsw latest` installs macOS from Apple's own image. The
+alternative — cloning a prebuilt `ghcr.io/cirruslabs/macos-*` guest — is faster and
+arrives with SSH and passwordless sudo already configured.
+
+It is also a third party's macOS underneath a test of this repository's security
+baseline. The result would describe their image as much as this configuration.
+Pinning it by digest would satisfy ADR-006 and still not fix that.
+
+The cost is real and is accepted: a freshly installed macOS boots into Setup
+Assistant, which no script may click. Building the golden image is therefore a
+one-time interactive step per macOS release. `./script/vm build` prints the
+checklist; everything after it is automated.
+
+### `script/vm seal`
+
+A golden image decides whether every later result means anything, so it is
+verified by read-back before it is trusted — the same argument ADR-016 makes about
+macOS defaults.
+
+Both halves are checked, and the second matters more. A golden that is not
+**usable** fails every run for a reason that looks like a repository bug: annoying,
+but self-announcing. A golden that is not **pristine** is worse. If Homebrew or the
+Command Line Tools are already present, the install still reports success while
+never exercising the code path under test. That is a green result that proves
+nothing, which is the failure mode this repository keeps legislating against.
+
+### Intel support is removed, not merely untested
+
+Keeping a platform the test workflow no longer covers would mean shipping a
+configuration nothing verifies. So it is gone rather than deprecated:
+
+- `script/platform-gaps` is deleted. It reported which declared packages the
+  current architecture could not install; with arm64 the only target, the answer
+  is always none.
+- `require_supported_mac` fails on x86_64 instead of warning.
+- `--profiles all` no longer subtracts anything, so it expands straight from
+  `VALID_PROFILES`.
+- The two-way `arm64-only` marker reconciliation is out of `script/check-tokens`,
+  and the marker is out of `profiles/local-llm.Brewfile`. A cask declaring
+  `depends_on arch: arm64` now installs everywhere this repository runs.
+
+### `/usr/local` is dropped for a second reason
+
+The obvious cleanup is to stop treating `/usr/local` as a Homebrew prefix because
+it was the Intel one. There is a sharper reason to remove it rather than leave it
+as a harmless fallback.
+
+On Apple Silicon that path still exists whenever an x86_64 Homebrew has been
+installed under Rosetta. A fallback would therefore resolve to a **translated
+toolchain on exactly the machine where `/opt/homebrew` is missing** — it would
+work, slowly, with the wrong binaries, and report success. The correct answer there
+is "Homebrew is not installed", which is what an empty result says.
+
+`brew_prefix` is still a discovery function with one definition, and the
+`brew-prefix` template still exists so the prefix is not inlined at call sites;
+both simply have one candidate now. `tests/placement-policy.sh` asserts the
+removal cannot half-revert, matching on `/usr/local/bin/brew` — the executable
+form a reintroduced fallback would use — rather than on the bare prefix, which now
+appears only in prose explaining its absence.
+
+### What this VM cannot prove
+
+Recorded because a test harness that hides its blind spots is worse than one that
+names them:
+
+- **Nested virtualization depends on which machine you are standing at, so it is
+  detected.** Apple's Virtualization.framework supports it only on M3 and later.
+  The build machine is an M1 Pro and cannot nest, so no container runtime starts
+  inside its guest and
+  `run_onchange_after_25_configure-container-runtime.sh.tmpl` is unprovable there.
+  The M5 Max target can, so on the target that hook becomes testable.
+
+  This is a limit of one machine, not of the design, and writing it down as a flat
+  "cannot" would have been wrong in the direction that matters — declaring
+  something untestable on the machine where it finally becomes testable.
+  `nested_virtualization_supported` in `script/lib/common.sh` reads
+  `hw.optional.arm.FEAT_NV`, and `script/test-install` either warns that the
+  runtime cannot work here or points out that it now can. `--runtime none` remains
+  the default because the smaller machine is where most runs happen.
+
+  The negative branch is confirmed on M1 Pro; the positive branch is a claim to
+  verify on the M5 Max, and `TASKS.md` carries it as such.
+- **Two guests per host.** Apple's licence permits two macOS VMs on one host. The
+  golden image plus one running clone is exactly two, so a matrix of selections
+  runs sequentially. This is a design constraint, not a queueing preference.
+- **Ghostty is unverified in the guest.** It needs Metal, and whether
+  paravirtualized graphics satisfy it is unknown. `TASKS.md` records the result
+  rather than predicting it.
+- **Guest sizing defaults to the smaller machine.** 8 GB RAM and 4 CPUs suit the
+  32 GB build machine, not the 128 GB target; `WORKSTATION_VM_MEMORY_GB` and
+  `WORKSTATION_VM_CPUS` raise it. The default fits the machine where most runs
+  happen rather than the roomier one.
+- **Setup Assistant is manual**, so a macOS release that changes it makes golden
+  rebuild manual again.
+
+## ADR-037: Colima as the default container runtime, with a declared substrate
+
+**Status:** accepted. Supersedes ADR-005 and refines ADR-010.
+
+Rancher Desktop was chosen as the free default because Moby provides the Docker API
+that Compose and Testcontainers need (ADR-005). That is still true, and it is also
+true of every alternative, so it never distinguished Rancher from anything. What
+distinguished Rancher was its cost, and the cost was structural:
+
+- **It fights the configuration.** Its default path-management strategy, `rcfiles`,
+  appends an export block to `~/.zshrc` — a file chezmoi owns. chezmoi then reports
+  the target as modified outside its control on every apply and offers to overwrite;
+  overwriting removes the block, Rancher re-adds it on next start, forever. Hook 25
+  existed largely to set that strategy to `manual`.
+- **It cannot be configured without being running.** `rdctl` answers
+  `list-settings` before it will accept a write, and returned 500 to a `set` while
+  still starting. Hook 25 carried a sixty-iteration wait loop for this, and
+  `TASKS.md` still listed the result as unproven.
+- **It installs what this configuration then disables.** A bundled Kubernetes
+  control plane, switched off; a desktop GUI, for a workflow driven from a terminal.
+- **An idle-CPU issue on Apple Silicon**, on a machine where battery matters.
+
+Colima has none of those. It is a CLI-managed Linux VM on Virtualization.framework
+exposing the standard Docker socket: no GUI, no privileged background daemon, no
+bundled control plane, and nothing that edits the shell files chezmoi manages.
+
+Rancher remains selectable, so hook 25's Rancher branch is kept rather than deleted.
+OrbStack stays the paid alternative — it is free only for personal or
+non-commercial use, or under $10,000 a year of related revenue, so a workstation
+used for employment needs a licence.
+
+### Apple's `container` was evaluated and rejected, for now
+
+Apple's native container tool reached 1.0 in June 2026 and is genuinely
+interesting here: it runs each container in its own lightweight VM via
+Virtualization.framework, which is *stronger* isolation than the single shared
+Linux VM every Docker-compatible runtime uses, and would suit this repository's
+threat model better than the incumbent.
+
+It does not implement the Docker API. Anything that speaks to a Docker socket —
+Compose, Testcontainers, kind, devcontainers — does not work with it, and the
+community bridges are immature. `docs/ARCHITECTURE.md` requires that API for
+project Compose stacks and CI-equivalent services, so this is a watch item and not
+a candidate. Revisit when Compose and Testcontainers work against it.
+
+### The substrate, and how it refines ADR-010
+
+ADR-010 says the repository does not maintain or deploy a shared container stack,
+and that services belong to the projects that own them. That still holds. But
+performance work on a VM-backed runtime lands on four objects that are shared by
+construction, and leaving them undeclared meant they were rebuilt by hand from a
+document:
+
+- **the VM** — sized deliberately; the only always-on cost
+- **one Docker network** with a pinned subnet, so a future host route covers every
+  cluster and the bridge address does not move
+- **a shared image registry**, because every k3d node has its own containerd image
+  store and a second cluster otherwise re-pulls everything the first already had
+- **a persistent BuildKit builder**, because image build is the operation run most
+  often and the one where a VM-backed runtime is weakest
+
+`script/container-substrate` owns those, idempotently, with `--dry-run`, `--status`
+and a `--verify` that exits non-zero.
+
+The line this draws is **state**: the repository may own substrate that holds no
+application state — a network, an image cache, a build cache, all rebuildable from
+nothing — and still must not own services with data. A database, a queue, an
+observability stack remain project-local. Nothing in `container-substrate` creates
+one, and the distinction is what keeps ADR-010 intact rather than quietly widened.
+
+Clusters stay out. A `k3d.yaml` belongs in the project repository so its shape is
+version-controlled rather than tribal knowledge, and because cluster CIDRs and
+ingress ports are project decisions.
+
+### Everything the substrate publishes binds to loopback
+
+A Docker port mapping without a host part binds `0.0.0.0`. `--port 5000` therefore
+publishes an unauthenticated image registry to every network the laptop joins, and
+`80:80` does the same for a cluster's ingress.
+
+The repository already required container ports to bind `127.0.0.1`, and this is
+the class of thing that invariant exists for: it is a laptop, it joins untrusted
+networks, and the repository installs an outbound firewall precisely because of
+that. So the registry is created as `--port 127.0.0.1:5000`, `--verify` fails when
+an existing registry is published more widely, and the documentation gives cluster
+port mappings the same treatment.
+
+The same reasoning excludes the wildcard-DNS convenience. It is a genuine
+quality-of-life win — hostnames instead of ports — but it needs dnsmasq running as
+a privileged service, and dnsmasq listens on all interfaces unless told otherwise.
+`AGENTS.md` forbids automatic network-service enablement and `bootstrap` states that
+no network service is enabled by this repository. It stays out; an operator who
+wants it should add `listen-address=127.0.0.1` and `bind-interfaces`, and know they
+have taken on a listening daemon.
+
+### Rosetta is opt-in
+
+`--vz-rosetta` makes amd64-only images usable, and is free if never exercised. It
+also requires Rosetta to be installed, and `AGENTS.md` forbids installing it
+automatically. So `SUBSTRATE_VM_ROSETTA` defaults to false and warns when enabled.
+
+### Colima settings that cannot be changed in place are verified by read-back
+
+`--mount-type=virtiofs` is discarded on a profile created with anything else.
+Colima emits one line —
+
+    level=warning msg="'volume mount type' cannot be updated after initial setup, discarded"
+
+— and then starts on the old value. Observed on the first real run here: the
+repository declared virtiofs and the guest mounted `fuse.sshfs`, which is the slower
+path and the one the tuning exists to avoid.
+
+This is ADR-016's failure mode in a new place: a setting that is accepted, stored and
+ignored, where the only symptom is that everything is quietly slower.
+`container-substrate` therefore reads the mount type back out of the profile Colima
+wrote, reports it in `--status` and fails `--verify` on a mismatch, rather than
+trusting that passing the flag did anything.
+
+Fixing it requires `colima delete`, which destroys the profile's contents. That is
+affordable only because everything the repository puts in there is declared: the
+network, the registry and the build cache are all rebuilt by the next apply, and
+images are re-pullable by definition. A substrate holding application state could not
+be treated this way, which is the same reason ADR-010's boundary is drawn at state.
+
+### colima.yaml is deliberately not chezmoi-managed
+
+`colima start` rewrites `~/.colima/default/colima.yaml`, because `--save-config`
+defaults to true. Putting that file under chezmoi would recreate, exactly, the
+Rancher `rcfiles` problem this decision exists to escape: a tool and a
+configuration manager both claiming one file, with an overwrite prompt on every
+apply. Settings are passed as flags, and `--save-config` then persists them so a
+later bare `colima start` reuses them.
+
+Sizing is verified rather than assumed. An existing profile keeps the sizing it was
+created with: CPU and memory take effect on the next start, but a disk can only
+grow. So `container-substrate` compares the declared sizing against
+`colima list --json` and reports drift instead of starting an under-provisioned VM,
+which would otherwise run — and simply be mysteriously slow.
+
+### k3d and kind together, under ADR-022
+
+ADR-022 allows one tool per job in the default profile, and two local-cluster tools
+would normally be drift. This overlap is deliberate, and both live in the opt-in
+`kubernetes` profile rather than the default:
+
+- **k3d** runs k3s, which is what a single-machine cluster should be: Traefik,
+  ServiceLB and metrics-server included, seconds to create and destroy. The daily
+  driver.
+- **kind** runs upstream Kubernetes, which is what a managed cloud cluster is. The
+  parity tool when a project targets EKS, GKE or AKS.
+
+Choosing by production target is the reason to keep both. Neither substitutes for
+the other, and collapsing to one would silently cost whichever parity mattered.
+
+### The package count rose while the installed surface fell
+
+Replacing one cask with four formulae — colima, docker, docker-compose,
+docker-buildx — raised the default selection from 48 entries to 51, so ADR-013's
+ceiling moved from 50 to 55.
+
+Worth recording because the number moved opposite to the thing it proxies for. What
+is actually installed went down: no Electron application, no bundled Kubernetes
+control plane, no privileged daemon, no GUI updater. A cask that installs a whole
+desktop runtime counts as one entry; so does a single-purpose CLI binary. The
+ceiling remains useful as a brake on casual additions and cannot be read as a
+security metric by itself.
+
+### Applying the substrate is not part of `chezmoi apply`
+
+Hook 25 does not start the VM. Creating it downloads a guest image, takes minutes,
+and commits 14 GiB of standing memory — and the VM never returns memory to macOS.
+That belongs to a decision the operator makes, not to a side effect of applying
+dotfiles, which is the same reasoning that keeps FileVault, Touch ID for sudo, the
+macOS defaults and the MCP policy opt-in. The hook reports substrate state and names
+the command that changes it.
+
+## ADR-038: Kubernetes belongs in the default profile
+
+**Status:** accepted. Amends ADR-013.
+
+ADR-013 keeps the default selection small and makes specialist capabilities opt-in,
+and it names Kubernetes among the specialists. The principle stands. The
+classification was wrong for this machine.
+
+This workstation exists for Docker, Kubernetes and AI development. A default
+installation that cannot do Kubernetes is not a smaller default — it is an incomplete
+one, and it pushes the operator into `--profiles` gymnastics for the thing the machine
+was bought to do. "Specialist" should mean *not everyone needs this*, not *the owner
+needs this on day one*.
+
+So `kubernetes` joins `core,dev,security,productivity,backup`.
+
+### What it costs, stated plainly
+
+The default trusted computing base grows from 51 entries to 64: kubectl, helm, k3d,
+kind, k9s, kubectx, stern, kubeconform, krew, argocd, kustomize, helmfile and
+kubeseal. `tests/render-brewfile.sh` raises its ceiling from 55 to 70 to match, which
+is a reviewed decision rather than drift — the point of that ceiling is to make growth
+deliberate, and this is it being deliberate.
+
+Every one of those is a single static binary. None installs a daemon, a system
+extension, a login item or a GUI updater, and none holds credentials of its own. That
+is why 13 additions are acceptable here where 13 casks would not be: ADR-013's real
+concern is "unrelated credentials, background components, permissions and update
+surfaces", and a CLI that reads a kubeconfig introduces none of those.
+
+### What did NOT change
+
+- ADR-013 itself. Cloud provider CLIs, data clients, privileged security monitors and
+  personal productivity applications remain opt-in, for exactly the reasons it gives.
+- ADR-022's one-tool-per-job rule. k3d and kind still both ship, still for the reason
+  ADR-037 records: k3d runs k3s for single-machine parity, kind runs upstream
+  Kubernetes for managed-cloud parity, and the production target decides which.
+- The container runtime is still a mutually exclusive choice, and Kubernetes still
+  needs one. Selecting `kubernetes` with `--runtime none` installs the clients and
+  gives them nothing to talk to, which is a legitimate combination for working
+  against remote clusters and a useless one for local development.
+
+### Verification consequence
+
+`script/test-install` defaults to the full set, so `k3d` is now present in the guest
+and the Kubernetes half of the workstation is exercised by every destructive run
+rather than needing a hand-written `--profiles` argument. That was the immediate
+prompt for this decision: the first substrate verification reported `k3d absent`,
+which was correct and also a sign the default did not match the machine's purpose.
+
+## ADR-039: Registry credentials go to the Keychain; Git LFS is not optional
+
+**Status:** accepted
+
+Two gaps found by reviewing the provisioned workstation against what it is for.
+
+### Registry credentials were stored in the clear
+
+With no credential helper configured, `docker login` writes
+
+    {"auths":{"ghcr.io":{"auth":"<base64 of user:token>"}}}
+
+into `~/.docker/config.json`. Base64 is encoding, not encryption, so a registry token
+was readable by anything that could read the file — on a machine whose purpose is
+pulling and pushing images, in a repository whose SECURITY.md says no secrets belong
+in plaintext. Anonymous pulls were unaffected, which is why nothing surfaced it.
+
+`docker-credential-helper` provides `docker-credential-osxkeychain`, and it is declared
+in `profiles/runtime-colima.Brewfile` rather than `core` because it is only useful
+alongside the Docker CLI that fragment owns.
+
+### The config file is modified, not owned
+
+`~/.docker/config.json` is managed with chezmoi's `modify_` mechanism, which receives
+the current content on stdin and writes the new content out. It is not a managed file,
+deliberately: Docker writes to it itself — `auths` on login, `currentContext` on
+context switch — so a fully managed file would be reported as modified outside
+chezmoi's control on every apply, with a prompt to overwrite that would discard what
+Docker had just stored. That is the Rancher Desktop `rcfiles` fight ADR-037 exists to
+escape, and choosing it here would have been self-inflicted.
+
+The script passes content through unchanged, with a warning, when `jq` is missing or
+the existing file is not valid JSON. Silently skipping a security control is worse
+than failing to apply it, and truncating a file that may hold credentials is worse
+than both.
+
+### Attribute order is load-bearing, and chezmoi does not enforce it
+
+The entry was first written `private_modify_config.json.tmpl`. chezmoi consumed
+`private_` and treated `modify_` as part of the filename, then created a literal
+`~/.docker/modify_config.json` containing 3304 bytes of the script's own source. No
+error, no warning; the credential store was simply never configured. `modify_` must
+come before `private_`.
+
+`tests/chezmoi-templates.sh` now fails when any managed target's name still begins
+with a chezmoi attribute prefix, which is the general form of that mistake. The
+existing dotfile check could not catch it, because the stray file sat inside `.docker`
+rather than at the top of the home directory.
+
+### Git LFS
+
+`git-lfs` was commented out with the note "only needed when a repository actually uses
+LFS". Model repositories do — Hugging Face stores weights in LFS — and this
+workstation exists partly for AI development. Cloning one without it silently yields
+pointer files instead of weights, which presents as a corrupt model rather than a
+missing tool.
+
+Installing the package is half the fix. The clean, smudge and process filters must be
+in Git's configuration too, and they are declared in `chezmoi/dot_gitconfig.tmpl`
+rather than left to a `git lfs install` run-once hook, because chezmoi owns that file
+and a hook writing to it would be the same fight as above. `required = true` is
+included on purpose: it turns a missing binary into an error instead of a silent
+pass-through.
+
+### Not fixed here
+
+Two related observations were left as decisions rather than folded into this one:
+
+- Image scanning and Dockerfile linting — `trivy`, `hadolint`, `dive`, `syft`,
+  `grype` — remain in the opt-in `security-scan` profile, although containers are now
+  the default purpose. That is the same misclassification ADR-038 corrected for
+  Kubernetes and probably wants the same treatment.
+- `~/.kube` is unmanaged, so `~/.kube/config` gets whatever `kubectl` or `k3d`
+  creates. The repository manages `private_dot_ssh` at 0600 and `private_dot_gnupg` at
+  0700 precisely because they hold secrets, and a kubeconfig holds cluster tokens and
+  client certificates.
+
+## ADR-040: Dockerfile linting and image scanning are default tools
+
+**Status:** accepted. Amends ADR-015.
+
+`trivy` and `hadolint` move from the opt-in `security-scan` profile into `dev`.
+
+This is the same correction ADR-038 made for Kubernetes. ADR-015 classified every
+single-binary scanner as an interactive, occasional activity — reasonable when
+containers were one execution domain among four. Containers and Kubernetes are now the
+default purpose (ADR-037, ADR-038), which makes linting a Dockerfile and scanning an
+image part of authoring rather than a specialist excursion. A default that can build
+images but not check them is not a leaner default; it is one that ships the risk and
+withholds the tool.
+
+They land in `dev` rather than in a scanner profile because what they validate is this
+repository's own output, which is what `dev` already carries: shellcheck for shell,
+yamllint for YAML, actionlint for workflows, hadolint for Dockerfiles, trivy for the
+images and manifests those produce.
+
+### Only two moved, and ADR-022 is why
+
+The remaining five stay opt-in because each overlaps something already installed or is
+not a daily tool:
+
+| Tool | Why it stays opt-in |
+|---|---|
+| `grype` | Matches images against vulnerability data — trivy already does that |
+| `osv-scanner` | Lockfile vulnerabilities — inside trivy's dependency scanning |
+| `trufflehog` | Credential scanning — `gitleaks` is already in `core` and is what `./script/test` runs |
+| `syft` | SBOM generation is a release and compliance step, and grype's input |
+| `dive` | Image layer inspection is for debugging a build, not for every build |
+
+ADR-022 permits one tool per job in the default profile, and moving all seven would
+have put two vulnerability scanners and two secret scanners on every machine. The
+question each had to answer was not "is this good" but "does the default already have
+something for this job".
+
+`tests/render-brewfile.sh` asserts trivy and hadolint are present AND that the other
+five are absent, so a later addition has to argue rather than drift in.
+
+### Cost
+
+The default grows from 66 entries to 68. Both are single static binaries with no
+daemon, no persistent state and no privileged access — the class ADR-015 already
+established as acceptable on the host. What changed is only whether they are opt-in.
+
+### Deliberately not addressed
+
+`~/.kube` remains unmanaged. It holds cluster tokens and client certificates, and the
+repository manages `private_dot_ssh` at 0600 and `private_dot_gnupg` at 0700 for
+exactly that reason, so the inconsistency is real and recorded — but it was reviewed
+and left alone rather than overlooked.
+
+## ADR-041: The declared macOS defaults and the application firewall are on by default
+
+**Status:** accepted. Amends ADR-012.
+
+`./bootstrap install` now applies the `script/macos-defaults` table and enables the
+application firewall with stealth mode. `--no-macos-defaults` and `--no-hardening`
+decline them; `--with-macos-defaults` and `--with-hardening` remain accepted and are
+redundant.
+
+ADR-012 kept hazardous and stateful capabilities out of the baseline, and that rule
+still holds — what changed is the finding that these two were never in that category.
+The test that established it is recorded in the evidence directory: both were applied to
+a guest, `macos-defaults --verify` read every declared key back in effect,
+`hardening-check` moved firewall and stealth from `[FAIL]` to `[PASS]` and dropped the
+failure count from eight to two, and SSH survived the firewall coming up mid-bootstrap
+because `--getallowsigned` auto-permits Apple-signed software and `sshd` qualifies.
+
+Both are reversible, which is the property ADR-012 actually cares about.
+`macos-defaults` records every previous value to a `macos-defaults-before.*` transcript
+before writing, and the firewall is two `socketfilterfw` calls. FileVault, Rosetta,
+Touch ID PAM and major OS upgrades stay opt-in precisely because they are not: each is
+either irreversible or can reboot.
+
+The argument for flipping them is that opt-in made the safer state the one you had to
+remember. A workstation whose purpose includes handling credentials shipped with its
+firewall off and every declared default unset whenever a flag was forgotten, and nothing
+reported it — `hardening-check` is non-strict by default, so it warned and continued.
+The failure mode was silent, and a declarative configuration that does not apply what it
+declares is not conservative, it is inaccurate.
+
+### What this costs
+
+Stealth mode stops the machine answering `ping`, so a host that has gone quiet on the
+network is now the expected result rather than a symptom. `docs/TESTING.md` says to use
+SSH rather than ICMP to decide whether a guest is alive, and recommends `--no-hardening`
+for a machine reachable only remotely.
+
+`script/test-install` defaults to true as well. A harness whose defaults differ from the
+defaults it tests exercises a configuration nobody ships, which is how these two paths
+stayed unproven through every earlier run. It also forwards the negative explicitly:
+once a missing flag means "on", passing nothing for `--no-hardening` would have produced
+a hardened guest from a run that asked for the opposite.

@@ -161,24 +161,72 @@ if [[ "$theme_line" =~ [a-z]+-[a-z]+ ]]; then
   exit 1
 fi
 
-# Nothing may assume the Apple Silicon prefix as the only one.
+# --- Intel support must stay removed (ADR-036).
 #
-# Hardcoding /opt/homebrew made every shell activation and apply hook a silent
-# no-op on an Intel Mac: the guard simply tested false, so Homebrew was never put
-# on PATH and the failure surfaced later as "command not found" for tools that
-# were in fact installed. Anything naming that path must name /usr/local too.
+# The assertion here used to be the OPPOSITE: anything naming /opt/homebrew had to
+# name /usr/local too, so a hardcoded Apple Silicon prefix could not make every
+# shell activation a silent no-op on an Intel Mac. Apple Silicon is now the only
+# supported platform, so that requirement inverted rather than merely expired —
+# /usr/local on this hardware is an x86_64 Homebrew under Rosetta, and falling back
+# to it would put translated binaries on PATH while reporting success.
+#
+# What is checked now is that the removal cannot half-revert. The machinery came
+# out of several files at once, and a partial restoration would leave a marker no
+# script reads or a gap report nothing calls.
+# Comments are excluded, and that is not a loophole — it is the difference between
+# checking for an INVOCATION and checking for a word. Several files here now
+# explain why platform-gaps was removed, so a plain grep matches the explanation
+# and fails forever: a test nobody can make pass gets deleted, and then the real
+# regression goes unnoticed. Same reason tests/vm.sh judges "$*" by code only.
 while IFS= read -r offender; do
-  file="${offender%%:*}"
+  echo "$offender" >&2
+  echo 'script/platform-gaps is invoked but no longer exists (ADR-036). It' >&2
+  echo 'reported what an Intel machine could not install.' >&2
+  exit 1
+done < <(
+  awk '
+    # This file is excluded from its own scan: the error message below names the
+    # script, which would otherwise match and make the check unconditionally fail.
+    # `next` on a FILENAME test rather than `nextfile`, which is not in every awk.
+    FILENAME ~ /placement-policy\.sh$/ { next }
+    /^[[:space:]]*#/ { next }
+    /platform-gaps/ { print FILENAME ":" FNR ": " $0 }
+  ' "$ROOT/bootstrap" "$ROOT/justfile" \
+    "$ROOT"/script/* "$ROOT"/tests/*.sh 2>/dev/null || true
+)
+[[ ! -e "$ROOT/script/platform-gaps" ]] || {
+  echo 'script/platform-gaps is back. It reported what an Intel machine could' >&2
+  echo 'not install; with arm64 the only target it has nothing to report.' >&2
+  exit 1
+}
+# The marker is only meaningful to a reader of platform-gaps, so a new one would be
+# decoration that looks load-bearing.
+refute_match '#[[:space:]]*arm64-only\b' "$ROOT/profiles"
+
+# No Rosetta Homebrew may be reintroduced as a fallback. Left unchecked, a
+# well-meaning "support both prefixes" edit silently restores it, and the symptom is
+# a translated toolchain on PATH that works and reports success.
+#
+# The pattern is the EXECUTABLE path, /usr/local/bin/brew, not the bare prefix.
+# Four files now explain in prose why /usr/local is absent, and matching the word
+# would flag every one of them — across shell comments, a fish comment and a Go
+# template comment, which no single comment rule covers. The executable form
+# appears only where the fallback would actually be reintroduced.
+while IFS= read -r file; do
   case "$file" in
-    *lib/common.sh | *docs/* | *.md) continue ;; # prose and the definition itself
+    # script/vm checks for Homebrew's ABSENCE in the guest, where naming both
+    # prefixes is stricter rather than wrong.
+    */script/vm) continue ;;
   esac
-  grep -q '/usr/local' "$file" || {
-    echo "$file names /opt/homebrew without /usr/local, so it assumes Apple" >&2
-    echo "Silicon. Homebrew installs to /usr/local on Intel. Use brew_prefix," >&2
-    echo 'the "brew-shellenv" template, or check both paths.' >&2
-    exit 1
-  }
-done < <(grep -rl '/opt/homebrew' "$ROOT/script" "$ROOT/chezmoi" "$ROOT/bootstrap" 2>/dev/null || true)
+  echo "$file resolves /usr/local/bin/brew. Apple Silicon is the only supported" >&2
+  echo 'platform (ADR-036), and /usr/local there is an x86_64 Homebrew under' >&2
+  echo 'Rosetta, so a fallback selects translated binaries and reports success.' >&2
+  echo 'Use brew_prefix, or the "brew-prefix"/"brew-shellenv" templates.' >&2
+  exit 1
+done < <(
+  grep -rl '/usr/local/bin/brew' \
+    "$ROOT/script" "$ROOT/chezmoi" "$ROOT/bootstrap" 2>/dev/null || true
+)
 
 # Ghostty's font-family must be installed by a fragment that is always selected.
 #
@@ -251,4 +299,39 @@ case "$toml_status" in
 esac
 [[ ! -e "$ROOT/containers" ]]
 [[ ! -e "$ROOT/chezmoi/private_dot_config/security-ai-workstation/containers" ]]
+
+# confirm() fails closed with no terminal on stdin, and its warning is the only guidance
+# the caller gets. It used to say "Pass --yes", which just eight of its nine callers do
+# not implement: `macos-defaults apply` over ssh printed the advice and then refused
+# `--yes` as an unknown argument, so the sudo-scoped defaults could not be applied
+# non-interactively at all. The hint must name ASSUME_YES, which every caller honours
+# because confirm() itself reads it.
+assert_match 'ASSUME_YES=1 to answer yes' "$ROOT/script/lib/common.sh"
+refute_match 'Pass --yes to answer' "$ROOT/script/lib/common.sh"
+
+# Anything that both calls confirm() and runs unattended needs the flag to exist too:
+# bootstrap is driven by script/test-install and macos-defaults by the chezmoi hook.
+# One call per file on purpose: assert_match greps its arguments together and passes on
+# the first hit, so naming both files in a single call would prove nothing about the
+# second once bootstrap matched.
+assert_match '^ *--yes \| -y\)' "$ROOT/bootstrap"
+assert_match '^ *--yes \| -y\)' "$ROOT/script/macos-defaults"
+
+# The macOS defaults and the firewall are on by default, and each needs a way out.
+# Asserted rather than commented because the whole point is that forgetting a flag no
+# longer silently downgrades the machine — a revert to `=false` must break the suite.
+assert_match '^APPLY_MACOS_DEFAULTS=true$' "$ROOT/bootstrap"
+assert_match '^WITH_HARDENING=true$' "$ROOT/bootstrap"
+assert_match '^ *--no-macos-defaults\)' "$ROOT/bootstrap"
+assert_match '^ *--no-hardening\)' "$ROOT/bootstrap"
+
+# test-install must agree with bootstrap, or the harness tests defaults nobody ships.
+assert_match '^WITH_MACOS_DEFAULTS=true$' "$ROOT/script/test-install"
+assert_match '^WITH_HARDENING=true$' "$ROOT/script/test-install"
+
+# And it must forward the negative explicitly: bootstrap now treats a missing flag as
+# "on", so a bare `[[ x == true ]] &&` would turn --no-hardening into a silent no-op.
+assert_match 'bootstrap_args\+=\(--no-macos-defaults\)' "$ROOT/script/test-install"
+assert_match 'bootstrap_args\+=\(--no-hardening\)' "$ROOT/script/test-install"
+
 echo 'Placement policy: OK'

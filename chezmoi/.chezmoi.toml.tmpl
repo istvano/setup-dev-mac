@@ -5,12 +5,14 @@
 {{- $workGitDir := promptStringOnce . "workGitDir" "Directory holding work repositories" "~/work" -}}
 {{- $workGitEmail := promptStringOnce . "workGitEmail" "Git user.email inside that directory (empty to disable the split)" "" -}}
 {{- $profileChoices := list "core" "dev" "security" "security-extra" "security-scan" "backup" "local-llm" "lab" "docs" "fonts" "mcp" "cloud" "cloud-aws" "cloud-azure" "cloud-gcp" "kubernetes" "data" "productivity" "productivity-extra" "paid" -}}
-{{- $profiles := promptMultichoiceOnce . "profiles" "Workstation profiles" $profileChoices (list "core" "dev" "security" "productivity" "backup") -}}
+{{- $profiles := promptMultichoiceOnce . "profiles" "Workstation profiles" $profileChoices (list "core" "dev" "security" "productivity" "backup" "kubernetes") -}}
 {{- $shell := promptChoiceOnce . "shell" "Interactive shell (fish does not change the account login shell)" (list "zsh" "fish") "zsh" -}}
-{{- $runtime := promptChoiceOnce . "runtime" "Container runtime" (list "rancher" "orbstack" "colima" "none") "rancher" -}}
+{{- $runtime := promptChoiceOnce . "runtime" "Container runtime" (list "colima" "rancher" "orbstack" "none") "colima" -}}
 {{- $passwordManager := promptChoiceOnce . "passwordManager" "Password manager" (list "bitwarden" "1password" "none") "bitwarden" -}}
 {{- $firewall := promptChoiceOnce . "firewall" "Outbound firewall" (list "lulu" "little-snitch" "none") "lulu" -}}
-{{- $applyMacOSDefaults := promptBoolOnce . "applyMacOSDefaults" "Apply conservative macOS defaults" false -}}
+{{- /* Defaults to true, matching ./bootstrap. This prompt is only reached by a direct
+       `chezmoi init` that bypassed bootstrap; bootstrap writes the value itself. */ -}}
+{{- $applyMacOSDefaults := promptBoolOnce . "applyMacOSDefaults" "Apply conservative macOS defaults" true -}}
 {{- /* .chezmoiroot resolves .chezmoi.sourceDir to <repo>/chezmoi. Record the
        repository root so this file agrees with what ./bootstrap writes. */ -}}
 sourceDir = {{ dir .chezmoi.sourceDir | quote }}

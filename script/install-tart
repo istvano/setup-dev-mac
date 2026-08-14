@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# Install Tart from a pinned, checksummed, signature-verified release.
+#
+# Tart runs macOS and Linux guests on Apple's Virtualization.framework. It is
+# what makes `script/vm` able to build one golden macOS image and then clone it
+# per test run, which is the only way a destructive `./bootstrap install` test is
+# repeatable rather than a 30-minute reinstall each time (ADR-036).
+#
+# It is deliberately NOT installed through Homebrew. The only tap that carries it
+# is third-party, which ADR-020 rejected for AeroSpace and tflint, and three
+# further things make the tap the wrong route here:
+#
+#   - Homebrew 6 refuses to load a formula from an untrusted tap at all, so
+#     `brew bundle` cannot install it without a separate `brew trust` step. A
+#     package that needs an interactive trust prompt cannot sit in a Brewfile.
+#   - The formula pulls a second tap formula, softnet, widening the tap surface
+#     for a dependency this repository does not use.
+#   - The release is already pinnable: a single universal archive with an
+#     upstream-published SHA-256. Pinning it here satisfies ADR-006 directly.
+#
+# The cost of that choice is that `brew upgrade` will never move this binary, so
+# the version and digest are pinned in vm/tart.lock and script/update-report
+# reports newer releases.
+#
+#   install-tart            install or reinstall the pinned release
+#   install-tart --verify   check the installed bundle against the pin
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+LOCK="$ROOT/vm/tart.lock"
+
+# The whole signed .app bundle is installed, not the executable copied out of it.
+# tart.app carries com.apple.security.virtualization and com.apple.vm.networking;
+# those entitlements are what let it create a VM at all, and they are only valid
+# while the bundle's signature is intact. A bare copy of Contents/MacOS/tart
+# loses them and fails at run time rather than at install time.
+LIBEXEC_DIR="$HOME/.local/libexec/tart"
+BUNDLE="$LIBEXEC_DIR/tart.app"
+EXECUTABLE="$BUNDLE/Contents/MacOS/tart"
+BIN_DIR="$HOME/.local/bin"
+BINARY="$BIN_DIR/tart"
+
+MODE="install"
+
+usage() {
+  cat <<'EOF'
+Usage: script/install-tart [install|--verify]
+
+  install     download and install the release pinned in vm/tart.lock (default)
+  --verify    non-zero when the installed bundle does not match the pin
+EOF
+}
+
+# An explicit rejection arm, unlike script/install-toolhive, which silently
+# treats any unrecognised argument as "install". There the default is the writing
+# mode, so a mistyped --verify reinstalls the binary it was asked to inspect.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    install) MODE="install" ;;
+    --verify) MODE="verify" ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    *) die "Unknown option: $1" ;;
+  esac
+  shift
+done
+
+[[ -f "$LOCK" ]] || die "Missing $LOCK"
+
+lock_value() {
+  local key="$1" value
+  value="$(grep -E "^$key=" "$LOCK" | head -n 1 | cut -d= -f2-)"
+  [[ -n "$value" ]] || die "$LOCK has no '$key'"
+  printf '%s' "$value"
+}
+
+VERSION="$(lock_value version)"
+EXPECTED_SHA="$(lock_value sha256)"
+EXPECTED_TEAM="$(lock_value team_id)"
+
+# codesign writes this to STDERR, so it is redirected rather than piped from
+# stdout. `|| true` because "not signed" must become an empty answer that the
+# caller reports, not an errexit abort with no explanation.
+signing_team() {
+  codesign -dv "$1" 2>&1 | sed -n 's/^TeamIdentifier=//p' | head -n 1 || true
+}
+
+report_installed_version() {
+  [[ -x "$EXECUTABLE" ]] || return 1
+  "$EXECUTABLE" --version 2>/dev/null | head -n 1 || true
+}
+
+if [[ "$MODE" == "verify" ]]; then
+  [[ -d "$BUNDLE" ]] || die "tart is not installed at $BUNDLE"
+  installed="$(report_installed_version || true)"
+  [[ "$installed" == "$VERSION" ]] ||
+    die "Installed tart reports '${installed:-unknown}', not the pinned $VERSION."
+  team="$(signing_team "$BUNDLE")"
+  [[ "$team" == "$EXPECTED_TEAM" ]] ||
+    die "Installed tart.app is signed by team '${team:-none}', not the pinned $EXPECTED_TEAM."
+  [[ -x "$BINARY" || -L "$BINARY" ]] ||
+    die "$BINARY is missing, so tart is installed but not on PATH."
+  success "tart $VERSION is installed and matches vm/tart.lock."
+  exit 0
+fi
+
+# Apple Silicon only, and not merely because this repository targets it:
+# Virtualization.framework cannot host an arm64 guest on an Intel host, so there
+# is no build to install there.
+require_supported_mac
+for command in curl shasum tar codesign; do
+  command_exists "$command" || die "$command is required."
+done
+
+ARCHIVE="tart.tar.gz"
+URL="https://github.com/openai/tart/releases/download/${VERSION}/${ARCHIVE}"
+
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/tart-download.XXXXXX")"
+# Staged beside the install directory rather than in TMPDIR, so the final move is
+# a rename on one filesystem instead of a copy of a 23 MB bundle.
+staging="$LIBEXEC_DIR.incoming.$$"
+trap 'rm -rf "$tmp_dir" "$staging"' EXIT
+
+log "Downloading tart $VERSION"
+curl -fsSL "$URL" -o "$tmp_dir/$ARCHIVE"
+
+actual="$(shasum -a 256 "$tmp_dir/$ARCHIVE" | awk '{print $1}')"
+if [[ "$actual" != "$EXPECTED_SHA" ]]; then
+  warn "Expected $EXPECTED_SHA"
+  warn "Received $actual"
+  die "Checksum mismatch for $ARCHIVE; refusing to install."
+fi
+success "Checksum matches the pin in vm/tart.lock."
+
+rm -rf "$staging"
+mkdir -p "$staging"
+tar -xzf "$tmp_dir/$ARCHIVE" -C "$staging"
+[[ -d "$staging/tart.app" ]] ||
+  die "$ARCHIVE does not contain tart.app; the release layout has changed."
+
+# Checked before anything is installed, and checked on what was just extracted
+# rather than on what is already on disk. The digest proves the archive is the
+# pinned one; this proves the bundle inside it is still signed by the same
+# developer and that macOS will actually honour its virtualization entitlement.
+team="$(signing_team "$staging/tart.app")"
+[[ "$team" == "$EXPECTED_TEAM" ]] ||
+  die "tart.app is signed by team '${team:-none}', not the pinned $EXPECTED_TEAM.
+Refusing to install. Update team_id in vm/tart.lock only after establishing that
+the new signing identity is legitimate."
+codesign --verify --strict "$staging/tart.app" 2>/dev/null ||
+  die "tart.app's code signature does not verify; refusing to install."
+success "Signature verifies and is signed by the pinned team $EXPECTED_TEAM."
+
+# No backup of the previous bundle. Every byte of it is reproducible from the
+# version and digest in vm/tart.lock, so a copy preserves nothing the repository
+# does not already declare — unlike the user-owned files backup_file exists for.
+mkdir -p "$(dirname "$LIBEXEC_DIR")" "$BIN_DIR"
+rm -rf "$LIBEXEC_DIR"
+mv "$staging" "$LIBEXEC_DIR"
+
+# A symlink into the bundle, which keeps the executable's real path inside
+# tart.app so the signature and entitlements still apply. Verified: invoking tart
+# through such a symlink reports its version and can create VMs.
+ln -sfn "$EXECUTABLE" "$BINARY"
+
+installed="$(report_installed_version || true)"
+[[ "$installed" == "$VERSION" ]] ||
+  die "Installed tart reports '${installed:-unknown}' rather than $VERSION."
+
+success "Installed tart $VERSION to $BUNDLE"
+log "On PATH as $BINARY"
+log "Build the golden macOS image next: ./script/vm build"

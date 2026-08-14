@@ -3,8 +3,12 @@
 ## All changes
 
 ```bash
-./script/test
+REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1 ./script/test
 ```
+
+Without the `REQUIRE_*` variables, four checks skip silently when their tool is
+absent — shellcheck, shfmt/actionlint/gitleaks, chezmoi template execution and
+YAML — and the suite still prints "All repository tests passed".
 
 ## Package profiles
 
@@ -61,4 +65,25 @@ uv add mlx
 
 ```bash
 chezmoi diff
+```
+
+## Installation changes
+
+```bash
+./script/test-install
+```
+
+Destructive, in the disposable macOS guest (ADR-036). Requires a sealed golden
+image: `./script/install-tart && ./script/vm build && ./script/vm seal`.
+
+It cannot prove three things, which must not be reported as passing: no container
+runtime runs inside the guest (nested virtualization needs M3 or later), Apple's
+licence permits two macOS guests per host so matrices are sequential, and Ghostty
+needs Metal.
+
+## The tart pin
+
+```bash
+./script/install-tart --verify
+./tests/vm.sh
 ```

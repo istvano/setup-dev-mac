@@ -7,7 +7,19 @@ The project name is independent of the directory it is checked out into; every
 command resolves its own repository root.
 
 The target is an Apple Silicon MacBook Pro with 128 GB unified memory, 4 TB
-storage and macOS on `arm64`.
+storage and macOS on `arm64` — an M5 Max.
+
+It is built and tested on a second Apple Silicon machine, an M1 Pro with 32 GB.
+Both are `arm64`, so unlike the Intel development platform this replaces (ADR-034,
+superseded) the build machine differs from the target only in capacity and
+generation, not in architecture. Two consequences are worth knowing before reading
+test results, and both are detected rather than assumed:
+
+- The M1 Pro cannot nest virtual machines, so a container runtime cannot be
+  exercised inside the test VM there. The M5 Max can.
+- The test guest is sized for the smaller machine by default.
+
+See [ADR-036](docs/DECISIONS.md).
 
 ## Design
 
@@ -42,15 +54,18 @@ Or provide the choices explicitly:
 
 ```bash
 ./bootstrap install \
-  --profiles core,dev,security,productivity,backup \
+  --profiles core,dev,security,productivity,backup,kubernetes \
   --shell zsh \
-  --runtime rancher \
+  --runtime colima \
   --password-manager bitwarden \
   --firewall lulu \
   --git-name "Your Name" \
-  --git-email "you@example.com" \
-  --with-hardening
+  --git-email "you@example.com"
 ```
+
+The declared macOS defaults and the application firewall are applied by default.
+Opt out with `--no-macos-defaults` or `--no-hardening`; `--with-macos-defaults`
+and `--with-hardening` are still accepted and now redundant.
 
 Optional identity and privilege choices, all disabled by default:
 
@@ -62,9 +77,9 @@ Optional identity and privilege choices, all disabled by default:
   --with-touchid-sudo                       # Touch ID for sudo via sudo_local
 ```
 
-The default free choices are zsh, Rancher Desktop with Moby, Bitwarden and LuLu.
-OrbStack, 1Password and Little Snitch are paid alternatives. Colima is the
-CLI-only container-runtime alternative, and fish is the alternative interactive
+The default free choices are zsh, Colima, Bitwarden and LuLu.
+OrbStack, 1Password and Little Snitch are paid alternatives. Rancher Desktop
+remains selectable as a GUI runtime, and fish is the alternative interactive
 shell (see [Interactive shell](#interactive-shell)).
 
 Follow [Operations](docs/OPERATIONS.md) for the complete first-install,
@@ -72,10 +87,15 @@ verification, update, hardening and package-reconciliation procedures.
 
 ## Package profiles
 
+**[docs/TOOLS.md](docs/TOOLS.md) is the full catalogue** — every package, what it is
+for, and whether it is a formula or a cask. It is generated from the purpose comments in
+`profiles/*.Brewfile` by `just tools`, and the test suite fails if it drifts.
+
 Host packages are defined by composable Brewfile fragments:
 
 - `core`: bootstrap trust set, terminal, editor, Git and frequently used CLI
-- `dev`: editors, language managers and local repository validation
+- `dev`: editors, coding agents and local validation — shell, YAML, Actions,
+  Dockerfile and image scanning
 - `security`: the general TLS and cryptographic toolkit
 - `productivity`: BetterDisplay, required for DDC monitor input switching
 - `cloud`: OpenTofu and module documentation
@@ -84,7 +104,8 @@ Host packages are defined by composable Brewfile fragments:
 - `data`: embedded SQL CLIs and native database/API clients
 - `security-extra`: host-network and PKI tooling, hardware security keys,
   privileged and macOS monitoring tools
-- `security-scan`: single-binary scanners for interactive use (see ADR-015)
+- `security-scan`: the wider single-binary scanner set — SBOM, lockfile and
+  credential scanning, image layer inspection (see ADR-015, ADR-040)
 - `backup`: restic and rclone for encrypted, verifiable off-site backup
 - `lab`: Lima, UTM and Ansible — the isolated Linux VM domain and local lab
 - `docs`: d2, pandoc and draw.io for diagrams and stakeholder documents
@@ -95,8 +116,10 @@ Host packages are defined by composable Brewfile fragments:
   utilities
 - `paid`: non-alternative paid additions
 
-The default profiles are `core,dev,security,productivity,backup`, which install
-48 packages with zsh, or 47 with fish. The default carries one tool per job (ADR-022) and no language
+The default profiles are `core,dev,security,productivity,backup,kubernetes`, which
+install 68 packages with zsh, or 67 with fish. Kubernetes is in the default because
+this workstation exists for Docker and Kubernetes development, so a default that
+cannot do it is incomplete rather than lean (ADR-038). The default carries one tool per job (ADR-022) and no language
 runtime: Node, Go, Java, Rust and pnpm come from mise (ADR-021), and any other
 language is one `mise use -g <lang>` away. Specialist profiles are opt-in. Container runtimes, password managers and outbound firewalls use
 separate mutually exclusive fragments.
@@ -123,13 +146,38 @@ See [Operations](docs/OPERATIONS.md#local-ai-models) and
 
 ## Project containers
 
-This repository provides a selected Docker-compatible runtime but no shared
-Compose stack. Each project owns its services, scanners, versions, volumes,
-ports, credentials and teardown policy.
+Colima is the default runtime: a CLI-managed Linux VM on Virtualization.framework
+exposing the standard Docker socket. It replaced Rancher Desktop, whose costs were
+structural — a desktop GUI, a bundled Kubernetes control plane this configuration
+disabled anyway, an idle-CPU issue on Apple Silicon, and a PATH strategy that
+rewrites the shell files chezmoi owns. Rancher remains selectable; OrbStack is the
+paid alternative. See [ADR-037](docs/DECISIONS.md).
 
-For Rancher Desktop, chezmoi selects Moby and disables Kubernetes by default so
-Compose and Testcontainers have the Docker API without an unused Kubernetes
-control plane.
+Each project still owns its services, scanners, versions, volumes, ports,
+credentials and teardown policy. What the repository owns is the **substrate**: the
+tuned VM, one shared Docker network, a shared image registry and a persistent
+BuildKit builder. All of it is stateless or a cache, which is the line ADR-037 draws
+against the shared service stack ADR-010 declined.
+
+```bash
+just substrate          # create or reconcile it; idempotent
+just substrate-verify   # non-zero when it has drifted
+just substrate-status
+```
+
+The registry matters more than it looks: every k3d node has its own containerd
+image store, so without a shared registry a second cluster re-pulls everything the
+first already had.
+
+Every host port the substrate opens binds to `127.0.0.1`, including the registry.
+Omitting the host part of a Docker port mapping means `0.0.0.0`, which on a laptop
+that joins untrusted networks is a real exposure rather than a theoretical one.
+
+Clusters are per-project and are not this repository's business: keep a `k3d.yaml`
+in the project repo so its shape is version-controlled. Pin the k3s image to your
+production minor version, set non-default pod and service CIDRs before creation,
+and remember that ServiceLB gives exactly one service per cluster ports 80 and 443
+— which is Traefik, reached through Ingress, as in production.
 
 ## Fonts
 
@@ -161,20 +209,15 @@ just extensions-diff     # includes what arrives as a pack child
 
 ## Platform
 
-Apple Silicon is the target. Intel macOS is supported as a development platform
-so the configuration can be built and tested before the arm64 machine exists
-(ADR-034); the Homebrew prefix is discovered rather than assumed, and
-`require_supported_mac` warns rather than passing silently, because the two are
-not equivalent.
+Apple Silicon only. `require_supported_mac` fails on `x86_64` rather than warning,
+because a platform the test workflow does not cover is a configuration nothing
+verifies (ADR-036).
 
-What the current machine cannot install is reported rather than remembered:
-
-```bash
-just gaps          # or ./script/platform-gaps
-```
-
-`./bootstrap plan` runs it too, so the gap is visible before an install rather
-than as a `brew bundle` failure partway through one.
+`/opt/homebrew` is the only Homebrew prefix, and `/usr/local` is deliberately not a
+fallback: on Apple Silicon that path holds an x86_64 Homebrew installed under
+Rosetta, so falling back to it would put a translated toolchain on `PATH` — working,
+slower, wrong binaries, and silent about it. The prefix still has exactly one
+definition, in `script/lib/common.sh`.
 
 ## Interactive shell
 
@@ -272,6 +315,7 @@ automatically and no repository is created for you; follow
 ├── profiles/          # Composable host Brewfile fragments
 ├── script/            # Canonical orchestration and validation
 ├── tests/             # Static, template and idempotency checks
+├── vm/                # The local macOS test VM and its pinned hypervisor
 └── vscode/            # Declared VS Code extensions, pinned
 ```
 
@@ -285,22 +329,72 @@ Run the validation suite for every change:
 
 It covers shell syntax and shellcheck, shfmt, actionlint, gitleaks, Brewfile
 rendering, profile-catalogue consistency, chezmoi template execution, YAML,
-placement invariants, render idempotency, browser profiles and agent context.
+placement invariants, VM tooling, render idempotency, browser profiles and agent
+context.
 
-Nothing here has been validated on macOS by CI, which runs Linux with bash 5
-while macOS ships bash 3.2 (ADR-033). To test on a real Mac, push the working
-tree to it and run there:
+Four of those checks skip silently when their tool is absent. Require them, which
+is what CI does:
+
+```bash
+REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1 ./script/test
+```
+
+## Testing a real install
+
+`./script/test` is static validation and `./script/verify` inspects a machine that
+is already installed. Neither can answer whether `./bootstrap install` turns a
+pristine macOS into a configured workstation — and running it on this machine
+answers that once, after which the machine is no longer pristine.
+
+So the repository builds a disposable one. A golden macOS image is created from
+Apple's IPSW, then cloned per run; `tart clone` is an APFS copy-on-write clone, so
+a fresh guest costs a second rather than a reinstall (ADR-036).
+
+```bash
+./script/install-tart              # pinned release, digest and signature verified
+./script/container-substrate       # the Colima VM, network, registry, build cache
+./script/vm build                  # macOS from Apple's IPSW; interactive, once
+./script/vm seal                   # prove the image is pristine AND usable
+./script/test-install --runtime colima
+```
+
+[Testing a real install](docs/TESTING.md) is the numbered runbook, including the one
+interactive step and what to do when a privileged cask stalls the run.
+
+`./script/vm seal` refuses an image that is not both usable and pristine. The
+second half matters more: a guest that already has Homebrew produces a green
+install that never exercised the code path under test.
+
+Because the `dev` profile installs shellcheck, shfmt, actionlint and gitleaks, the
+guest is also where `./script/test` runs with nothing skipped;
+`./script/test-install` does that automatically.
+
+What the VM cannot prove is tracked in `TASKS.md` rather than left implied.
+Nested virtualization needs M3 or later, so a container runtime cannot start in the
+guest on the M1 Pro build machine — but it can on the M5 Max target, which is the
+first machine anywhere that can exercise the container-runtime apply hook.
+`script/test-install` detects which case applies rather than assuming, and defaults
+to `--runtime none` because that suits the machine where most runs happen. Apple's
+licence permits two macOS guests per host on either machine, so a profile matrix
+runs sequentially, and Ghostty needs Metal, which is unverified in a VZ guest.
+
+See [vm/README.md](vm/README.md) and [Testing](docs/TESTING.md).
+
+A remote arm64 Mac still works instead of the local VM:
 
 ```bash
 export MAC_TEST_HOST=user@host MAC_TEST_PORT=22
 ./script/sync-to-mac ./script/test
 ```
 
-`sync-to-mac` uses rsync rather than a clone, because a test machine may not
-reach the git remote and a clean macOS has no `git` until Xcode Command Line
-Tools are installed. It verifies that `.git` and the executable bits survived the
-transfer — both failures otherwise surface much later as unrelated errors — and
-forwards the remote exit status.
+`sync-to-mac` uses rsync rather than a clone, because a pristine macOS has no
+`git` until the Xcode Command Line Tools are installed — the very thing under
+test. It verifies that `.git` and the executable bits survived the transfer, since
+both failures otherwise surface much later as unrelated errors, and it forwards the
+remote exit status.
+
+CI remains Linux-only static validation: it runs bash 5 while macOS ships bash 3.2
+(ADR-033), so it cannot prove macOS application behaviour.
 
 Homebrew renames tokens continuously, so the declared package set is checked
 against upstream separately. This is the only check that needs network access,

@@ -9,7 +9,7 @@ source "$ROOT/script/lib/profiles.sh"
 PROFILES="$DEFAULT_PROFILES"
 # See bootstrap: SHELL names the running shell, so the selection needs its own name.
 SHELL_CHOICE="zsh"
-RUNTIME="rancher"
+RUNTIME="colima"
 PASSWORD_MANAGER="bitwarden"
 FIREWALL="lulu"
 OUTPUT="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation/Brewfile"
@@ -43,7 +43,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ "$SHELL_CHOICE" =~ ^(zsh|fish)$ ]] || die "Invalid shell"
-[[ "$RUNTIME" =~ ^(rancher|orbstack|colima|none)$ ]] || die "Invalid runtime"
+[[ "$RUNTIME" =~ ^(colima|rancher|orbstack|none)$ ]] || die "Invalid runtime"
 [[ "$PASSWORD_MANAGER" =~ ^(bitwarden|1password|none)$ ]] || die "Invalid password manager"
 [[ "$FIREWALL" =~ ^(lulu|little-snitch|none)$ ]] || die "Invalid firewall"
 validate_profiles "$PROFILES"

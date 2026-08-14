@@ -7,10 +7,12 @@ rationale belongs in `DECISIONS.md`; unfinished work belongs in `TASKS.md`.
 ## Before first installation
 
 1. Read the selected Brewfile fragments and all `chezmoi/run_*` scripts.
-2. Run the static validation suite:
+2. Run the static validation suite, requiring every check. Without the `REQUIRE_*`
+   variables, four checks skip silently when their tool is absent and the suite
+   still reports success:
 
    ```bash
-   ./script/test
+   REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1 ./script/test
    ```
 
 3. Preview the default choices:
@@ -26,8 +28,21 @@ rationale belongs in `DECISIONS.md`; unfinished work belongs in `TASKS.md`.
    ```
 
 5. On macOS, verify the current Homebrew formula and cask tokens.
-6. Decide where the FileVault recovery key will be stored offline.
-7. Confirm Apple account recovery and two hardware security keys.
+6. Rehearse the install in the disposable macOS VM, so the first run on real
+   hardware is not the first run at all:
+
+   ```bash
+   ./script/install-tart && ./script/vm build && ./script/vm seal
+   ./script/test-install
+   ```
+
+   See [Testing a real install](TESTING.md) and ADR-036. Note what the VM cannot
+   prove on the machine you are using: nested virtualization needs M3 or later, so
+   a container runtime cannot start in the guest on the M1 Pro build machine,
+   though it can on the M5 Max target. `script/test-install` reports which case
+   applies.
+7. Decide where the FileVault recovery key will be stored offline.
+8. Confirm Apple account recovery and two hardware security keys.
 
 ## Install
 
@@ -41,20 +56,22 @@ An explicit installation using the free defaults is:
 
 ```bash
 ./bootstrap install \
-  --profiles core,dev,security,productivity,backup \
+  --profiles core,dev,security,productivity,backup,kubernetes \
   --shell zsh \
-  --runtime rancher \
+  --runtime colima \
   --password-manager bitwarden \
   --firewall lulu \
   --git-name "Your Name" \
-  --git-email "you@example.com" \
-  --with-hardening
+  --git-email "you@example.com"
 ```
 
 The bootstrap validates Apple Silicon macOS, establishes the documented trust
 set, writes the reviewed choices to chezmoi data and applies the source state.
-It does not enable FileVault, install Rosetta, modify Touch ID PAM, enable
-network services or install a major macOS upgrade.
+It applies the declared macOS defaults and enables the application firewall with
+stealth mode; both are reversible and both can be declined with
+`--no-macos-defaults` and `--no-hardening`. It does not enable FileVault, install
+Rosetta, modify Touch ID PAM, enable network services or install a major macOS
+upgrade — those stay opt-in because each is either irreversible or can reboot.
 
 Add only the specialist profiles required by current work. For example:
 
@@ -81,7 +98,7 @@ a verification step for each item.
 
 Also verify manually:
 
-- Rancher Desktop uses Moby and leaves Kubernetes disabled.
+- The container substrate is present: `./script/container-substrate --verify`
 - BetterDisplay works with the intended monitors and has only required
   permissions.
 - A representative Apple Silicon project can run `uv add mlx` and its
@@ -129,6 +146,97 @@ empty `workGitEmail` disables the work identity split.
 If the data predates removal of the empty `ai` profile, remove `ai` from
 `data.profiles`, along with the obsolete `syncNativeAi` and `pythonVersion`
 keys; MLX and Python versions are entirely project-owned.
+
+## Container substrate
+
+Colima is the default runtime (ADR-037), and this section is about *using* containers
+on the host. It is unrelated to testing the repository: `docs/TESTING.md` uses tart,
+ssh and rsync, and neither `script/vm` nor `script/test-install` references Docker or
+Colima at all. Do not start the substrate in order to run a VM test — it only competes
+for memory.
+
+The layer beneath project containers and clusters is declared rather than rebuilt by
+hand:
+
+```bash
+./script/container-substrate --dry-run   # exact commands, nothing changes
+./script/container-substrate             # create or reconcile; idempotent
+./script/container-substrate --status
+./script/container-substrate --verify    # non-zero when missing or drifted
+```
+
+It owns four things: the Colima VM, one Docker network on a pinned subnet, a shared
+image registry and a persistent BuildKit builder. Nothing else — services with data
+stay in the project that owns them, which is the boundary ADR-010 draws and ADR-037
+refines.
+
+**Nothing is started by `chezmoi apply`.** The VM commits 14 GiB of standing memory
+and takes minutes to create, so hook 25 reports its state and names this command
+instead. Sizing suits the 32 GB build machine; raise `SUBSTRATE_VM_MEMORY_GB` and
+`SUBSTRATE_VM_CPUS` on the 128 GB target.
+
+**Stop it when you are not using it.** The VM never gives memory back to macOS, so
+14 GiB stays committed until `colima stop`. Measured on the build machine: running it
+alongside a test guest put 22 GiB of 32 GB in use and 5 GB into swap. The network,
+registry and build cache all survive a stop/start, so stopping costs only the ~10
+second restart.
+
+Sizing is compared against `colima list --json`, not assumed. An existing profile
+keeps what it was created with: CPU and memory apply on the next start, but a disk
+can only grow, so shrinking one means `colima delete` — which destroys every image,
+volume and cluster in it.
+
+Every published port binds `127.0.0.1`. A Docker port mapping without a host part
+binds `0.0.0.0`, so `--port 5000` would put an unauthenticated image registry on
+every network this laptop joins. Give cluster ports the same treatment in a project's
+`k3d.yaml`: `127.0.0.1:8080:80`, not `8080:80`.
+
+Clusters are project-owned. Keep a `k3d.yaml` in the project repository and point it
+at the substrate:
+
+```yaml
+network: k3d-lan
+registries:
+  use:
+    - k3d-shared-registry:5000
+```
+
+Pin the k3s image to the production minor version, and set non-default
+`--cluster-cidr` and `--service-cidr` before creation — every k3s cluster otherwise
+defaults to the same ranges, two clusters on one bridge then share an address space,
+and CIDRs cannot be changed on a running cluster. Check for VPN collisions first with
+`netstat -rn -f inet | grep '^10\.'`.
+
+With ServiceLB kept, exactly one service per cluster can own ports 80 and 443. That
+service is Traefik, and workloads are reached through Ingress — which is how
+production works, so it is parity rather than a limitation. A second `LoadBalancer`
+asking for port 80 stays `<pending>` by design.
+
+### Migrating from Rancher Desktop
+
+Rancher remains selectable, but two runtimes competing for the Docker socket is a
+correctness problem before it is a performance one. Switch deliberately:
+
+```bash
+# 1. Stop Rancher and stop it starting again.
+#    Quit the app, then System Settings > General > Login Items.
+
+# 2. Re-select the runtime and re-apply.
+sed -i '' 's/^runtime = "rancher"/runtime = "colima"/' ~/.config/chezmoi/chezmoi.toml
+./script/setup
+
+# 3. Confirm no second docker client remains on PATH.
+exec zsh
+which -a docker kubectl        # nothing under ~/.rd/bin
+
+# 4. Create the substrate.
+./script/container-substrate
+```
+
+Step 3 matters. The shell configuration only adds `~/.rd/bin` to `PATH` when Rancher
+is the selected runtime, so re-applying removes the entry — but the directory and its
+`docker` binary survive on disk until Rancher is uninstalled. Leave the cask
+installed if a GUI fallback is wanted; just never run both at once.
 
 ## Browser profiles
 
@@ -278,7 +386,7 @@ The opt-in `fonts` profile adds more from
 [ryanoasis/nerd-fonts](https://github.com/ryanoasis/nerd-fonts):
 
 ```bash
-./bootstrap plan --profiles core,dev,security,productivity,backup,fonts
+./bootstrap plan --profiles core,dev,security,productivity,backup,kubernetes,fonts
 ```
 
 To use an unpatched font and still get every Nerd Font glyph, name the real font
