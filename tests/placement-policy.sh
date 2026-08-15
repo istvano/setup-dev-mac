@@ -337,6 +337,32 @@ assert_match 'script/macos-defaults" \| quote \}\} apply --yes' \
 assert_match '\.docker' "$ROOT/chezmoi/.chezmoiignore"
 assert_match 'ne \.runtime "colima"' "$ROOT/chezmoi/.chezmoiignore"
 
+# An existing /etc/pam.d/sudo_local must be preserved before it is replaced. The presence
+# check only recognises `auth sufficient pam_tid.so`, so a file using `required`,
+# pam_watchid or any other local customisation was overwritten by the stock template with
+# no copy kept, and sudo silently stopped behaving as configured.
+assert_match 'replaced-by-bootstrap' "$ROOT/bootstrap"
+
+# The age hook renders whether age-keygen exists, which is what makes it retry.
+#
+# run_once_ is keyed on the script's content hash, so with static content a machine whose
+# `brew bundle` failed to install age printed one WARN, was recorded as done, and never
+# created the identity — leaving SOPS unusable with nothing reporting it. Rendering the
+# tool's presence changes the hash once it is installed, so the next apply re-runs it.
+assert_match 'lookPath "age-keygen"' \
+  "$ROOT/chezmoi/run_once_after_15_bootstrap-age-key.sh.tmpl"
+
+# git treats user.signingkey as a FILE PATH under gpg.format=ssh, rescuing only keys that
+# begin "ssh-". Verified by signing with each form: a raw ecdsa-sha2-nistp256 key exits 128
+# with "Couldn't load public key", and key:: works for every type. Without the prefix every
+# Secretive key (Secure Enclave is ECDSA-only) and every YubiKey sk- key failed on EVERY
+# commit, since commit.gpgsign is true — and both are recommended in that same file.
+assert_match 'key::%s' "$ROOT/chezmoi/dot_gitconfig.tmpl"
+# shellcheck disable=SC2016  # a literal $ in the search pattern, not an expansion
+assert_match 'hasPrefix "ecdsa-" \$signingKey' "$ROOT/chezmoi/dot_gitconfig.tmpl"
+# shellcheck disable=SC2016  # a literal $ in the search pattern, not an expansion
+assert_match 'hasPrefix "sk-" \$signingKey' "$ROOT/chezmoi/dot_gitconfig.tmpl"
+
 # The macOS defaults and the firewall are on by default, and each needs a way out.
 # Asserted rather than commented because the whole point is that forgetting a flag no
 # longer silently downgrades the machine — a revert to `=false` must break the suite.

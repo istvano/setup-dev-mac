@@ -45,6 +45,44 @@ a wildcard port would permit any local listener and is rejected. Use
 `127.0.0.1` rather than `localhost`, because URL matching is on the literal
 host.
 
+## What is allowlisted, and how far each one is trusted
+
+Versions were checked against npm and PyPI on 2026-08-15. Every entry is pinned, so
+`npx`/`uvx` fetch that exact release rather than whatever upstream publishes next.
+
+| Entry | Provenance | Notes |
+|---|---|---|
+| `@upstash/context7-mcp@4.0.2` | Upstash | Library documentation lookup. Read-only. |
+| `mcp-server-fetch@2026.7.10` | Anthropic reference (PyPI) | URL retrieval. Read-only. |
+| `mcp-server-git@2026.7.10` | Anthropic reference (PyPI) | Launched with no `--repository`, so the repository is chosen per call rather than pinned into this file. Adding `--repository <path>` here would scope it to one checkout, at the cost of a machine-specific absolute path in a committed file. |
+| `@modelcontextprotocol/server-sequential-thinking@2026.7.4` | Anthropic reference | Reasoning aid. No I/O. |
+| `mcp-remote@0.1.38 https://mcp.atlassian.com/v1/sse` | Atlassian, proxied | Jira and Confluence. |
+| `slack-mcp-server@1.3.0` | **Third party** | See the warning below. |
+
+**Jira goes through Atlassian's own remote server.** `mcp-remote` is only a stdio-to-SSE
+proxy, so the trust boundary stays with Atlassian rather than with a community
+reimplementation. The endpoint was verified to be real and OAuth-gated: it answers `401`
+with `www-authenticate: Bearer realm="OAuth"` from `server: AtlassianEdge`. Both the proxy
+version and the URL are part of the exact match, so neither can be swapped silently.
+
+**Slack is the weak entry, deliberately recorded as such.** There is no official Slack
+remote MCP endpoint that could be verified — `slack.com/api/mcp` answers
+`{"ok":false,"error":"unknown_method"}` and `mcp.slack.com` merely redirects to a workspace
+subdomain — and the former official package, `@modelcontextprotocol/server-slack`, is
+marked on npm as *"Package no longer supported"*. So `slack-mcp-server` is community code
+that will hold a Slack token and can read workspace history. It is pinned, which bounds
+*which* code runs, but pinning is not review. Read its source at the pinned version before
+authenticating it, or drop the entry and keep Slack on the claude.ai connector instead.
+
+`@modelcontextprotocol/server-github` is deliberately absent for the same reason: npm marks
+it no longer supported.
+
+**A note on the claude.ai connectors.** Atlassian, Slack, Linear and the rest configured
+through claude.ai are not stdio servers launched from this machine, and whether
+`allowManagedMcpServersOnly` governs them was not established. Applying this policy on a
+working machine without checking that first is how a day's tooling disappears; try it on
+the test VM (`./script/vm ssh`) first.
+
 ## Adding a server
 
 The full workflow, including inspection and pinning, is in

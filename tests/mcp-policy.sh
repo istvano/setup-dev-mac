@@ -14,7 +14,10 @@ LOCK="$ROOT/mcp/toolhive.lock"
   exit 1
 }
 
-python3 - "$POLICY" <<'PY'
+# Held in a variable rather than piped straight in, so the same validator can also be run
+# against a fixture below. See the self-test after the real check for why that matters.
+VALIDATOR="$(
+  cat <<'PY'
 import json
 import re
 import sys
@@ -136,6 +139,49 @@ if errors:
 print(f"MCP policy: OK ({len(allowed)} allowed, "
       f"{len(policy.get('deniedMcpServers', []))} denied)")
 PY
+)"
+
+python3 -c "$VALIDATOR" "$POLICY"
+
+# Prove the validator actually validates.
+#
+# mcp/managed-settings.json declares "allowedMcpServers": [], which is the deliberate
+# fail-closed state (mcp/README.md). But an empty list means the loop above never executes,
+# so this test printed "OK (0 allowed, 0 denied)" while the serverName rejection, the
+# npx/uvx pinning rule, the plaintext-http check and the wildcard-port check had not run at
+# all — the ADR-029 controls AGENTS.md calls a source of truth were untested by
+# construction, and an accidental emptying of the array was indistinguishable from the
+# intended state.
+#
+# A non-empty floor would be the wrong fix, because empty is legitimate here. Running the
+# validator against a fixture that MUST be rejected exercises the rules whatever the real
+# file contains.
+fixture="$(mktemp)"
+trap 'rm -f "$fixture"' EXIT
+# serverCommand is a LIST here on purpose. Given a string it trips "must be a non-empty
+# list of strings" and never reaches the resolver-pinning rule, so the ADR-006 check — the
+# one that stops `npx …@latest` fetching whatever upstream publishes today — would have
+# stayed unexercised by a fixture that still looked comprehensive.
+cat >"$fixture" <<'JSON'
+{
+  "allowManagedMcpServersOnly": true,
+  "allowedMcpServers": [
+    { "serverName": "github" },
+    { "serverUrl": "http://example.com/mcp" },
+    { "serverUrl": "https://127.0.0.1:*/mcp" },
+    { "serverCommand": ["npx", "@modelcontextprotocol/server-github@latest"] },
+    { "serverCommand": ["uvx", "some-tool"] },
+    { "unknownKey": "x" }
+  ]
+}
+JSON
+if python3 -c "$VALIDATOR" "$fixture" >/dev/null 2>&1; then
+  echo 'The MCP validator accepted a policy it must reject.' >&2
+  echo 'The fixture contains a serverName entry, a plaintext http URL, a wildcard' >&2
+  echo 'port, two unpinned resolver specs and an unknown key. If this passes, the' >&2
+  echo 'checks are not running and the real policy is unverified too.' >&2
+  exit 1
+fi
 
 # ToolHive is optional, so the lock file may legitimately be absent. When it is
 # present it must be a complete pin: a version with no digest is not a pin.

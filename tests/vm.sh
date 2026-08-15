@@ -315,4 +315,44 @@ assert_match 'echo "CHEZMOI-RC\|\$rc"' "$ROOT/script/test-install"
 assert_match "sed -n 's/\\^CHEZMOI-RC\\|//p'" "$ROOT/script/test-install"
 assert_match 'Could not read chezmoi status from the guest' "$ROOT/script/test-install"
 
+# --- Argument parsers that used to do the opposite of what was asked.
+#
+# sync-to-mac had a bare `case` on $1 with no reject arm, so `--dryrun` fell through and
+# became the remote command: a real `rsync -az --delete` followed by `--dryrun` executed in
+# the guest. The reject arm must only catch things that LOOK like options, because trailing
+# arguments are a legitimate remote command.
+assert_match '^ *-\*\)' "$ROOT/script/sync-to-mac"
+# shellcheck disable=SC2016  # a literal $ in the search pattern, not an expansion
+assert_match 'Unknown option: \$1' "$ROOT/script/sync-to-mac"
+
+# install-toolhive defaulted to install and recognised only an exact --verify, so `--verfiy`
+# re-downloaded and overwrote the binary it was asked to inspect, reporting success.
+# shellcheck disable=SC2016  # a literal $ in the search pattern, not an expansion
+assert_match '^ *\*\) die "Unknown option: \$1" ;;$' "$ROOT/script/install-toolhive"
+
+# The tar fallback must land in $REMOTE_DIR. It archived basename "$ROOT" into
+# dirname "$REMOTE_DIR", so the tree arrived at ~/workspace/setup-dev-mac while every other
+# path uses ~/workspace/mac-os-setup, and the run then blamed a missing .git.
+assert_match "tar -C '\\\$REMOTE_DIR' -xzf -" "$ROOT/script/sync-to-mac"
+# shellcheck disable=SC2016  # a literal $ in the search pattern, not an expansion
+refute_match 'tar -C .\$\(dirname "\$REMOTE_DIR"\)' "$ROOT/script/sync-to-mac"
+
+# --- One array for the colima flags, so --dry-run cannot print a different command than
+# apply runs. They were two arrays and had already diverged on --mount-type: dry-run
+# honoured the override while apply hardcoded virtiofs, the one flag that cannot be changed
+# after the VM exists.
+assert_match '^build_vm_start_args\(\) \{$' "$ROOT/script/container-substrate"
+assert_match '^ *colima start "\$\{VM_START_ARGS\[@\]\}"$' "$ROOT/script/container-substrate"
+# shellcheck disable=SC2016  # a literal $ in the search pattern, not an expansion
+assert_match '^ *"--mount-type=\$VM_MOUNT_TYPE"$' "$ROOT/script/container-substrate"
+
+# --- A registry that cannot be checked is a failed check, not a skipped one. Every registry
+# assertion hung off `command_exists k3d` with no else, so --verify reported "matches the
+# declared state" without ever running the loopback-binding check.
+assert_match 'SUBSTRATE_REGISTRY_REQUIRED' "$ROOT/script/container-substrate"
+
+# --- The guest substrate checks name colima explicitly, so they must not run for another
+# runtime and fail for reasons unrelated to it. TASKS.md instructs --runtime rancher.
+assert_match 'RUNTIME" != colima' "$ROOT/script/test-install"
+
 echo 'Local macOS VM and container substrate: OK'

@@ -16,8 +16,25 @@ set -Eeuo pipefail
 KEY_DIR="{{ joinPath .chezmoi.homeDir ".config/age" }}"
 KEY_FILE="$KEY_DIR/keys.txt"
 
+# age-keygen present at render time: {{ if lookPath "age-keygen" }}yes{{ else }}no{{ end }}
+#
+# That line is what makes this retry, and it is load-bearing rather than informational.
+#
+# This is a run_once_ script, so chezmoi keys it on the file's hash and never runs it
+# again once it has exited — and the guard below exits 0, deliberately, so a missing age
+# does not fail the apply. Together those meant: apply hook 10 tolerates `brew bundle`
+# failing (documented, for the no-bottle case), so if age was among the casualties this
+# printed one WARN, was recorded as done, and NOTHING ever created the identity. Fixing
+# Homebrew afterwards did not help, because the file's content never changed. SOPS was
+# then unusable and neither script/verify nor hardening-check looks for the key.
+#
+# Rendering whether age-keygen exists means the content DOES change once it is installed,
+# so the next apply re-runs this and creates the identity. The body is idempotent: an
+# existing key is left alone.
 command -v age-keygen >/dev/null 2>&1 || {
-  echo "[WARN] age is not installed; skipping age identity creation." >&2
+  echo "[WARN] age is not installed, so no age identity was created." >&2
+  echo "       SOPS cannot encrypt or decrypt without one." >&2
+  echo "       Install it and re-apply:  brew install age && ./script/setup" >&2
   exit 0
 }
 

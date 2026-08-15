@@ -56,20 +56,42 @@ Environment:
 EOF
 }
 
-case "${1:-}" in
-  --help | -h)
-    usage
-    exit 0
-    ;;
-  --dry-run)
-    DRY_RUN=true
-    shift
-    ;;
-  --fetch)
-    FETCH=true
-    shift
-    ;;
-esac
+# Leading options are parsed in a loop; the first non-option begins the remote command.
+#
+# This was a single `case` on $1 with no reject arm, so anything unrecognised fell through
+# and became the remote command. `./script/sync-to-mac --dryrun` therefore ran a real
+# `rsync -az --delete` to the guest and then executed `--dryrun` as a shell command there
+# — the one typo whose entire purpose is to change nothing did the most. Being a case and
+# not a loop, it also could not combine flags.
+#
+# A blanket `*) die` would be wrong here: trailing arguments are a legitimate remote
+# command (`sync-to-mac ./script/test`). Only things that LOOK like options are rejected,
+# and `--` is honoured for the rare command that genuinely starts with a dash.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    --fetch)
+      FETCH=true
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      die "Unknown option: $1
+If this was meant as a remote command, put it after -- so it is not read as an option."
+      ;;
+    *) break ;;
+  esac
+done
 
 # Two targets, one transfer path. The local VM is reached through the SSH
 # configuration script/vm generates, which carries the guest's address, the
@@ -155,8 +177,16 @@ sync_tree() {
   else
     [[ "$DRY_RUN" == true ]] && die "--dry-run needs rsync."
     warn "rsync is not installed; falling back to tar over ssh (no deletions)."
-    tar -C "$(dirname "$ROOT")" -czf - "$(basename "$ROOT")" |
-      ssh_run "mkdir -p '$(dirname "$REMOTE_DIR")' && tar -C '$(dirname "$REMOTE_DIR")' -xzf -"
+    # Archives the CONTENTS of $ROOT into $REMOTE_DIR.
+    #
+    # It used to archive "$(basename "$ROOT")" and extract into "$(dirname "$REMOTE_DIR")",
+    # so the tree landed at ~/workspace/setup-dev-mac while every other path in this
+    # repository — the mkdir above, verify_transfer, remote_command's cd, and the sourceDir
+    # bootstrap writes into chezmoi.toml — uses $REMOTE_DIR (~/workspace/mac-os-setup).
+    # The transfer "succeeded" to a directory nothing reads, and the run then died claiming
+    # the checkout had no .git.
+    tar -C "$ROOT" -czf - . |
+      ssh_run "mkdir -p '$REMOTE_DIR' && tar -C '$REMOTE_DIR' -xzf -"
   fi
 }
 
@@ -164,9 +194,9 @@ sync_tree() {
 # as something else entirely.
 verify_transfer() {
   ssh_run "test -d '$REMOTE_DIR/.git'" ||
-    die "The remote checkout has no .git directory. gitleaks scans commit
-history and will fail under REQUIRE_LINTERS=1. Re-sync; do not work around it
-with --no-git, which skips history and defeats the check."
+    die "The remote checkout at $REMOTE_DIR has no .git directory, so gitleaks
+cannot scan commit history and ./script/test will fail under REQUIRE_LINTERS=1.
+Check the transfer reached that path: ./script/vm ssh ls -a '$REMOTE_DIR'"
   ssh_run "test -x '$REMOTE_DIR/bootstrap' && test -x '$REMOTE_DIR/script/test'" ||
     die "Executable bits were lost in transfer. Repository scripts will not run
 and tests/chezmoi-templates.sh will report it as a chezmoi error."

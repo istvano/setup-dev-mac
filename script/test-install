@@ -349,6 +349,23 @@ exercise_guest_substrate() {
     return 0
   fi
 
+  # Every check below names colima, limactl and the colima Brewfile fragment explicitly,
+  # so they only mean anything for that runtime. They used to run for rancher and orbstack
+  # too — the gate above tested only for `none` — which failed roughly seven checks and
+  # then died, for reasons that had nothing to do with the runtime under test. TASKS.md
+  # instructs `--runtime rancher` as the way to first exercise apply hook 25, so the
+  # documented next step was guaranteed to fail confusingly.
+  #
+  # Reported rather than silently skipped: a pass here must not be read as evidence about
+  # a runtime this function cannot inspect.
+  if [[ "$RUNTIME" != colima ]]; then
+    warn "Runtime is $RUNTIME, and these checks are colima-specific, so the substrate is
+NOT verified in this run. The packages for $RUNTIME were installed and chezmoi applied
+its configuration; what is unproven is the runtime wiring. Verify it in the guest with
+./script/vm ssh, or re-run with --runtime colima."
+    return 0
+  fi
+
   # Installed AND wired correctly, which are different questions.
   #
   # Every check here works WITHOUT a running daemon, which is what makes the runtime

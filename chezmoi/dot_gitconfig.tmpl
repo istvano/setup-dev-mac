@@ -2,7 +2,35 @@
   name = {{ .gitName | quote }}
   email = {{ .gitEmail | quote }}
 {{- if and .gitSigningKey (ne .gitSigningMethod "none") }}
-  signingkey = {{ .gitSigningKey | quote }}
+{{- /*
+  For the ssh method a literal public key is prefixed with `key::`, which is what git
+  requires for anything except an `ssh-`-prefixed key.
+
+  git treats user.signingkey as a FILE PATH under gpg.format=ssh. A raw key beginning
+  "ssh-" is rescued by a deprecated back-compatibility path; nothing else is. Measured,
+  not assumed — signing a commit with each form:
+
+    raw   ecdsa-sha2-nistp256 …   exit 128, error: Couldn't load public key ecdsa-…
+    raw   ssh-ed25519 …           exit 0
+    key:: ecdsa-sha2-nistp256 …   exit 0
+    key:: ssh-ed25519 …           exit 0
+
+  So every Secretive key broke — the Secure Enclave only does ECDSA P-256 — and so did
+  every YubiKey resident key (sk-ssh-ed25519@…, sk-ecdsa-…@…). Both are recommended
+  further down this very file, and commit.gpgsign is true, so EVERY commit failed for
+  those users. Only a 1Password Ed25519/RSA key happened to work, via the deprecated path.
+
+  key:: is applied only to values that look like a public key, so a path or a GPG key ID
+  is passed through untouched. allowed_signers.tmpl still needs the bare key and reads
+  .gitSigningKey directly, so it is unaffected.
+*/ -}}
+{{- $signingKey := .gitSigningKey -}}
+{{- if eq .gitSigningMethod "ssh" -}}
+{{- if or (hasPrefix "ssh-" $signingKey) (hasPrefix "ecdsa-" $signingKey) (hasPrefix "sk-" $signingKey) -}}
+{{- $signingKey = printf "key::%s" $signingKey -}}
+{{- end -}}
+{{- end }}
+  signingkey = {{ $signingKey | quote }}
 {{- end }}
 [init]
   defaultBranch = main

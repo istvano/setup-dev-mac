@@ -303,10 +303,34 @@ enable_touchid_sudo_if_requested() {
     return 0
   }
 
+  # An existing sudo_local is preserved before it is replaced.
+  #
+  # The check above only recognises `auth sufficient pam_tid.so`. Anything else in this
+  # file — `auth required pam_tid.so`, pam_watchid.so, or a pam_reattach line ordered for
+  # tmux without the pam_tid line matching that exact form — was replaced wholesale by the
+  # stock two-line template with no copy kept, and the loss was silent: sudo simply stopped
+  # behaving the way the user had configured it. AGENTS.md requires backing up user-owned
+  # files before replacement, and backup_file cannot be used here because /etc is not
+  # writable as the user, so the copy is made with sudo alongside the original.
+  local backup=""
+  if [[ -f "$target" ]]; then
+    warn "$target already exists and does not contain 'auth sufficient pam_tid.so'.
+It will be replaced by the stock template and a copy kept alongside it. If it carried
+pam_reattach, pam_watchid or a different pam_tid form, merge that back afterwards."
+  fi
+
+  # After the prompt, not before: declining must leave nothing behind.
   confirm "Enable Touch ID for sudo by writing $target?" || return 0
+  if [[ -f "$target" ]]; then
+    backup="$target.replaced-by-bootstrap.$(date -u +%Y%m%d-%H%M%S)"
+    sudo cp -p "$target" "$backup" ||
+      die "Could not back up $target; refusing to replace it."
+    log "Saved the previous $target as $backup"
+  fi
   sudo cp "$template" "$target"
   sudo sed -i '' 's/^#auth/auth/' "$target"
   success "Enabled Touch ID for sudo in $target."
+  [[ -z "$backup" ]] || log "Previous configuration: $backup"
 }
 
 # git-delta is part of the trust set because the chezmoi configuration selects it

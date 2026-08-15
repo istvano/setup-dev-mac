@@ -22,12 +22,24 @@ LOCK="$ROOT/mcp/toolhive.lock"
 INSTALL_DIR="$HOME/.local/bin"
 BINARY="$INSTALL_DIR/thv"
 
+# A real loop with a reject arm, because the previous form defaulted to install and only
+# recognised an exact `--verify`. So `--verfiy`, `-v` or `verify` all meant INSTALL: a
+# network fetch from GitHub and `install -m 755` over the existing binary, reporting
+# success. A command run to CHECK an installation silently performed one, which means it
+# could never detect drift in the thing it was asked about. script/install-tart already
+# carries a comment naming this defect as its reason for having an explicit reject arm.
 MODE="install"
-[[ "${1:-}" == "--verify" ]] && MODE="verify"
-[[ "${1:-}" =~ ^(--help|-h)$ ]] && {
-  echo 'Usage: script/install-toolhive [--verify]'
-  exit 0
-}
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --verify) MODE="verify" ;;
+    --help | -h)
+      echo 'Usage: script/install-toolhive [--verify]'
+      exit 0
+      ;;
+    *) die "Unknown option: $1" ;;
+  esac
+  shift
+done
 
 [[ -f "$LOCK" ]] || die "Missing $LOCK"
 

@@ -35,14 +35,66 @@ comment pretending to be a test.
       now ignored unless colima is selected, verified by rendering `.chezmoiignore` for all
       four runtimes.
 
-Not fixed, deliberately — see the QA report for the full list with `file:line`:
-`container-substrate --verify` passing with no registry because its checks are gated on
-`k3d` (declared only in the `kubernetes` profile), the MCP policy test being vacuous
-against an empty allowlist, `sync-to-mac --dryrun` performing a real `rsync --delete`,
-`install-toolhive` installing on any unrecognised argument, the dry-run/apply
-`--mount-type` divergence, and the documentation drift (`README.md` and `docs/TESTING.md`
-both claim `--runtime none` is the `test-install` default; it is colima).
-`user.signingkey` being written raw needs a real signing test before anyone acts on it.
+### Second pass: ten more fixed
+
+- [x] **Destructive on a typo.** `sync-to-mac` had a bare `case` on `$1` with no reject
+      arm, so `--dryrun` became the remote command and performed a real
+      `rsync -az --delete`; it now parses leading options in a loop and rejects anything
+      option-shaped, while still accepting a positional remote command and `--`.
+      `install-toolhive` treated any unrecognised argument as "install", so `--verfiy`
+      re-downloaded and overwrote the binary it was asked to inspect.
+- [x] **Wrong results.** `sync-to-mac`'s tar fallback extracted to
+      `~/workspace/setup-dev-mac` instead of `$REMOTE_DIR`, then blamed a missing `.git`
+      and advised a flag no script implements. `container-substrate` kept two separate
+      colima flag arrays under a comment claiming one, and they had diverged on
+      `--mount-type` — dry-run honoured the override, apply hardcoded virtiofs, on the one
+      setting that cannot be changed after the VM exists; there is now a single
+      `build_vm_start_args`. `test-install` ran colima-specific checks for every non-`none`
+      runtime, so the `--runtime rancher` run TASKS.md itself prescribes failed ~7 checks
+      for unrelated reasons.
+- [x] **Untested controls.** `container-substrate --verify` reported "matches the declared
+      state" while examining no registry at all, because every registry check hung off
+      `command_exists k3d` with no else — silently retiring the loopback-binding check.
+      Missing k3d is now a failure (`SUBSTRATE_REGISTRY_REQUIRED=false` to accept it).
+      `tests/mcp-policy.sh` validated nothing, since the real allowlist is legitimately
+      empty; the validator now also runs against a fixture that must be rejected, which
+      exercises the serverName, plaintext-http, wildcard-port and both ADR-006 pinning
+      rules. Verified by making the fixture valid and confirming the test then fails.
+- [x] **Silent damage.** `--with-touchid-sudo` replaced an existing
+      `/etc/pam.d/sudo_local` with no copy kept whenever it lacked the exact
+      `auth sufficient pam_tid.so` form; it is now backed up after the prompt, so
+      declining leaves nothing behind. The age hook exited 0 when `age-keygen` was
+      missing and, being `run_once_` with static content, was recorded as done and never
+      retried — leaving SOPS unusable with nothing reporting it. It now renders whether
+      `age-keygen` exists, so installing age changes the content hash and the next apply
+      creates the identity.
+- [x] **`user.signingkey` broke SSH signing for two of the three recommended key
+      sources.** git treats the value as a file path under `gpg.format=ssh`, rescuing only
+      keys beginning `ssh-`. Measured by signing a commit with each form: raw
+      `ecdsa-sha2-nistp256` exits 128 with `Couldn't load public key`, raw `ssh-ed25519`
+      succeeds, and `key::` works for every type. So every Secretive key (the Secure
+      Enclave is ECDSA-only) and every YubiKey `sk-` key failed on *every* commit, because
+      `commit.gpgsign` is true. `key::` is now applied only to values that look like a
+      public key, leaving a file path or a GPG key ID untouched.
+
+Still open — see the QA report for `file:line`: the `count_entries` `"0\n0"` latent
+arithmetic abort in `script/tools`; `container-substrate` inspecting only
+`k3d-$REGISTRY` while accepting either name, so a hand-created loopback registry reads as
+world-exposed and the offered remediation cannot work; `script/update` ignoring all
+arguments (so `--no-pager` does nothing) and diffing a different source than it applies;
+the weaker assertions (`vscode --force` satisfiable by the dry-run branch, the
+`arm64-only` marker regex, the Ghostty theme check); and the documentation drift —
+`README.md` and `docs/TESTING.md` both still claim `--runtime none` is the `test-install`
+default when it is colima, `ARCHITECTURE.md` still calls macOS defaults opt-in, `TASKS.md`
+cites the removed `firewall_logging`, and the "four skips", 53-settings, 14-checks and
+"51 to 64" counts have all drifted.
+
+**Unresolved question, not a defect:** with `gitSigningMethod=ssh` and
+`passwordManager=bitwarden`, `gpg.ssh.program` is unset (it is only written for
+1Password), so git falls back to `ssh-keygen`, which reads `$SSH_AUTH_SOCK` and never
+consults `~/.ssh/config` — so the Bitwarden `IdentityAgent` has no effect on signing.
+Exporting `SSH_AUTH_SOCK` from the shell configuration would fix signing but changes the
+agent for *all* ssh use, which needs a deliberate decision rather than a quiet default.
 
 ## Run the new test harness
 

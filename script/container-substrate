@@ -284,10 +284,20 @@ builder_exists() {
   docker buildx inspect "$BUILDER" >/dev/null 2>&1
 }
 
-# The commands, in one place, so --dry-run cannot drift from apply.
-vm_start_command() {
-  local args=(
-    colima start
+# The flags, in ONE array, built once and used by both --dry-run and apply.
+#
+# This comment used to say "in one place" above a function that was not the one place:
+# apply_vm carried a second, independent array, and the two had already drifted — dry-run
+# honoured $VM_MOUNT_TYPE while apply hardcoded virtiofs. So
+# `SUBSTRATE_VM_MOUNT_TYPE=sshfs ./script/container-substrate --dry-run` printed sshfs and
+# the very next apply created the VM with virtiofs. That is the worst setting to get wrong
+# here: it cannot be changed after the VM is created, which is why it is verified by
+# read-back — so the drift report then disagreed with what apply had actually done.
+#
+# A global, because bash 3.2 cannot return an array.
+VM_START_ARGS=()
+build_vm_start_args() {
+  VM_START_ARGS=(
     --vm-type=vz
     "--mount-type=$VM_MOUNT_TYPE"
     --cpu "$VM_CPUS"
@@ -296,7 +306,15 @@ vm_start_command() {
     --network-address
     --mount "$VM_MOUNT:w"
   )
-  [[ "$VM_ROSETTA" == true ]] && args+=(--vz-rosetta)
+  [[ "$VM_ROSETTA" == true ]] && VM_START_ARGS+=(--vz-rosetta)
+  # Explicit, so a false ROSETTA test does not make this function return non-zero as its
+  # final statement and trip errexit in the caller.
+  return 0
+}
+
+vm_start_command() {
+  build_vm_start_args
+  local args=(colima start "${VM_START_ARGS[@]}")
   # A loop, NOT `printf '%q' "${args[0]}"; printf ' %q' "${args[@]:1}"`.
   #
   # In bash 3.2 — which is what macOS ships and what this repository targets
@@ -385,20 +403,11 @@ installed. This repository does not install it for you (see AGENTS.md)."
   # this. That is also why ~/.colima/default/colima.yaml is NOT managed by chezmoi:
   # Colima rewrites it on every start, and a chezmoi-managed file that the tool
   # rewrites is the exact fight that made Rancher Desktop expensive (ADR-037).
-  # An array, because a conditional flag spliced into a command line as a string
-  # does not word-split under this file's IFS and arrives as one unknown option.
-  # script/AGENTS.md states the rule; this is the only optional flag here.
-  local args=(
-    --vm-type=vz
-    --mount-type=virtiofs
-    --cpu "$VM_CPUS"
-    --memory "$VM_MEMORY_GB"
-    --disk "$VM_DISK_GB"
-    --network-address
-    --mount "$VM_MOUNT:w"
-  )
-  [[ "$VM_ROSETTA" == true ]] && args+=(--vz-rosetta)
-  colima start "${args[@]}"
+  # The same array --dry-run prints, so the command reviewed is the command run. An array
+  # rather than a string because a conditional flag spliced in as a string does not
+  # word-split under this file's IFS and arrives as one unknown option (script/AGENTS.md).
+  build_vm_start_args
+  colima start "${VM_START_ARGS[@]}"
   success "The Colima VM is running."
 }
 
@@ -604,6 +613,22 @@ do_verify() {
 from every network this machine joins."
         failures=$((failures + 1))
       fi
+    else
+      # Missing k3d is a failed check, not a skipped one.
+      #
+      # Every registry check hung off `if command_exists k3d`, with no else — so on a
+      # machine without the kubernetes profile, --verify examined no registry at all and
+      # still printed "Substrate matches the declared state". That silently retired
+      # registry_publishes_loopback, the check that enforces the loopback-only binding
+      # rule in AGENTS.md and README.md: a security control switched off by the absence
+      # of an unrelated profile, reported as success.
+      #
+      # "Cannot check" must not read as "correct", so this counts.
+      warn "k3d is not installed, so the shared registry cannot be verified — including
+whether it binds $REGISTRY_HOST only. k3d is in profiles/kubernetes.Brewfile.
+Select that profile, or run with SUBSTRATE_REGISTRY_REQUIRED=false to accept a
+substrate with no registry."
+      [[ "${SUBSTRATE_REGISTRY_REQUIRED:-true}" == false ]] || failures=$((failures + 1))
     fi
     builder_exists || {
       warn "Buildx builder $BUILDER is absent, so builds have no persistent cache."
