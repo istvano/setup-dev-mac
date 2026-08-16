@@ -337,6 +337,26 @@ assert_match 'script/macos-defaults" \| quote \}\} apply --yes' \
 assert_match '\.docker' "$ROOT/chezmoi/.chezmoiignore"
 assert_match 'ne \.runtime "colima"' "$ROOT/chezmoi/.chezmoiignore"
 
+# Documentation must not contradict the code on the two claims that misled a reader most.
+#
+# README.md and docs/TESTING.md both stated `--runtime none` was the test-install default
+# when it is colima — and TESTING.md said both things, 86 lines apart, in the runbook
+# followed for a destructive run. ARCHITECTURE.md described macOS defaults as applied "when
+# requested" for as long as ADR-041 had made them the default. Neither is the kind of error
+# a reader can catch, because both read as authoritative.
+# A single-line fragment of the false sentence, with `.` standing in for the backtick.
+# The first attempt used `defaults\n?to ...` to span the line break: grep -E has no \n, so
+# that pattern could never fire — a refutation that cannot match is not a guard, it is a
+# comment that costs a test run.
+refute_match 'runtime none. because that suits' "$ROOT/README.md"
+refute_match '^.--runtime none. is the default' "$ROOT/docs/TESTING.md"
+refute_match 'applies declared macOS defaults when requested' "$ROOT/docs/ARCHITECTURE.md"
+
+# And the skip count, which is the number that decides whether a green local run means
+# anything. There are five, not four; the fifth is the atuin config parse.
+refute_match 'SKIPS four checks' "$ROOT/AGENTS.md"
+refute_match 'four checks skip' "$ROOT/docs/OPERATIONS.md"
+
 # neovim is $EDITOR in both shells and core.editor in git, so it must not be unconfigured.
 #
 # It was, for the entire life of the repository: every commit message, `git rebase -i`, and

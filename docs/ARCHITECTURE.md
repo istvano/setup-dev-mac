@@ -83,7 +83,7 @@ bootstrap
        -> installs host packages
        -> creates an age identity if none exists
        -> configures runtimes
-       -> applies declared macOS defaults when requested
+       -> applies declared macOS defaults (default; --no-macos-defaults opts out)
        -> provisions browser profiles when selected
 ```
 

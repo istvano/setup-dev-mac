@@ -8,8 +8,8 @@ rationale belongs in `DECISIONS.md`; unfinished work belongs in `TASKS.md`.
 
 1. Read the selected Brewfile fragments and all `chezmoi/run_*` scripts.
 2. Run the static validation suite, requiring every check. Without the `REQUIRE_*`
-   variables, four checks skip silently when their tool is absent and the suite
-   still reports success:
+   variables, five checks skip when their tool is absent and the suite still reports
+   success — three of them printing "OK" as they do it:
 
    ```bash
    REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1 ./script/test

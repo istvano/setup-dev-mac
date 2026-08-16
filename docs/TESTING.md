@@ -262,10 +262,14 @@ cd ~/workspace/mac-os-setup
 `all` means every declared profile — 20 of them. The expansion is printed, because
 a selection that broad should be visible in the plan.
 
-`--runtime none` is the default for the build machine, not a simplification.
+`--runtime none` is passed explicitly here; it is **not** the default. `test-install`
+defaults to `colima` (see line 179 above and `script/test-install`), because the
+container runtime is most of what this workstation is for.
+
 Nested virtualization needs M3 or later, so on the M1 Pro no container runtime can
-start inside the guest at all; selecting one installs the cask and then reports it
-could not be configured. That is the hardware, not a repository failure, and a pass
+start inside the guest at all; selecting one installs the packages and verifies the
+wiring, then reports that the daemon could not start. That is the hardware, not a
+repository failure, and a pass
 is not evidence the runtime works.
 
 On the M5 Max it *does* work, so `--runtime colima` there is the first opportunity

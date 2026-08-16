@@ -391,7 +391,10 @@ Nested virtualization needs M3 or later, so a container runtime cannot start in 
 guest on the M1 Pro build machine — but it can on the M5 Max target, which is the
 first machine anywhere that can exercise the container-runtime apply hook.
 `script/test-install` detects which case applies rather than assuming, and defaults
-to `--runtime none` because that suits the machine where most runs happen. Apple's
+to `--runtime colima`: the container runtime is most of what this workstation is for,
+so a test that skipped it would be testing a machine nobody uses. On the M1 Pro the
+packages install and the wiring is verified while the daemon cannot start, and the run
+says so rather than passing quietly. Pass `--runtime none` to skip it. Apple's
 licence permits two macOS guests per host on either machine, so a profile matrix
 runs sequentially, and Ghostty needs Metal, which is unverified in a VZ guest.
 

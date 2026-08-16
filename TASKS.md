@@ -82,12 +82,24 @@ arithmetic abort in `script/tools`; `container-substrate` inspecting only
 `k3d-$REGISTRY` while accepting either name, so a hand-created loopback registry reads as
 world-exposed and the offered remediation cannot work; `script/update` ignoring all
 arguments (so `--no-pager` does nothing) and diffing a different source than it applies;
-the weaker assertions (`vscode --force` satisfiable by the dry-run branch, the
-`arm64-only` marker regex, the Ghostty theme check); and the documentation drift —
-`README.md` and `docs/TESTING.md` both still claim `--runtime none` is the `test-install`
-default when it is colima, `ARCHITECTURE.md` still calls macOS defaults opt-in, `TASKS.md`
-cites the removed `firewall_logging`, and the "four skips", 53-settings, 14-checks and
-"51 to 64" counts have all drifted.
+and the weaker assertions (`vscode --force` satisfiable by the dry-run branch, the
+`arm64-only` marker regex, the Ghostty theme check).
+
+- [x] **Documentation drift corrected (F24).** `README.md` and `docs/TESTING.md` both
+      claimed `--runtime none` was the `test-install` default when it is colima — and
+      `TESTING.md` contradicted itself 86 lines apart, in the runbook followed for a
+      destructive run. `ARCHITECTURE.md` still described macOS defaults as applied "when
+      requested" after ADR-041 made them default. `AGENTS.md` and `docs/OPERATIONS.md` said
+      four checks skip silently; there are **five** — the fifth is the atuin config parse in
+      `tests/placement-policy.sh`, which needs a Python 3.11+ for `tomllib` that no profile
+      declares. `script/install-toolhive` told the operator to start Rancher Desktop, which
+      a default install no longer has. The 53-settings figure is annotated in place as
+      historical (now 50 + 2 = 52); the "51 to 64" ceiling rationale was corrected when the
+      ceiling reached 70.
+
+      Counts were measured rather than recalled: `SETTINGS` and `ACTIONS` counted from
+      `script/macos-defaults`, checks counted from the `TESTS` array, and skip points found
+      by grepping for what each test actually prints.
 
 - [x] **Resolved: ssh signing under Bitwarden.** The open question was that with
       `gitSigningMethod=ssh` and `passwordManager=bitwarden`, `gpg.ssh.program` is unset (it
@@ -165,6 +177,12 @@ Everything else in this section depends on it, so it comes first.
       needs `--with-hardening`. Non-strict reports and continues, which is why the
       run still passed.
 
+      **Not reproducible as written.** `firewall_logging` no longer exists — macOS 26
+      removed `socketfilterfw --getloggingmode`, so the check was deleted from both
+      `script/macos-defaults` and `script/hardening-check` — and `--with-hardening` is now
+      the default rather than a flag. A comparable run today reports 2 failures, not 9.
+      Kept as the record of what that run observed, not as a target to match.
+
       Transcript checked per SECURITY.md: mode 0600, zero `Password:` prompts.
 - [ ] Run with the FULL default selection. The pass above used
       `--firewall none --password-manager none` to isolate the privileged-cask risk,
@@ -204,7 +222,13 @@ Linux CI cannot prove any of these. Most can now be answered in the VM on either
 machine; the ones that need specific hardware are marked.
 
 - [x] `./script/macos-defaults apply` then `--verify` on macOS 13.7.8:
-      **no key was found to be ignored.** All 53 declared settings are in effect.
+      **no key was found to be ignored.** All 53 declared settings were in effect.
+
+      That count is historical and no longer matches: the table now declares **50
+      settings plus 2 actions = 52**, because `firewall_logging` was removed when macOS 26
+      dropped `socketfilterfw --getloggingmode`. Left as recorded rather than silently
+      restated, since it is evidence of what a specific run on a specific OS observed —
+      but do not expect to reproduce 53, and note that this evidence predates the removal.
 
       The two apparent findings were both faults in the verifier, not in macOS,
       and both were "cannot inspect" reported as "not applied" — the failure

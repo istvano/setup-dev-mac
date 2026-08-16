@@ -195,10 +195,15 @@ The minimum validation gate is `./script/test`. It covers:
 - rendering idempotency
 - Codex instruction and skill structure
 
-`./script/test` SKIPS four checks when their tools are absent — shellcheck,
-shfmt/actionlint/gitleaks, chezmoi template execution and YAML — and still prints
-"All repository tests passed". Run it with `REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1`
-before believing a green result.
+`./script/test` SKIPS five checks when their tools are absent — shellcheck,
+shfmt/actionlint/gitleaks, chezmoi template execution, YAML, and the atuin config
+parse in `tests/placement-policy.sh` when no Python 3.11+ is importable for `tomllib`
+— and still prints "All repository tests passed". Run it with
+`REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1` before believing a green result.
+
+Three of those five report the word "OK" as they skip, which is why a green local run
+reads as more coverage than it is. Note also that no profile declares any Python: the
+one satisfying `tomllib` today arrives as a transitive dependency of `yamllint`.
 
 Shell scripts are discovered by shebang via `script/shell-files`, never by
 filename extension. Selecting by extension previously skipped every
