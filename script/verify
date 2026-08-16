@@ -35,4 +35,25 @@ brewfile="$tmp_dir/Brewfile"
 
 brew bundle check --verbose --file="$brewfile"
 chezmoi doctor
+
+# Identity is reported here but does not fail this command.
+#
+# ./script/verify answers "is the declared state installed", and identity is not declared
+# state — it is the part of a machine this repository deliberately cannot reproduce. A
+# machine can be correctly provisioned and still be unable to decrypt a secret or sign a
+# commit, and until now nothing said so: verify and hardening-check both passed while the
+# age key was missing entirely.
+#
+# Non-fatal because the failure is not always the machine's fault (a locked vault, a key
+# the operator manages by hand), and because making a green verify depend on a vault
+# unlock would push people to stop running it. script/identity --check is the gate when
+# a gate is wanted.
+echo
+if "$ROOT/script/identity" --check; then
+  :
+else
+  warn "Identity is incomplete on this machine; see the report above."
+  warn "This does not affect the installed state. Details: docs/NEW-MACHINE.md"
+fi
+
 success "Selected workstation state is installed and chezmoi is healthy."

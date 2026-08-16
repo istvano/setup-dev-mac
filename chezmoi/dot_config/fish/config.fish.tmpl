@@ -81,6 +81,11 @@ set -gx VISUAL $EDITOR
 # value of the variable flags to '-l'".
 set -gx LESS -R
 
+# ripgrep reads its configuration ONLY through this variable — there is no default path it
+# looks in. Without it, ~/.config/ripgrep/ripgreprc is an inert file and rg silently runs at
+# its defaults. Kept in step with dot_zshrc.tmpl.
+set -gx RIPGREP_CONFIG_PATH (test -n "$XDG_CONFIG_HOME"; and echo $XDG_CONFIG_HOME; or echo $HOME/.config)/ripgrep/ripgreprc
+
 # A stricter umask is deliberately not set here: Homebrew fails to build several
 # formulae under umask 077. Rely on FileVault and per-file modes instead.
 

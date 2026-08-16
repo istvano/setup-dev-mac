@@ -1,0 +1,26 @@
+# ripgrep configuration.
+#
+# ripgrep reads this file only when RIPGREP_CONFIG_PATH points at it, which is why the
+# shell configurations export it. A config file with nothing exporting the variable is the
+# quiet failure mode here: rg keeps working, at its defaults, and nothing says why.
+#
+# Deliberately small. rg's defaults are good, and every option here changes behaviour that
+# was actually noticed rather than one that reads well in a blog post.
+
+# Case-insensitive until the pattern contains a capital, matching the search behaviour
+# already configured for neovim, fzf and less on this machine.
+--smart-case
+
+# Follow symlinks. ~/.config is full of them on a chezmoi-managed machine, and a search
+# that silently skips them is worse than one that is slightly slower.
+--follow
+
+# Long lines are usually minified assets or a base64 blob, and printing one fills the
+# terminal without telling you anything. The match is still reported, just truncated.
+--max-columns=200
+--max-columns-preview
+
+# Hidden files are searched, because dotfiles are the point of this repository. .git is
+# still excluded by the default ignore rules, so this does not mean walking object storage.
+--hidden
+--glob=!.git/

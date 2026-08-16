@@ -38,12 +38,42 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=script/lib/common.sh
 source "$ROOT/script/lib/common.sh"
 
-# Sizing. The VM never returns memory to macOS, so this is a standing cost and the
-# only expensive object here. The defaults suit the 32 GB build machine and leave
-# macOS 18 GB; raise them on the 128 GB target. Do not exceed roughly 60% of
-# physical memory.
-VM_CPUS="${SUBSTRATE_VM_CPUS:-8}"
-VM_MEMORY_GB="${SUBSTRATE_VM_MEMORY_GB:-14}"
+# Sizing, derived from the machine rather than hardcoded for one of them.
+#
+# The VM never returns memory to macOS, so this is a standing cost and the only expensive
+# object here. The numbers used to be constants suited to the 32 GB build machine, with a
+# comment saying "raise them on the 128 GB target" — which meant the target either ran a VM
+# sized for a quarter of its memory, or the operator exported SUBSTRATE_VM_* on every single
+# invocation, because nothing persisted them. Forgetting made `--verify` report drift
+# against numbers that were never right for the machine.
+#
+# 45% of physical memory, and two cores fewer than the machine has. Both are floors-and-caps
+# rather than ratios all the way down: below 4 GiB the VM cannot build anything useful, and
+# leaving fewer than two cores for macOS makes the whole machine feel broken during a build.
+#
+# The formula deliberately reproduces the previous constants on the 32 GB build machine —
+# 32 GiB * 0.45 = 14, and 10 cores - 2 = 8 — so this is a generalisation of the tuned
+# values, not a re-guess of them. On a 128 GB machine it yields 57 GiB and stays under the
+# ~60% ceiling the old comment warned about.
+detect_memory_gb() {
+  local bytes
+  bytes="$(sysctl -n hw.memsize 2>/dev/null || echo 0)"
+  local total=$((bytes / 1024 / 1024 / 1024))
+  local share=$((total * 45 / 100))
+  ((share >= 4)) || share=4
+  printf '%s' "$share"
+}
+
+detect_cpus() {
+  local ncpu
+  ncpu="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+  local share=$((ncpu - 2))
+  ((share >= 2)) || share=2
+  printf '%s' "$share"
+}
+
+VM_CPUS="${SUBSTRATE_VM_CPUS:-$(detect_cpus)}"
+VM_MEMORY_GB="${SUBSTRATE_VM_MEMORY_GB:-$(detect_memory_gb)}"
 # 100 GiB, which is also Colima's own default, so this declares what an untouched
 # profile already has and a fresh machine gets without an oversized allocation.
 #

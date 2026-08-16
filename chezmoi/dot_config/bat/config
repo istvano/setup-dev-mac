@@ -1,3 +1,14 @@
+# Catppuccin Mocha is BUILT IN, so no theme file or `bat cache --build` step is needed.
+#
+# Recorded because it looks like it should need one. bat historically required Catppuccin
+# themes to be dropped into ~/.config/bat/themes/ and compiled, and a review of this file
+# flagged the missing themes/ directory as a silent-fallback bug of the ADR-030 class —
+# where the terminal looks almost right and nothing reports the difference. It is not:
+# `bat --list-themes` on a machine provisioned by this repository lists all four Catppuccin
+# variants (Frappe, Latte, Macchiato, Mocha), shipped with bat since 0.26.0.
+#
+# If a future bat drops them, the symptom is silent: bat falls back to its default theme
+# rather than erroring. Check with `bat --list-themes | grep -i catppuccin`.
 --theme="Catppuccin Mocha"
 --style="numbers,changes,header"
 --paging=auto

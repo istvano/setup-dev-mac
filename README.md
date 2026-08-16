@@ -38,6 +38,23 @@ See [Architecture](docs/ARCHITECTURE.md) for the current design and
 
 ## Quick start
 
+**On a brand-new Mac, start at [docs/NEW-MACHINE.md](docs/NEW-MACHINE.md).** It covers what
+this section assumes you already have — a checkout, the Command Line Tools, and an identity —
+and lists what to export from the old machine *before* you wipe it.
+
+From nothing:
+
+```bash
+mkdir -p ~/workspace/istvano
+git clone https://github.com/istvano/setup-dev-mac.git ~/workspace/istvano/setup-dev-mac
+cd ~/workspace/istvano/setup-dev-mac
+./bootstrap plan && ./bootstrap install
+```
+
+The repository is public, so cloning needs no authentication — which matters on a machine
+that has no SSH key yet. Choose the checkout location deliberately: `./bootstrap` records it
+as `sourceDir` in `~/.config/chezmoi/chezmoi.toml`, and moving it later breaks every apply.
+
 Review the planned choices before installation:
 
 ```bash

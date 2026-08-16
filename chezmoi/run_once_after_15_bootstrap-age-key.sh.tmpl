@@ -45,11 +45,57 @@ fi
 
 umask 077
 mkdir -p "$KEY_DIR"
+
+# Restore from Bitwarden BEFORE minting a new identity.
+#
+# This is the difference between a portable machine and a lossy one. SSH keys are generated
+# per machine on purpose (hook 12) because a new signing key is simply enrolled. An age key
+# has no such property: files encrypted to an identity you no longer hold are unrecoverable,
+# so a new Mac that quietly mints a second identity has destroyed access to every existing
+# SOPS file. The old script did exactly that, and printed "back this key up now" at the
+# moment it was already too late for the previous machine's key.
+#
+# The vault is only consulted when `bw` is present AND already unlocked — `bw` reads
+# BW_SESSION and this runs without a terminal, so it cannot prompt. A locked vault is not an
+# error here; it means the restore has to happen later, which script/identity --restore does.
+BW_ITEM="${AGE_BW_ITEM:-age-identity}"
+restored=false
+
+if command -v bw >/dev/null 2>&1; then
+  if bw get notes "$BW_ITEM" >"$KEY_FILE.tmp" 2>/dev/null &&
+    grep -q 'AGE-SECRET-KEY-' "$KEY_FILE.tmp"; then
+    mv "$KEY_FILE.tmp" "$KEY_FILE"
+    chmod 600 "$KEY_FILE"
+    restored=true
+  else
+    rm -f "$KEY_FILE.tmp"
+  fi
+fi
+
+if [[ "$restored" == true ]]; then
+  echo "[OK] Restored the age identity from Bitwarden item '$BW_ITEM'."
+  echo "     Public key: $(age-keygen -y "$KEY_FILE")"
+  exit 0
+fi
+
 age-keygen -o "$KEY_FILE" 2>/dev/null
 chmod 600 "$KEY_FILE"
 
-echo "[OK] Created an age identity at $KEY_FILE."
-echo "     Public key (use this as an age recipient in .sops.yaml):"
-age-keygen -y "$KEY_FILE"
-echo "     Back this key up now: losing it makes every SOPS-encrypted file unrecoverable."
+# A marker, so "this key is not backed up" is a fact the tooling can report rather than
+# something the operator has to remember. script/identity --check reads it and keeps
+# complaining until the key is in the vault and the marker is removed.
+: >"$KEY_DIR/.locally-generated"
+
+cat >&2 <<EOF
+[WARN] No age identity was found in Bitwarden, so a NEW one was generated.
+       If this machine is replacing another, STOP: files encrypted to the old
+       identity cannot be read with this one. Restore the old key instead:
+         ./script/identity --restore
+
+       If this is genuinely the first machine, store this key in Bitwarden now,
+       as a secure note in an item named '$BW_ITEM':
+         $KEY_FILE
+       Public key, for .sops.yaml recipients:
+         $(age-keygen -y "$KEY_FILE")
+EOF
 {{- end }}

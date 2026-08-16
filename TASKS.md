@@ -89,12 +89,42 @@ default when it is colima, `ARCHITECTURE.md` still calls macOS defaults opt-in, 
 cites the removed `firewall_logging`, and the "four skips", 53-settings, 14-checks and
 "51 to 64" counts have all drifted.
 
-**Unresolved question, not a defect:** with `gitSigningMethod=ssh` and
-`passwordManager=bitwarden`, `gpg.ssh.program` is unset (it is only written for
-1Password), so git falls back to `ssh-keygen`, which reads `$SSH_AUTH_SOCK` and never
-consults `~/.ssh/config` — so the Bitwarden `IdentityAgent` has no effect on signing.
-Exporting `SSH_AUTH_SOCK` from the shell configuration would fix signing but changes the
-agent for *all* ssh use, which needs a deliberate decision rather than a quiet default.
+- [x] **Resolved: ssh signing under Bitwarden.** The open question was that with
+      `gitSigningMethod=ssh` and `passwordManager=bitwarden`, `gpg.ssh.program` is unset (it
+      is only written for 1Password), so git shells out to `ssh-keygen`, which reads
+      `$SSH_AUTH_SOCK` and never consults `~/.ssh/config` — the Bitwarden `IdentityAgent`
+      therefore had no effect on signing and every commit failed.
+
+      The considered fix was exporting `SSH_AUTH_SOCK` from the shell configuration, which
+      would have changed the agent for *all* ssh use. It was not taken. Instead SSH keys are
+      now generated per machine and kept on disk
+      (`run_onchange_after_12_ssh-key.sh.tmpl`), and `private_dot_ssh/config.tmpl` names the
+      file with `IdentityFile` rather than pointing at an agent — so `ssh-keygen` signs
+      against the key directly and the problem does not arise.
+
+      Verified by signing a commit with `SSH_AUTH_SOCK` unset and no agent running: exit 0.
+      1Password keeps its agent, where the keys genuinely live in the agent.
+
+## Configuration gaps still open
+
+- [ ] **`k9s` has no configuration**, and the `kubernetes` profile is a default that installs
+      13 binaries and configures none of them. Deferred rather than guessed: k9s 0.51.0
+      writes its `config.yaml` only on first interactive run, which needs a TTY and a
+      reachable cluster, so a config authored here could not be validated before shipping —
+      and an invalid one breaks k9s at startup. Do it on a machine with a cluster: let k9s
+      generate its defaults, then bring the diff back. The settings worth having are a
+      read-only default for production contexts, and a skin matching the Catppuccin palette
+      the rest of the machine uses.
+- [ ] **`gh` has no configuration** (no editor, pager, protocol or aliases). Same reason to
+      be careful for a different cause: `gh config set` rewrites `~/.config/gh/config.yml`,
+      so a chezmoi-managed copy is a file the tool also writes — the conflict ADR-037
+      records for Rancher Desktop. Decide whether to manage it with a `modify_` script that
+      preserves gh's own keys, or to leave it alone deliberately and record that.
+- [x] **`bat`'s Catppuccin theme was investigated and is fine.** A review flagged the missing
+      `themes/` directory and absent `bat cache --build` as a silent-fallback bug. It is not:
+      `bat --list-themes` in a provisioned guest lists all four Catppuccin variants, built in
+      since bat 0.26.0. Recorded in `chezmoi/dot_config/bat/config` so it is not
+      re-investigated.
 
 ## Run the new test harness
 

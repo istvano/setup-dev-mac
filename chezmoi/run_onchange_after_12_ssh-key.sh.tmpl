@@ -1,0 +1,66 @@
+{{- if and (eq .chezmoi.os "darwin") (ne .passwordManager "1password") -}}
+#!/usr/bin/env bash
+# Give this machine its own SSH key, and never move it.
+#
+# Runs before the age hook (15) because everything that follows — cloning over ssh,
+# signing commits — depends on a key existing.
+#
+# Skipped entirely when 1Password is the selected manager, because there the private keys
+# live in 1Password's agent and a file on disk would be a second, competing identity.
+#
+# Why per-machine keys rather than one key restored from the vault:
+#
+#   * A private key that never leaves the machine that generated it cannot be exposed by
+#     the loss of any other machine. The cost is enrolling one public key per Mac; the
+#     benefit is that decommissioning a Mac is one revocation at the forge.
+#   * Nothing has to be transported to a new machine, which removes the step most likely
+#     to be done insecurely under time pressure.
+#
+# The age key is the deliberate exception and IS restored from the vault (hook 15): it has
+# to be, because SOPS files encrypted to a lost identity are unrecoverable. Signing keys
+# have no such property — a new one is simply enrolled.
+set -Eeuo pipefail
+
+KEY="{{ .chezmoi.homeDir }}/.ssh/id_ed25519"
+
+if [[ -f "$KEY" ]]; then
+  exit 0
+fi
+
+umask 077
+mkdir -p "$(dirname "$KEY")"
+
+# No passphrase: this has to run unattended, and the key is protected at rest by FileVault.
+# The comment in private_dot_ssh/config.tmpl says how to add one, and AddKeysToAgent plus
+# UseKeychain mean it would be entered once rather than every use.
+#
+# Comment carries the machine name so the enrolled keys are distinguishable at the forge,
+# which is the whole point of one key per machine.
+if ! ssh-keygen -t ed25519 -a 100 -N '' \
+  -C "{{ .chezmoi.username }}@$(scutil --get ComputerName 2>/dev/null || hostname -s)" \
+  -f "$KEY" >/dev/null; then
+  # Reported, never fatal. chezmoi stops at the first failing script, so exiting non-zero
+  # here would cost every later hook — the macOS defaults, the browser profiles, the
+  # security reminder — for a key that ./script/identity --check will report as missing
+  # anyway.
+  echo "[WARN] Could not generate an SSH key at $KEY; run ./script/identity --check." >&2
+  exit 0
+fi
+
+chmod 600 "$KEY"
+chmod 644 "$KEY.pub"
+
+cat >&2 <<EOF
+[OK] Generated an SSH key for this machine: $KEY
+     It will not be copied anywhere. Enrol the PUBLIC key below:
+
+$(cat "$KEY.pub")
+
+     GitHub:  https://github.com/settings/ssh/new
+     Then switch this checkout to ssh:
+       git remote set-url origin git@github.com:istvano/setup-dev-mac.git
+     Check the result with:  ./script/identity --check
+EOF
+
+exit 0
+{{- end }}

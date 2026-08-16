@@ -1807,3 +1807,44 @@ defaults it tests exercises a configuration nobody ships, which is how these two
 stayed unproven through every earlier run. It also forwards the negative explicitly:
 once a missing flag means "on", passing nothing for `--no-hardening` would have produced
 a hardened guest from a run that asked for the opposite.
+
+## ADR-042: mise owns the JVM ecosystem; SDKMAN is declined
+
+**Status:** accepted. Amends ADR-021.
+
+`java`, `maven`, `gradle` and `kotlin` are declared in
+`chezmoi/dot_config/mise/config.toml.tmpl` alongside node, go, pnpm, python and rust.
+Two JDKs are pinned — `temurin-21` first and therefore default, `temurin-17` because
+Couchbase SDK and connector work still spans it. `tests/render-brewfile.sh` refutes
+Homebrew-installed `maven`, `gradle`, `kotlin`, `openjdk` and `sdkman-cli`.
+
+SDKMAN was the preferred tool and was declined on three specific grounds, not on taste.
+
+**It cannot be installed within this repository's existing rules.** Neither `sdkman-cli`
+nor `sdkman` exists in homebrew-core, checked against the formulae API. That leaves a
+third-party tap — the route ADR-020 rejected for AeroSpace and tflint, and which Homebrew 6
+now gates behind per-item `brew trust` — or `curl … | bash`, which ADR-006 and `AGENTS.md`
+forbid as unreviewed remote-script execution. Adopting it therefore required suspending one
+of two standing decisions, for a capability already available.
+
+**Its installer writes to a file chezmoi owns.** SDKMAN appends `sdkman-init.sh` sourcing to
+`~/.zshrc`. A tool that rewrites the shell configuration this repository manages is the
+precise conflict that made Rancher Desktop expensive enough to drop in ADR-037, and it would
+recur on every apply.
+
+**mise already covers the ground.** Verified against its version index: `java` 26.0.2,
+`maven` 3.9.16, `gradle` 9.7.0, `sbt` 2.0.6, `scala` 3.8.4, `kotlin` 2.4.10, `jbang` 0.141.0.
+Per-project selection works the way SDKMAN users expect — `mise use java@temurin-17` writes
+the project's own pin — so nothing about the workflow is lost.
+
+### Why this is an amendment rather than a new rule
+
+ADR-021 already says one manager decides each version, and that a second installer is a
+second place the version is decided. The JVM was the one ecosystem where that rule had gone
+unstated, because only the JDK was declared and the build tools were absent entirely — so
+`mvn` and `gradle` were, in practice, whatever a project happened to find. Declaring them
+here closes that gap rather than opening a new question.
+
+`sbt` and `scala` are deliberately not declared yet. They are available from the same
+manager and should be added when Scala SDK or Spark connector work actually starts, rather
+than installed against the possibility.

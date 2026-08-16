@@ -140,6 +140,11 @@ else
 fi
 export VISUAL="$EDITOR"
 
+# ripgrep reads its configuration ONLY through this variable — there is no default path it
+# looks in. Without the export, ~/.config/ripgrep/ripgreprc is an inert file and rg silently
+# runs at its defaults, which is the kind of quiet no-op this repository treats as a bug.
+export RIPGREP_CONFIG_PATH="${XDG_CONFIG_HOME:-$HOME/.config}/ripgrep/ripgreprc"
+
 # --- Aliases -----------------------------------------------------------------
 
 # eza replaces ls. --icons=auto needs a Nerd Font, which core.Brewfile installs

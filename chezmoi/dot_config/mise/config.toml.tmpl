@@ -10,8 +10,28 @@ idiomatic_version_file_enable_tools = ["node", "python", "java", "go"]
 [tools]
 node = "24"
 go = "1.25"
-java = "temurin-21"
 pnpm = "10"
+# Python was listed in idiomatic_version_file_enable_tools above but never in [tools], so
+# mise honoured a .python-version and installed nothing — `python3` resolved to Apple's
+# system build, which is not a runtime anyone chose. uv stays the project-level tool for
+# dependencies and virtualenvs; this pins the interpreter underneath it.
+python = "3.13"
+# The JVM ecosystem, all of it, from the same manager that owns every other language.
+#
+# SDKMAN is the usual answer here and was considered. It is not in homebrew-core, so
+# installing it means either a third-party tap (which ADR-020 rejected for AeroSpace and
+# tflint) or curl-pipe-bash (which ADR-006 and AGENTS.md forbid) — and its installer
+# appends its own init to ~/.zshrc, the file chezmoi owns, which is the same fight that
+# made Rancher Desktop expensive enough to drop in ADR-037. mise covers the same ground,
+# so the JVM is not a special case needing a second manager. See the ADR-021 amendment.
+#
+# Two JDKs: 21 is the default because it is first, 17 is present because Couchbase SDK and
+# connector work still spans it. `mise use java@temurin-17` in a project switches it, which
+# is the per-project selection SDKMAN users expect.
+java = ["temurin-21", "temurin-17"]
+maven = "3.9"
+gradle = "9"
+kotlin = "2.4"
 # mise manages Rust by driving rustup and installing rustup itself when absent,
 # so Homebrew does not also install one. See ADR-021.
 rust = "stable"

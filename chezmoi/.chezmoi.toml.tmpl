@@ -13,6 +13,26 @@
 {{- /* Defaults to true, matching ./bootstrap. This prompt is only reached by a direct
        `chezmoi init` that bypassed bootstrap; bootstrap writes the value itself. */ -}}
 {{- $applyMacOSDefaults := promptBoolOnce . "applyMacOSDefaults" "Apply conservative macOS defaults" true -}}
+{{- /* Machine identity, so one repository can serve several Macs.
+
+       scutil rather than `hostname`: on macOS `hostname` reports whatever the current
+       network hands back and changes on a different Wi-Fi, so it is not a stable key.
+       ComputerName is what the user set in System Settings and what stays put.
+
+       ephemeral is detected, never asked: a container, a CI runner or a Codespace should
+       get a reduced environment without a second code path, and there is nobody there to
+       answer a prompt. Templates can gate GUI casks, secrets and macOS defaults on it.
+
+       work/personal is deliberately NOT a third flag here. workGitEmail already decides
+       that split and drives dot_config/git/config-work.tmpl; a second mechanism deciding
+       the same thing is how the two drift apart. */ -}}
+{{- $machineName := "" -}}
+{{- if eq .chezmoi.os "darwin" -}}
+{{-   $machineName = output "scutil" "--get" "ComputerName" | trim -}}
+{{- else -}}
+{{-   $machineName = .chezmoi.hostname -}}
+{{- end -}}
+{{- $ephemeral := or (env "CI" | not | not) (env "CODESPACES" | not | not) -}}
 {{- /* .chezmoiroot resolves .chezmoi.sourceDir to <repo>/chezmoi. Record the
        repository root so this file agrees with what ./bootstrap writes. */ -}}
 sourceDir = {{ dir .chezmoi.sourceDir | quote }}
@@ -39,3 +59,5 @@ runtime = {{ $runtime | quote }}
 passwordManager = {{ $passwordManager | quote }}
 firewall = {{ $firewall | quote }}
 applyMacOSDefaults = {{ $applyMacOSDefaults }}
+machineName = {{ $machineName | quote }}
+ephemeral = {{ $ephemeral }}

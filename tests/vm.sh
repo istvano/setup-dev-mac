@@ -355,4 +355,17 @@ assert_match 'SUBSTRATE_REGISTRY_REQUIRED' "$ROOT/script/container-substrate"
 # runtime and fail for reasons unrelated to it. TASKS.md instructs --runtime rancher.
 assert_match 'RUNTIME" != colima' "$ROOT/script/test-install"
 
+# Substrate sizing is derived from the machine, not hardcoded for one of them.
+#
+# The constants suited the 32 GB build machine, with a comment telling the operator to
+# "raise them on the 128 GB target" — so the target either ran a VM sized for a quarter of
+# its memory, or SUBSTRATE_VM_* had to be exported on every invocation, because nothing
+# persisted them. Forgetting made --verify report drift against numbers that were never
+# right for that machine.
+assert_match '^detect_memory_gb\(\) \{$' "$ROOT/script/container-substrate"
+assert_match '^detect_cpus\(\) \{$' "$ROOT/script/container-substrate"
+assert_match 'sysctl -n hw\.memsize' "$ROOT/script/container-substrate"
+# The env override must survive, because a machine sometimes needs a deliberate number.
+assert_match 'SUBSTRATE_VM_MEMORY_GB:-\$\(detect_memory_gb\)' "$ROOT/script/container-substrate"
+
 echo 'Local macOS VM and container substrate: OK'

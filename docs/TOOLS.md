@@ -73,11 +73,12 @@ Installed by `./bootstrap install` with no `--profiles` argument.
 |---|---|---|
 | `openssl@3` | TLS, certificate and cryptographic inspection toolkit. | formula |
 
-### `productivity` — 1 package(s)
+### `productivity` — 2 package(s)
 
 | Tool | What it is for | Kind |
 |---|---|---|
 | `betterdisplay` | Free native display manager: HiDPI, DDC brightness and monitor input switching. | cask |
+| `obsidian` | Local-file Markdown knowledge base. Notes live as plain files on disk. | cask |
 
 ### `backup` — 2 package(s)
 
@@ -126,11 +127,12 @@ defaults; see `./bootstrap --help` for the alternatives.
 | `docker-buildx` | Persistent BuildKit builders and cache mounts. | formula |
 | `docker-credential-helper` | Stores registry credentials in the macOS Keychain. | formula |
 
-### `password-bitwarden` — 1 package(s)
+### `password-bitwarden` — 2 package(s)
 
 | Tool | What it is for | Kind |
 |---|---|---|
 | `bitwarden` | Free native password manager with browser integration. | cask |
+| `bitwarden-cli` | Reads the age identity out of the vault during setup. | formula |
 
 ### `firewall-lulu` — 1 package(s)
 
@@ -238,14 +240,13 @@ Selected explicitly with `--profiles`. Nothing here is installed by default.
 | `duckdb` | In-process analytical SQL database CLI. | formula |
 | `dbeaver-community` | Native GUI client for inspecting project databases. | cask |
 
-### `productivity-extra` — 9 package(s)
+### `productivity-extra` — 8 package(s)
 
 | Tool | What it is for | Kind |
 |---|---|---|
 | `firefox@developer-edition` | Optional native browser with an isolated development profile. | cask |
 | `google-chrome` | Optional native browser for compatibility and profile separation. | cask |
 | `tailscale-app` | Optional native VPN client requiring macOS network integration. | cask |
-| `obsidian` | Optional native local-file Markdown knowledge base. | cask |
 | `iina` | Optional native macOS media player. | cask |
 | `iterm2` | Mature terminal emulator; alternative to ghostty, not a replacement for it. | cask |
 | `obs` | Free GPL alternative if a non-paid recorder is needed; heavy for short clips. | cask |
@@ -297,8 +298,8 @@ Chosen instead of the defaults above, never alongside them.
 
 | | Packages |
 |---|---|
-| Default selection | 68 |
-| Everything declared | 120 |
+| Default selection | 70 |
+| Everything declared | 121 |
 
 Language runtimes are not here: Node, Go, Java, Rust and pnpm come from mise
 and Python from uv, so they are declared in `chezmoi/dot_config/mise/`

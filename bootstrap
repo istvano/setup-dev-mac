@@ -234,12 +234,50 @@ Bootstrap trust set:
 EOF
 }
 
+# Install the Command Line Tools without a GUI detour.
+#
+# This used to run `xcode-select --install` and then die: "Complete the Apple installer,
+# then rerun". That made the FIRST `./bootstrap install` on a clean Mac always exit
+# non-zero — the one command a new machine runs, failing by design, with the two-pass
+# requirement recorded only in docs/TESTING.md, a maintainer document.
+#
+# `softwareupdate` can install the same package headlessly, but only when the on-demand
+# sentinel file exists: without it the Command Line Tools package is not offered in the
+# list at all. That is the trick script/test-install has used to provision guests since
+# the VM harness was built, so it is well exercised here.
+#
+# The GUI path remains as a fallback. If softwareupdate offers nothing — a macOS version
+# that changed the label, or a machine that already has full Xcode — the old behaviour is
+# exactly right, so it is kept rather than replaced.
 ensure_xcode_clt() {
   if xcode-select -p >/dev/null 2>&1; then
     success "Xcode Command Line Tools are installed."
     return
   fi
-  log "Starting the Apple Xcode Command Line Tools installer."
+
+  local sentinel=/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+  local label=''
+  log "Installing the Xcode Command Line Tools. This needs sudo and takes a few minutes."
+  sudo touch "$sentinel" 2>/dev/null || true
+  label="$(softwareupdate -l 2>/dev/null |
+    sed -n 's/^ *\* Label: \(Command Line Tools for Xcode.*\)$/\1/p' | tail -1)"
+
+  if [[ -n "$label" ]]; then
+    log "Installing: $label"
+    if sudo softwareupdate -i "$label"; then
+      sudo rm -f "$sentinel" 2>/dev/null || true
+      # Read back rather than trusting the installer's exit status: /usr/bin/git and
+      # /usr/bin/python3 are stubs until this is present, so a false success here surfaces
+      # later as something unrelated.
+      xcode-select -p >/dev/null 2>&1 ||
+        die "softwareupdate reported success but xcode-select -p still fails."
+      success "Xcode Command Line Tools are installed."
+      return
+    fi
+  fi
+
+  sudo rm -f "$sentinel" 2>/dev/null || true
+  warn "softwareupdate could not install them; falling back to the Apple installer."
   xcode-select --install >/dev/null 2>&1 || true
   die "Complete the Apple installer, then rerun ./bootstrap install."
 }
@@ -387,6 +425,30 @@ toml_quote() {
   printf '"%s"' "$value"
 }
 
+# Machine identity, mirroring chezmoi/.chezmoi.toml.tmpl.
+#
+# scutil rather than `hostname`: on macOS `hostname` reflects whatever the current network
+# hands back and changes with the Wi-Fi, so it cannot be a stable key for per-machine
+# configuration. ComputerName is what System Settings shows and what stays put.
+#
+# Both this and the template write these keys, which is the duplication TASKS.md already
+# records for the other twelve. Kept consistent by tests/placement-policy.sh until the two
+# writers are collapsed into one.
+machine_name() {
+  scutil --get ComputerName 2>/dev/null || hostname -s 2>/dev/null || echo unknown
+}
+
+# Detected, never asked. A CI runner or a container has nobody to answer a prompt, and
+# templates use this to skip GUI casks, secrets and macOS defaults rather than needing a
+# separate code path for those hosts.
+is_ephemeral() {
+  if [[ -n "${CI:-}" || -n "${CODESPACES:-}" ]]; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 write_chezmoi_config() {
   # Separate declarations: bash expands every argument to `local` before the
   # builtin assigns any of them, so a later value cannot reference an earlier one.
@@ -446,6 +508,8 @@ runtime = $(toml_quote "$RUNTIME")
 passwordManager = $(toml_quote "$PASSWORD_MANAGER")
 firewall = $(toml_quote "$FIREWALL")
 applyMacOSDefaults = $APPLY_MACOS_DEFAULTS
+machineName = $(toml_quote "$(machine_name)")
+ephemeral = $(is_ephemeral)
 EOF
     chmod 600 "$config"
   )

@@ -337,6 +337,82 @@ assert_match 'script/macos-defaults" \| quote \}\} apply --yes' \
 assert_match '\.docker' "$ROOT/chezmoi/.chezmoiignore"
 assert_match 'ne \.runtime "colima"' "$ROOT/chezmoi/.chezmoiignore"
 
+# neovim is $EDITOR in both shells and core.editor in git, so it must not be unconfigured.
+#
+# It was, for the entire life of the repository: every commit message, `git rebase -i`, and
+# quick fix over ssh opened a bare editor with no clipboard integration on a machine whose
+# shell config argues about keymaps.
+assert_match '^opt\.clipboard = "unnamedplus"$' "$ROOT/chezmoi/dot_config/nvim/init.lua"
+
+# And it must stay plugin-free. ADR-031 rejects fetching unreviewed code at runtime outside
+# the Homebrew trust boundary, and a neovim plugin manager is exactly that.
+#
+# Comment lines are skipped, because the config explains WHY it has no plugin manager and
+# names the tools it is refusing — so a plain refute_match matched that prose and failed on
+# the correct file. That is the same false positive tests/chezmoi-templates.sh records for
+# its `*fi*` glob and tests/vm.sh for `"$*"`: a check that cannot tell code from the
+# explanation of the code reports the fixed state as broken, gets deleted, and then the real
+# regression goes unnoticed.
+nvim_plugins="$(awk '
+  /^[[:space:]]*--/ { next }
+  /lazy\.nvim|packer|vim-plug|Plug / { printf "  %d: %s\n", FNR, $0 }
+' "$ROOT/chezmoi/dot_config/nvim/init.lua")"
+[[ -z "$nvim_plugins" ]] || {
+  echo 'nvim/init.lua references a plugin manager:' >&2
+  echo "$nvim_plugins" >&2
+  echo 'ADR-031: no runtime fetching of unreviewed code.' >&2
+  exit 1
+}
+
+# Machine identity is recorded by BOTH config writers, or per-machine templates silently
+# see an empty value depending on which path created the config. bootstrap writes it on the
+# normal install; .chezmoi.toml.tmpl on a direct `chezmoi init`.
+#
+# scutil, never `hostname`: on macOS `hostname` follows the network and changes with the
+# Wi-Fi, which makes it useless as a stable key for per-machine configuration.
+assert_match '^machineName = ' "$ROOT/chezmoi/.chezmoi.toml.tmpl"
+assert_match '^ephemeral = ' "$ROOT/chezmoi/.chezmoi.toml.tmpl"
+assert_match 'machineName = \$\(toml_quote' "$ROOT/bootstrap"
+assert_match 'ephemeral = \$\(is_ephemeral\)' "$ROOT/bootstrap"
+assert_match 'scutil --get ComputerName' "$ROOT/bootstrap"
+refute_match 'output "hostname"' "$ROOT/chezmoi/.chezmoi.toml.tmpl"
+
+# The age identity is RESTORED before it is minted, and the two halves of identity are
+# treated differently on purpose.
+#
+# age files encrypted to a lost identity are unrecoverable, so a new Mac that quietly mints
+# a second identity has destroyed access to every existing secret — the old hook did exactly
+# that, and printed "back this key up now" at the point it was already too late for the
+# previous machine. SSH is the opposite: a signing key is simply re-enrolled, so generating
+# per machine is strictly better than moving one around.
+assert_match 'bw get notes' "$ROOT/chezmoi/run_once_after_15_bootstrap-age-key.sh.tmpl"
+assert_match 'locally-generated' "$ROOT/chezmoi/run_once_after_15_bootstrap-age-key.sh.tmpl"
+assert_match 'bitwarden-cli' "$ROOT/profiles/password-bitwarden.Brewfile"
+
+# The marker must be a FAILURE in the report, not a warning: a key existing only on this
+# machine is one disk failure from taking every encrypted file with it.
+assert_match 'fail "This age identity was generated locally' "$ROOT/script/identity"
+assert_match '^ *--restore) MODE="restore" ;;$' "$ROOT/script/identity"
+assert_match 'script/identity" --check' "$ROOT/script/verify"
+
+# SSH keys are generated per machine and stay on it.
+#
+# Bitwarden's SSH agent was the previous design and is deliberately gone: a key that never
+# leaves the machine that made it cannot be exposed by losing a different machine, and the
+# agent could not sign commits at all — with gpg.format=ssh and no gpg.ssh.program, git
+# shells out to `ssh-keygen`, which reads $SSH_AUTH_SOCK and never parses ~/.ssh/config, so
+# IdentityAgent had no effect and every commit failed. Verified by signing a commit with no
+# agent present and the key on disk: exit 0.
+refute_match 'bitwarden-ssh-agent\.sock' "$ROOT/chezmoi/private_dot_ssh/config.tmpl"
+assert_match '^ *IdentityFile ~/\.ssh/id_ed25519$' "$ROOT/chezmoi/private_dot_ssh/config.tmpl"
+assert_match 'ssh-keygen -t ed25519' \
+  "$ROOT/chezmoi/run_onchange_after_12_ssh-key.sh.tmpl"
+
+# 1Password keeps its agent: there the private keys genuinely live in the agent, and a file
+# on disk would be a second competing identity.
+assert_match 'IdentityAgent "~/Library/Group Containers' \
+  "$ROOT/chezmoi/private_dot_ssh/config.tmpl"
+
 # An existing /etc/pam.d/sudo_local must be preserved before it is replaced. The presence
 # check only recognises `auth sufficient pam_tid.so`, so a file using `required`,
 # pam_watchid or any other local customisation was overwritten by the stock template with

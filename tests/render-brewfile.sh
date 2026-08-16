@@ -52,7 +52,13 @@ grep -q 'brew "git-delta"' "$TMP/Brewfile" # replaces difftastic
 refute_match '^brew "(htop|tree|difftastic|wget)"' "$TMP/Brewfile"
 
 # Language runtimes come from mise, not Homebrew (ADR-021).
-refute_match '^brew "(rustup|pnpm)"' "$TMP/Brewfile"
+#
+# The JVM entries were added when mise took over the whole JVM ecosystem rather than just
+# the JDK. Two managers deciding one version is the precise failure ADR-021 exists to
+# prevent: `mvn` on PATH from Homebrew while mise pins 3.9 in the project means the build
+# runs under whichever won the PATH race, and nothing reports the disagreement.
+refute_match '^brew "(rustup|pnpm|maven|gradle|kotlin|openjdk|openjdk@[0-9]+|sdkman-cli)"' \
+  "$TMP/Brewfile"
 
 # Security tooling is opt-in; the default keeps the general crypto toolkit, plus
 # sops, which pairs with the age identity every apply creates.
@@ -109,6 +115,18 @@ refute_match '^brew "(grype|osv-scanner|trufflehog|syft|dive)"' "$TMP/Brewfile"
 # default trusted computing base, from 51 to 64, and it was a reviewed decision rather
 # than drift — the machine exists for Docker and Kubernetes development, so a default
 # that cannot do Kubernetes is not a smaller default, it is an incomplete one.
+#
+# The default is now 70 — the ceiling exactly, with no headroom left. Two entries were
+# added after that raise, each for a reason recorded where it lives:
+#
+#   bitwarden-cli  the age identity is restored from the vault on a new machine, and the
+#                  desktop app cannot be scripted. Without it the only path is minting a
+#                  fresh identity, which makes existing SOPS files unreadable.
+#   obsidian       moved out of productivity-extra so a new Mac has it on day one.
+#
+# So the NEXT addition fails this test, and that is the mechanism working rather than an
+# obstacle to route around. Raising the number again is an ADR, and the argument has to be
+# about what belongs on the host by default — not about making room.
 #
 # Previously raised from 50 to 55 by ADR-037, and worth recording WHY, because that
 # number moved in the opposite direction to the thing it is a proxy for.
