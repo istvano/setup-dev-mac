@@ -299,9 +299,38 @@ registry_container() {
     grep -qxE "k3d-$REGISTRY|$REGISTRY"
 }
 
+# The name the registry container ACTUALLY has, out of the two spellings accepted above.
+#
+# registry_container() deliberately matches either `k3d-$REGISTRY` or the bare `$REGISTRY`,
+# so a registry created by hand is found rather than duplicated. Everything downstream then
+# inspected only the prefixed name, which meant a hand-created container was found by one
+# function and invisible to the next.
+registry_container_name() {
+  local name
+  for name in "k3d-$REGISTRY" "$REGISTRY"; do
+    if docker inspect "$name" >/dev/null 2>&1; then
+      printf '%s' "$name"
+      return 0
+    fi
+  done
+  return 1
+}
+
 registry_publishes_loopback() {
-  local ports
-  ports="$(docker inspect "k3d-$REGISTRY" --format '{{ json .HostConfig.PortBindings }}' 2>/dev/null || true)"
+  local ports name
+  # Inspect whichever name exists, not just the prefixed one.
+  #
+  # Inspecting only `k3d-$REGISTRY` made a bare-name container fail `docker inspect`, which
+  # left $ports empty, which returned 1 — and every caller reads 1 as "published on every
+  # interface". So a registry correctly bound to 127.0.0.1 was reported as reachable from
+  # every network this machine joins, permanently, and `apply` then offered to fix it with
+  # `k3d registry delete` on a container k3d does not manage: a remediation that cannot
+  # work, accepted after the operator consented to losing the cache.
+  #
+  # A security check that fails loudly on the SAFE configuration is worse than no check,
+  # because the noise is what teaches people to ignore it.
+  name="$(registry_container_name)" || return 1
+  ports="$(docker inspect "$name" --format '{{ json .HostConfig.PortBindings }}' 2>/dev/null || true)"
   [[ -n "$ports" ]] || return 1
   # A binding with an empty or 0.0.0.0 HostIp is published to every interface.
   case "$ports" in
@@ -486,6 +515,22 @@ apply_registry() {
     warn "Registry $REGISTRY is published on all interfaces, not $REGISTRY_HOST.
 A Docker port mapping without a host part binds 0.0.0.0, so this unauthenticated
 image registry is reachable from every network this machine joins."
+
+    # Only k3d's own registries can be recreated by k3d.
+    #
+    # The offer below runs `k3d registry delete`, which only knows containers k3d created.
+    # A registry made by hand under the bare name is found by registry_container() but is
+    # not k3d's, so the delete fails and the recreate never happens — after the operator
+    # has already agreed to lose the cache. Reporting what to do beats performing a fix
+    # that cannot work.
+    if [[ "$(registry_container_name)" != "k3d-$REGISTRY" ]]; then
+      warn "This registry was not created by k3d, so it cannot be recreated here.
+Fix it by hand, then re-run:
+  docker rm -f $(registry_container_name)
+  ./script/container-substrate"
+      return 0
+    fi
+
     if confirm "Recreate it on $REGISTRY_HOST? Cached images are lost but re-pullable."; then
       k3d registry delete "$REGISTRY"
       log "Recreating registry $REGISTRY on $REGISTRY_HOST:$REGISTRY_PORT"

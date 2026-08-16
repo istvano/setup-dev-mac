@@ -94,7 +94,15 @@ PY
 refute_match 'uninstall-extension' "$ROOT/script/vscode-extensions"
 
 # --force is what makes a repeated apply a cheap no-op rather than a prompt.
-assert_match 'install-extension.*--force' "$ROOT/script/vscode-extensions"
+# The REAL install line, not the dry-run printf.
+#
+# `install-extension.*--force` matched three lines: a comment, the actual `code
+# --install-extension "$entry" --force` at :133, and the dry-run `printf` at :144 which
+# only prints that command. So --force could have been dropped from the line that runs —
+# leaving `code` prompting for confirmation on every extension during an unattended apply —
+# while this test stayed green off the string in the printf.
+# shellcheck disable=SC2016  # a literal $ in the search pattern, not an expansion
+assert_match '^ *code --install-extension "\$entry" --force$' "$ROOT/script/vscode-extensions"
 
 # The chezmoi hook must embed the declared list, or editing the list changes
 # nothing until an unrelated hook happens to change.

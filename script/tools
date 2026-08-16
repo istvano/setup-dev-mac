@@ -93,8 +93,24 @@ emit_table() {
   ' "$fragment"
 }
 
+# `|| true`, NOT `|| printf '0'`.
+#
+# `grep -c` PRINTS the count and exits 1 when that count is zero, so the fallback appended
+# a second zero and the result was the two-line string "0\n0". Every consumer then went
+# wrong at once: the `[[ "$count" != 0 ]]` skip guard saw a non-empty string that is not
+# "0" and emitted a heading reading "— 0\n0 package(s)" with an empty table, and the totals
+# arithmetic died with `bad math expression: operator expected at '0'` under set -e — so
+# `./script/tools --check` failed with a bash error rather than a diagnosis.
+#
+# Latent rather than live only because every fragment currently declares at least one
+# entry. Commenting out the last package in a file during review is enough to trigger it.
+# The ${n:-0} matters as much as the `|| true`: a MISSING file makes grep print nothing at
+# all rather than "0", so the variable would be empty and the arithmetic would fail with a
+# different message for a different reason. Both paths now yield a number.
 count_entries() {
-  grep -cE '^(brew|cask) "' "$1" 2>/dev/null || printf '0'
+  local n
+  n="$(grep -cE '^(brew|cask) "' "$1" 2>/dev/null || true)"
+  printf '%s' "${n:-0}"
 }
 
 # shellcheck disable=SC2016

@@ -201,7 +201,25 @@ done < <(
 }
 # The marker is only meaningful to a reader of platform-gaps, so a new one would be
 # decoration that looks load-bearing.
-refute_match '#[[:space:]]*arm64-only\b' "$ROOT/profiles"
+#
+# Matched on DECLARATION lines, which is the only place a marker means anything, and where
+# ADR-013 documents it living: at the END of a purpose comment, as in
+# `cask "lm-studio" # Local inference runtime. arm64-only`. The previous pattern required
+# arm64-only to be the first token after `#`, so the marker could be reintroduced in
+# exactly its documented form and the refutation would not fire.
+#
+# A blanket search would be wrong in the other direction: profiles/local-llm.Brewfile
+# explains the removed platform-gaps in prose and names the marker while doing so. A check
+# that cannot tell a declaration from the explanation of one fails on the correct file.
+marker_lines="$(awk '
+  /^[[:space:]]*(brew|cask) "/ && /arm64-only/ { printf "  %s:%d: %s\n", FILENAME, FNR, $0 }
+' "$ROOT"/profiles/*.Brewfile)"
+[[ -z "$marker_lines" ]] || {
+  echo 'A package declaration carries an arm64-only marker:' >&2
+  echo "$marker_lines" >&2
+  echo 'Nothing reads it since script/platform-gaps was removed (ADR-036).' >&2
+  exit 1
+}
 
 # No Rosetta Homebrew may be reintroduced as a fallback. Left unchecked, a
 # well-meaning "support both prefixes" edit silently restores it, and the symptom is

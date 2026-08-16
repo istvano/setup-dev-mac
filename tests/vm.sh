@@ -276,8 +276,14 @@ while IFS= read -r match; do
   $match
 Report the state and name the command instead; the VM is a standing 14 GiB cost."
 done < <(awk '/^[[:space:]]*#/ { next } /colima start/ { printf "%d: %s\n", FNR, $0 }' "$hook")
-# It must still report the substrate rather than ignoring it.
-assert_match 'container-substrate' "$hook"
+# It must still report the substrate rather than ignoring it — and the assertion has to
+# name the INVOCATION, not the word.
+#
+# `assert_match 'container-substrate'` also matched the hook's own echo strings ("[INFO]
+# Container substrate not set up: ./script/container-substrate"), so both real `--verify`
+# calls could have been deleted while the hook kept printing advice about a substrate it no
+# longer checked, and this test would not have noticed.
+assert_match 'script/container-substrate" \| quote \}\} --verify' "$hook"
 
 # The harness must prove chezmoi finished, not merely that bootstrap exited. An install
 # interrupted inside a run_onchange hook leaves the rest pending, and without this gate a

@@ -1,8 +1,47 @@
 #!/usr/bin/env bash
+# Pull the repository and apply the updated state, after showing what will change.
+#
+# Packages are deliberately NOT upgraded here. `brew upgrade` is a separate, reviewed
+# decision — see script/update-report, which reports what is out of date and changes
+# nothing.
 set -Eeuo pipefail
+IFS=$'\n\t'
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
 source "$ROOT/script/lib/common.sh"
+
+# --no-pager, matching script/setup.
+#
+# This script had no argument parsing at all, so `./script/update --no-pager` — the obvious
+# thing to type, and the flag its sibling documents — was silently ignored and the pager
+# still captured the session. The comment in script/setup records the observed failure:
+# under `script`, or any recorded or piped run, the pager takes over and there is no
+# obvious way out. The run then reached confirm(), which fails closed without a terminal,
+# so it ended in "Cancelled" after the pager had already hijacked the terminal.
+NO_PAGER=()
+case "${1:-}" in
+  --no-pager)
+    NO_PAGER=(--no-pager)
+    shift
+    ;;
+  --help | -h)
+    echo 'Usage: script/update [--no-pager]'
+    echo '  --no-pager  print the diff without a pager, for recorded runs'
+    exit 0
+    ;;
+  "") ;;
+  *) die "Unknown option: $1" ;;
+esac
+
 git -C "$ROOT" pull --ff-only
-chezmoi diff
+
+# One source for BOTH commands.
+#
+# `chezmoi diff` ran against the CONFIGURED source directory while `chezmoi apply` was
+# given `--source "$ROOT"`. When those differ — a second checkout, a moved directory, a
+# machine whose chezmoi.toml still points at an older path — the operator reviewed one tree
+# and applied another. Reviewing the wrong diff is worse than showing none, because it
+# produces confident consent to a change nobody saw.
+chezmoi diff --source "$ROOT" "${NO_PAGER[@]+"${NO_PAGER[@]}"}"
 confirm "Apply updated workstation state?" || die "Cancelled."
 chezmoi apply --source "$ROOT"
