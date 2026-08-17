@@ -91,6 +91,14 @@ installs the bootstrap trust set, asks for your git identity, enables the applic
 firewall, then hands over to chezmoi to apply the dotfiles and install every declared
 package.
 
+Two of those steps download outside Homebrew, so they are worth recognising rather than
+wondering about. chezmoi installs **tart**, the VM engine the test harness runs on, by
+fetching the release pinned in `vm/tart.lock` and checking its SHA-256 and Apple Team
+Identifier before installing — it is not a Homebrew package, because that would need a tap
+(ADR-020). With the `kubernetes` profile it also installs six **kubectl plugins** through
+krew into `~/.krew/bin`. Neither is fatal: if GitHub is unreachable, the install reports it
+and carries on, and the retry command is printed.
+
 **You will be asked for your password more than once**, and one of those prompts arrives
 well into the package installation rather than at the start. That is expected.
 
