@@ -355,6 +355,40 @@ assert_match 'script/macos-defaults" \| quote \}\} apply --yes' \
 assert_match '\.docker' "$ROOT/chezmoi/.chezmoiignore"
 assert_match 'ne \.runtime "colima"' "$ROOT/chezmoi/.chezmoiignore"
 
+# The snapshot records the SELECTION, and never the four per-machine keys.
+#
+# chezmoi.toml lives only on the machine that wrote it, so losing it meant re-answering
+# twelve prompts from memory. Copying the file verbatim would be the wrong fix: sourceDir is
+# that checkout's absolute path, machineName and ephemeral are detected rather than chosen,
+# and with ssh signing the gitSigningKey is generated per machine by design. The replayable
+# bootstrap line carries what transfers and omits what must not.
+assert_match '== Workstation selection ==' "$ROOT/script/snapshot"
+assert_match 'Replay this selection on another Mac' "$ROOT/script/snapshot"
+assert_match 'script/snapshot --compare' "$ROOT/script/snapshot"
+
+# Comment lines are skipped, for the third time in this file and the same reason each time:
+# the code EXPLAINS that sourceDir must not be recorded, so a plain refute_match matched the
+# explanation and failed on the correct file. A check that cannot tell code from prose about
+# the code reports the fix as the bug.
+snapshot_leaks="$(awk '
+  /^[[:space:]]*#/ { next }
+  /sourceDir|gitSigningKey/ { printf "  %d: %s\n", FNR, $0 }
+' "$ROOT/script/snapshot")"
+[[ -z "$snapshot_leaks" ]] || {
+  echo 'script/snapshot records a key that must not travel between machines:' >&2
+  echo "$snapshot_leaks" >&2
+  echo 'sourceDir is this checkout path; an ssh gitSigningKey is generated per machine.' >&2
+  exit 1
+}
+
+# bootstrap asks for the password once, up front, rather than at three unpredictable moments.
+# SECURITY.md and docs/TESTING.md have told the operator to do this by hand all along.
+assert_match '^prime_sudo\(\) \{$' "$ROOT/bootstrap"
+assert_match '^ *prime_sudo$' "$ROOT/bootstrap"
+# No keepalive: suppressing the post-bundle prompt means holding root unattended for the
+# 30-45 minutes brew bundle takes, which is a worse trade than one expected prompt.
+refute_match 'while true.*sudo -n true|sudo.*keepalive' "$ROOT/bootstrap"
+
 # Documentation must not contradict the code on the two claims that misled a reader most.
 #
 # README.md and docs/TESTING.md both stated `--runtime none` was the test-install default

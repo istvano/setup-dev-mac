@@ -46,6 +46,14 @@ FIREWALL="lulu"
 GIT_NAME="Workstation Test"
 GIT_EMAIL="test@example.invalid"
 KEEP=false
+# Whether to let bootstrap install the Command Line Tools itself.
+#
+# Default false, meaning this harness installs them first — which is faster and keeps the
+# normal run unattended. The cost is that bootstrap's own installer never executes: it
+# short-circuits on `xcode-select -p`, so the sentinel, the softwareupdate label scrape and
+# the read-back are only ever proven in THIS file's copy of that code. --skip-clt exercises
+# the real one against a genuinely bare guest.
+SKIP_CLT=false
 # True by default, matching bootstrap. A test whose defaults differ from the defaults it
 # is testing proves the wrong thing: the eight-package-profile runs were all passing
 # while the macOS defaults and the firewall went untested.
@@ -74,6 +82,11 @@ Usage: script/test-install [options]
   --with-macos-defaults      accepted and redundant; both are the default now
   --with-hardening           accepted and redundant; both are the default now
   --keep                     do not reset; run against the current test VM state
+  --skip-clt                 do not install the Command Line Tools here; let
+                             ./bootstrap do it, exercising its own installer.
+                             Run this one WITH THE VM WINDOW OPEN: bootstrap falls
+                             back to the GUI installer if softwareupdate offers no
+                             package, and an unattended run cannot answer that.
 
 Requires a sealed golden image. Build one once with:
   ./script/install-tart && ./script/vm build && ./script/vm seal
@@ -140,6 +153,10 @@ parse_args() {
         ;;
       --keep)
         KEEP=true
+        shift
+        ;;
+      --skip-clt)
+        SKIP_CLT=true
         shift
         ;;
       --help | -h)
@@ -584,7 +601,27 @@ run_install_test() {
   remote ./bootstrap plan
 
   step 'Xcode Command Line Tools'
-  ensure_guest_clt
+  if [[ "$SKIP_CLT" == true ]]; then
+    # Left to bootstrap on purpose, so ITS installer runs rather than this file's copy.
+    #
+    # Both implementations do the same three things — touch the on-demand sentinel, scrape
+    # the package label out of `softwareupdate -l`, then `sudo softwareupdate -i` it — and
+    # only this one had ever executed, because the harness always got there first and
+    # bootstrap short-circuits on `xcode-select -p`.
+    #
+    # The guest is pristine here: `vm seal` asserts the golden image has no Command Line
+    # Tools, so this is a genuinely bare machine rather than a simulation of one.
+    log "Skipping the harness CLT step; ./bootstrap will install them."
+    warn "If softwareupdate offers no package, bootstrap falls back to the GUI installer
+and exits. Watch the VM window — an unattended run cannot answer that dialog."
+    if "$ROOT/script/vm" ssh xcode-select -p >/dev/null 2>&1; then
+      warn "The guest ALREADY has the Command Line Tools, so bootstrap's installer will
+short-circuit and this run proves nothing about it. Use a pristine guest:
+  ./script/vm reset && ./script/test-install --skip-clt"
+    fi
+  else
+    ensure_guest_clt
+  fi
 
   step 'bootstrap install'
   log "Selection: profiles=$PROFILES shell=$SHELL_CHOICE runtime=$RUNTIME"

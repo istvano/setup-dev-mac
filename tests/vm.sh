@@ -361,6 +361,18 @@ assert_match 'SUBSTRATE_REGISTRY_REQUIRED' "$ROOT/script/container-substrate"
 # runtime and fail for reasons unrelated to it. TASKS.md instructs --runtime rancher.
 assert_match 'RUNTIME" != colima' "$ROOT/script/test-install"
 
+# --skip-clt exists, so bootstrap's own Command Line Tools installer can be exercised.
+#
+# The harness installs the CLT itself before running bootstrap, which makes bootstrap
+# short-circuit on `xcode-select -p` — so its sentinel, label scrape and read-back had never
+# executed, and were only ever proven in this harness's copy of the same code. The golden
+# image is genuinely CLT-free (see the seal assertion above), so a reset guest is the right
+# place to run it.
+assert_match '^ *--skip-clt)$' "$ROOT/script/test-install"
+assert_match '^SKIP_CLT=false$' "$ROOT/script/test-install"
+# The guard must be around the harness's own step, or the flag does nothing.
+assert_match 'SKIP_CLT" == true' "$ROOT/script/test-install"
+
 # Substrate sizing is derived from the machine, not hardcoded for one of them.
 #
 # The constants suited the 32 GB build machine, with a comment telling the operator to

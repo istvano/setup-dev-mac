@@ -18,21 +18,64 @@ command_exists brew || die "brew is required."
 
 STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/security-ai-workstation/snapshots"
 OUTPUT=""
+COMPARE=false
+
+usage() {
+  cat <<'EOF'
+Usage: script/snapshot [--output PATH]
+       script/snapshot --compare SNAPSHOT_A SNAPSHOT_B
+
+  (no argument)  record this machine to a dated file under
+                 ~/.config/security-ai-workstation/snapshots/
+  --output PATH  write the snapshot somewhere else
+  --compare      diff two snapshots, ignoring the timestamp line
+
+Fetch another machine's snapshot with:  ./script/sync-to-mac --fetch REMOTE LOCAL
+EOF
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --output)
-      [[ $# -ge 2 ]] || die "--output requires a path."
+      require_value "$1" "${2:-}"
       OUTPUT="$2"
       shift 2
       ;;
+    --compare)
+      COMPARE=true
+      shift
+      break
+      ;;
     --help | -h)
-      echo 'Usage: script/snapshot [--output PATH]'
+      usage
       exit 0
       ;;
     *) die "Unknown option: $1" ;;
   esac
 done
+
+# Compare two machines.
+#
+# Recording existed; comparing did not, so "why does the new Mac behave differently" had no
+# answer beyond reading two files side by side. The format is already diffable: the three
+# brew sections are sorted `name version` with no paths, no hostname and no $HOME, and
+# `macos-defaults --diff` prints only rows that differ from declared.
+#
+# Line 1 is the only machine-specific noise — a timestamp that differs on every run of every
+# machine — so it is stripped. Line 2 (macOS version and arch) is kept, because two machines
+# on different OS versions is signal, not noise.
+if [[ "$COMPARE" == true ]]; then
+  [[ $# -eq 2 ]] || die "--compare needs exactly two snapshot paths."
+  for snapshot in "$1" "$2"; do
+    [[ -r "$snapshot" ]] || die "Cannot read $snapshot"
+  done
+  log "Comparing $1 -> $2 (timestamps ignored)"
+  # `diff` exits 1 when files differ, which is the normal outcome here and not an error.
+  if diff -u <(sed '1d' "$1") <(sed '1d' "$2"); then
+    success 'The two snapshots are identical.'
+  fi
+  exit 0
+fi
 
 if [[ -z "$OUTPUT" ]]; then
   mkdir -p "$STATE_DIR"
@@ -43,6 +86,56 @@ fi
   printf '# Workstation snapshot %s\n' "$(date)"
   printf '# macOS %s (%s)\n\n' "$(sw_vers -productVersion)" "$(uname -m)"
 
+  # The SELECTION, and a command that reproduces it.
+  #
+  # Two reasons this belongs here. It makes a machine-to-machine diff readable: without it,
+  # two Macs differing by one profile show forty unexplained package differences. And it is
+  # the answer to "chezmoi.toml lives only on this machine" — losing that file used to mean
+  # re-answering twelve prompts from memory.
+  #
+  # The FILE is deliberately not copied. Four of its keys must not travel to another machine:
+  # `sourceDir` is this checkout's absolute path and moving it breaks every apply,
+  # `machineName` and `ephemeral` are detected rather than chosen, and with ssh signing the
+  # `gitSigningKey` is per-machine by design — script/identity exists to keep keys local.
+  # Every remaining key already has a bootstrap flag, so the selection replays as a command.
+  echo '== Workstation selection =='
+  selection=''
+  if command_exists chezmoi && command_exists jq; then
+    selection="$(chezmoi data 2>/dev/null || true)"
+  fi
+  # `.profiles` is tested rather than assumed. `chezmoi data` succeeds and returns its own
+  # built-in keys even on a machine this repository has never configured, so a non-empty
+  # result proves nothing — the first version printed the "Replay this selection" header
+  # with nothing under it on exactly that machine.
+  if [[ -n "$selection" ]] && jq -e '.profiles' <<<"$selection" >/dev/null 2>&1; then
+    jq -r '
+      "profiles           = " + (.profiles | join(",")),
+      "shell              = " + .shell,
+      "runtime            = " + .runtime,
+      "passwordManager    = " + .passwordManager,
+      "firewall           = " + .firewall,
+      "gitSigningMethod   = " + .gitSigningMethod,
+      "applyMacOSDefaults = " + (.applyMacOSDefaults | tostring),
+      "machineName        = " + (.machineName // "<unset>") + "   (per machine, not replayed)"
+    ' <<<"$selection"
+
+    echo
+    echo '# Replay this selection on another Mac:'
+    jq -r '"./bootstrap install --yes"
+      + " --profiles " + (.profiles | join(","))
+      + " --shell " + .shell
+      + " --runtime " + .runtime
+      + " --password-manager " + .passwordManager
+      + " --firewall " + .firewall
+      + " --git-signing-method " + .gitSigningMethod
+      + (if .applyMacOSDefaults then "" else " --no-macos-defaults" end)' <<<"$selection"
+    echo '# Identity is NOT replayed: --git-name/--git-email are yours to pass, the ssh'
+    echo '# signing key is generated per machine, and the age key comes from Bitwarden.'
+  else
+    echo '(no selection recorded: needs chezmoi, jq, and a configuration this repository applied)'
+  fi
+
+  echo
   echo '== Installed formulae =='
   brew list --formula --versions
 

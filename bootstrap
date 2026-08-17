@@ -231,6 +231,10 @@ Workstation bootstrap plan
 
 Bootstrap trust set:
   Xcode Command Line Tools, Homebrew, Git, GitHub CLI, age, git-delta and chezmoi
+
+Your password is asked for once immediately after you confirm, so the early
+privileged steps do not each prompt on their own. Expect ONE further prompt after
+the packages install: the macOS defaults run then, well past sudo's timeout.
 EOF
 }
 
@@ -515,6 +519,34 @@ EOF
   )
 }
 
+# Ask for the password once, at a predictable moment, instead of three times at random ones.
+#
+# Several early steps need sudo — the Command Line Tools installer, the Homebrew installer,
+# the application firewall — and each used to prompt on its own whenever its turn came.
+# Priming the timestamp collapses them into one prompt right after you have agreed to
+# proceed, which is also the moment you are still watching.
+#
+# What this does NOT fix, deliberately: apply hook 40 runs `macos-defaults apply` after
+# `brew bundle` has spent 30-45 minutes installing packages, which is many times sudo's
+# five-minute timestamp, so that prompt still arrives mid-run. A background keepalive would
+# suppress it by holding root authority unattended for the whole install — which is a worse
+# trade than one expected prompt, and contradicts the posture SECURITY.md takes about
+# privileged operations. docs/NEW-MACHINE.md warns the operator that it is coming.
+#
+# SECURITY.md and docs/TESTING.md already tell the operator to run `sudo -v` by hand before
+# recording a session, so that a password is never captured in a transcript. This makes the
+# code do what the documentation asked for.
+#
+# Non-fatal: a machine with passwordless sudo, or an operator who declines, should not lose
+# the run here. The individual sudo calls will prompt or fail on their own terms.
+prime_sudo() {
+  if sudo -v 2>/dev/null; then
+    log "sudo authorised; the early privileged steps will not prompt again."
+    return 0
+  fi
+  warn "Could not pre-authorise sudo. Individual steps will prompt as they need it."
+}
+
 main() {
   parse_args "$@"
   validate_choices
@@ -526,6 +558,7 @@ main() {
   [[ "$COMMAND" == plan ]] && exit 0
   require_supported_mac
   confirm "Proceed with bootstrap and chezmoi apply?" || die "Cancelled."
+  prime_sudo
   ensure_xcode_clt
   ensure_homebrew
   install_bootstrap_packages
