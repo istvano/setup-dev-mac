@@ -40,7 +40,9 @@ See [Architecture](docs/ARCHITECTURE.md) for the current design and
 
 **On a brand-new Mac, start at [docs/NEW-MACHINE.md](docs/NEW-MACHINE.md).** It covers what
 this section assumes you already have — a checkout, the Command Line Tools, and an identity —
-and lists what to export from the old machine *before* you wipe it.
+and separates the two starting points that get confused: adding a Mac while keeping the one
+you have, where only GPG material needs carrying across, and retiring the machine you are
+replacing, where a list of things must be rescued first.
 
 From nothing:
 

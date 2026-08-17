@@ -9,26 +9,53 @@ machine. This one does not assume anything.
 
 ---
 
-## 0. Before you wipe the old Mac
+## 0. Before you start
 
-Do this **first**. Software is reproducible from this repository; identity is not. Once the
-old machine is gone, anything in this list is gone with it.
+Software is reproducible from this repository; identity is not. Which work that implies
+depends on which of two situations you are in, and they are different jobs — read the one
+that applies and ignore the other.
+
+### Adding a Mac, and keeping the one you have
+
+The common case, and the safe one. The machine you already have keeps working and keeps its
+keys, so nothing has to be rescued and proceeding destroys nothing.
+
+- [ ] **Carry the GPG material across, if you sign commits with GPG.** This is the one thing
+      that cannot be regenerated: a new key is a new identity, and existing signatures do not
+      verify against it. Export the secret key, the ownertrust and a revocation certificate
+      from the machine that holds it — [Operations](OPERATIONS.md) has the commands. Check
+      the expiry while you are there (`gpg --list-secret-keys --keyid-format=long`); importing
+      a key that expires in a few weeks only moves the problem.
+- [ ] **Nothing to do about SSH.** The new Mac generates its own key and you enrol it
+      *alongside* the existing one. Both stay valid — that is the point of one key per
+      machine. Do not remove the old key from GitHub or from work.
+- [ ] **Nothing to do about the age key** *if this is the first Mac this repository has
+      provisioned* — there is no key yet, and the install mints the first one. Confirm by
+      running `cat ~/.config/age/keys.txt` on the existing machine: no such file means
+      nothing exists to lose. If it *does* print a key, treat it as precious and follow the
+      first checkbox in the next section instead.
+- [ ] **Optional, and worth it:** if the existing machine was provisioned by this repository,
+      copy `~/.config/chezmoi/chezmoi.toml` across. It records every answer — profiles,
+      shell, runtime, identity — and re-answering from memory is the most annoying avoidable
+      part of a rebuild. A machine that was never bootstrapped has no such file.
+
+### Retiring the machine you are replacing
+
+Only when the old Mac is actually going away. Once it is gone, anything in this list is gone
+with it.
 
 - [ ] **Confirm the age key is in Bitwarden.** `cat ~/.config/age/keys.txt` on the old Mac
       and check the same value is stored in the vault. Without it, every SOPS-encrypted file
       you own becomes permanently unreadable — nothing in this repository can recover it.
-
-      If that file does not exist, the old Mac was never provisioned by this repository and
-      there is no key to carry over. Nothing is at risk, and the new machine will mint the
-      first one — take the "first machine" branch in step 4.
-- [ ] **Export the GPG secret key, ownertrust and a revocation certificate**, if you sign
-      with GPG. See [Operations](OPERATIONS.md).
-- [ ] **Note which SSH public keys are enrolled** at GitHub and at work. The new Mac gets its
-      own key, so the old one should be *removed* from those services once you are done.
+      [Creating the `age-identity` item](MANUAL-SECURITY.md#creating-the-age-identity-item)
+      has the steps if it is not there yet.
+- [ ] **Export the GPG secret key, ownertrust and a revocation certificate.** See
+      [Operations](OPERATIONS.md).
+- [ ] **Note which SSH public keys are enrolled** at GitHub and at work. Remove the retired
+      machine's key from those services once the new one is enrolled *and* proven to work —
+      not before, or you lock yourself out of the thing you need in order to fix it.
 - [ ] **Export LuLu / Little Snitch rules** if you want to keep the answers you built up.
-- [ ] **Copy `~/.config/chezmoi/chezmoi.toml`** somewhere safe. It records every choice you
-      made — profiles, shell, runtime, identity — and re-answering from memory is the most
-      annoying avoidable part of a rebuild.
+- [ ] **Copy `~/.config/chezmoi/chezmoi.toml`** somewhere safe.
 - [ ] Check that anything you care about outside `$HOME` is in a backup.
 
 ---
@@ -143,26 +170,32 @@ advice for that selection — ignore it and confirm the agent is enabled instead
       Without `bw login`, `bw status` reports `unauthenticated` and `bw unlock` below answers
       `You are not logged in.` — clear enough, but only if you know the CLI is a separate
       login from the app.
-- [ ] **Restore the age key.** Expect the install to have *generated* a local one rather
-      than restoring it: the hook can only read the vault if `bw` is already unlocked, and
-      it runs without a terminal, so on a first run it almost always mints. That is why it
-      leaves a marker and why `./script/identity --check` reports a **failure** until the
-      key is the right one. Fix it now:
+- [ ] **Settle the age key.** Expect the install to have *generated* one rather than
+      restoring it: the hook can only read the vault if `bw` is already unlocked, and it runs
+      without a terminal, so on a first run it almost always mints. That is why it leaves
+      `~/.config/age/.locally-generated` behind, and why `./script/identity --check` reports a
+      **failure** until you resolve it. Which resolution is correct depends on whether an age
+      key already existed anywhere:
+
+      *No key existed — this is the first Mac this repository has provisioned.* Keep the
+      generated key and put it in the vault, which also makes every later machine a restore
+      rather than a decision:
+      [Creating the `age-identity` item](MANUAL-SECURITY.md#creating-the-age-identity-item)
+      covers which field it has to go in, and why an item that looks right in the wrong field
+      fails. Then `rm ~/.config/age/.locally-generated`.
+
+      *A key already existed, in the vault or on another Mac.* Replace the generated one with
+      it, **before encrypting anything**. A second identity is not an inconvenience: files
+      encrypted to the first key cannot be read with the second.
 
       ```bash
       export BW_SESSION="$(bw unlock --raw)"
       ./script/identity --restore
       ```
 
-      If this Mac is replacing another, do this **before encrypting anything**. A second
-      identity does not merely inconvenience you — files encrypted to the old key cannot be
-      read with the new one.
-
-      If this is genuinely your first machine, keep the generated key and store it instead:
-      [Creating the `age-identity` item](MANUAL-SECURITY.md#creating-the-age-identity-item)
-      has the steps, including which field it has to go in and why a correct-looking item in
-      the wrong field fails. Then delete `~/.config/age/.locally-generated` so the check
-      passes.
+      `--restore` asks before replacing an existing key, and when the vault holds no
+      `age-identity` item it fails with "Could not read Bitwarden item" having changed
+      nothing. So it is safe to run if you are unsure which case you are in.
 - [ ] **An SSH key is generated for this machine** and never leaves it. Each Mac has its own,
       which is the point: losing one machine means revoking one key.
 
