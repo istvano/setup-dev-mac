@@ -17,6 +17,10 @@ old machine is gone, anything in this list is gone with it.
 - [ ] **Confirm the age key is in Bitwarden.** `cat ~/.config/age/keys.txt` on the old Mac
       and check the same value is stored in the vault. Without it, every SOPS-encrypted file
       you own becomes permanently unreadable — nothing in this repository can recover it.
+
+      If that file does not exist, the old Mac was never provisioned by this repository and
+      there is no key to carry over. Nothing is at risk, and the new machine will mint the
+      first one — take the "first machine" branch in step 4.
 - [ ] **Export the GPG secret key, ownertrust and a revocation certificate**, if you sign
       with GPG. See [Operations](OPERATIONS.md).
 - [ ] **Note which SSH public keys are enrolled** at GitHub and at work. The new Mac gets its
@@ -154,9 +158,11 @@ advice for that selection — ignore it and confirm the agent is enabled instead
       identity does not merely inconvenience you — files encrypted to the old key cannot be
       read with the new one.
 
-      If this is genuinely your first machine, keep the generated key: store it in Bitwarden
-      as a secure note named `age-identity`, then delete
-      `~/.config/age/.locally-generated` so the check passes.
+      If this is genuinely your first machine, keep the generated key and store it instead:
+      [Creating the `age-identity` item](MANUAL-SECURITY.md#creating-the-age-identity-item)
+      has the steps, including which field it has to go in and why a correct-looking item in
+      the wrong field fails. Then delete `~/.config/age/.locally-generated` so the check
+      passes.
 - [ ] **An SSH key is generated for this machine** and never leaves it. Each Mac has its own,
       which is the point: losing one machine means revoking one key.
 
