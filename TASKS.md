@@ -117,6 +117,30 @@ and the weaker assertions (`vscode --force` satisfiable by the dry-run branch, t
       Verified by signing a commit with `SSH_AUTH_SOCK` unset and no agent running: exit 0.
       1Password keeps its agent, where the keys genuinely live in the agent.
 
+- [x] **The age restore from Bitwarden is verified, both call sites.** This was the one
+      unproven path that costs real data if wrong: a new Mac that mints a second identity
+      cannot read anything encrypted to the first.
+
+      Tested in the guest against a throwaway Bitwarden account holding a scratch key —
+      never the real vault, because that guest has passwordless sudo, a passphraseless
+      shared SSH key, and `bw login` persists credentials to a disk image that gets deleted.
+
+      Round trip, using the key the guest had already minted so nothing of value was
+      involved: stored it as an `age-identity` secure note, deleted the local copy, then
+
+      - `./script/identity --restore` returned the **same** public key
+        (`age1mnnlgyycud…`), mode 0600, marker removed, and `--check` went from FAIL to
+        all-PASS.
+      - The **hook's** own branch — the one a real `bootstrap install` runs — was exercised
+        by clearing chezmoi's `scriptState` bucket so `run_once` hook 15 re-ran with
+        `BW_SESSION` exported. It printed `Restored the age identity from Bitwarden` and
+        left no marker: it restored rather than minting.
+
+      Both implementations of `bw get notes` are therefore proven, not just the operator-
+      facing one. What is still unexercised is the failure path where the item exists but
+      the key sits in a custom field rather than the notes body — the hook hides that behind
+      `2>/dev/null` and it is indistinguishable from a locked vault.
+
 ## Configuration gaps still open
 
 - [ ] **`k9s` has no configuration**, and the `kubernetes` profile is a default that installs
