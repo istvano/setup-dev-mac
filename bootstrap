@@ -540,11 +540,27 @@ EOF
 # Non-fatal: a machine with passwordless sudo, or an operator who declines, should not lose
 # the run here. The individual sudo calls will prompt or fail on their own terms.
 prime_sudo() {
-  if sudo -v 2>/dev/null; then
+  # NOPASSWD is checked FIRST, because `sudo -v` does not honour it.
+  #
+  # Measured in the test guest, which has `NOPASSWD: ALL`: `sudo -n true` exits 0 while
+  # `sudo -n -v` fails with "a password is required". `-v` refreshes the credential
+  # timestamp, and that is a password operation regardless of what the command rules say.
+  # So on a passwordless machine the old order always fell through to the warning — and the
+  # warning was itself wrong there, promising prompts that will never come.
+  if sudo -n true 2>/dev/null; then
+    log "sudo needs no password on this machine; nothing to pre-authorise."
+    return 0
+  fi
+
+  if sudo -v; then
     log "sudo authorised; the early privileged steps will not prompt again."
     return 0
   fi
-  warn "Could not pre-authorise sudo. Individual steps will prompt as they need it."
+
+  # Reached when the operator declines, or there is no terminal to ask on. Not fatal: the
+  # steps that need sudo will ask, or fail, on their own terms — which is a better outcome
+  # than aborting an install over a convenience.
+  warn "Not pre-authorised. Individual privileged steps will prompt as they need it."
 }
 
 main() {

@@ -385,6 +385,13 @@ snapshot_leaks="$(awk '
 # SECURITY.md and docs/TESTING.md have told the operator to do this by hand all along.
 assert_match '^prime_sudo\(\) \{$' "$ROOT/bootstrap"
 assert_match '^ *prime_sudo$' "$ROOT/bootstrap"
+# NOPASSWD is tested BEFORE `sudo -v`, because `-v` does not honour it. Measured in the
+# guest, which has NOPASSWD: ALL — `sudo -n true` exits 0 while `sudo -n -v` reports "a
+# password is required", because refreshing the credential timestamp is a password
+# operation whatever the command rules say. With the checks the other way round, a
+# passwordless machine always fell through to a warning that promised prompts it would
+# never see.
+assert_match '^ *if sudo -n true 2>/dev/null; then$' "$ROOT/bootstrap"
 # No keepalive: suppressing the post-bundle prompt means holding root unattended for the
 # 30-45 minutes brew bundle takes, which is a worse trade than one expected prompt.
 refute_match 'while true.*sudo -n true|sudo.*keepalive' "$ROOT/bootstrap"

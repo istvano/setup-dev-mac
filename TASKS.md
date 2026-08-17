@@ -141,6 +141,27 @@ and the weaker assertions (`vscode --force` satisfiable by the dry-run branch, t
       the key sits in a custom field rather than the notes body — the hook hides that behind
       `2>/dev/null` and it is indistinguishable from a locked vault.
 
+- [x] **bootstrap's Command Line Tools installer is verified.** It was the last code path
+      no run had executed: `script/test-install` installs the CLT itself before running
+      bootstrap, so bootstrap short-circuited on `xcode-select -p` and its own installer —
+      the on-demand sentinel, the `softwareupdate -l` label scrape, `sudo softwareupdate -i`
+      and the read-back — existed only in a form nothing had run.
+
+      `./script/vm reset && ./script/test-install --skip-clt` against a pristine guest, exit
+      0, 32 PASS, guest suite green:
+
+          [INFO] Skipping the harness CLT step; ./bootstrap will install them.
+          [INFO] Installing the Xcode Command Line Tools. This needs sudo and takes a few minutes.
+          [INFO] Installing: Command Line Tools for Xcode 26.6-26.6
+          [OK]   Xcode Command Line Tools are installed.
+
+      The fragile part is the label scrape: it depends on the sentinel existing first (before
+      it, `softwareupdate -l` does not offer the package at all) and on the sed pattern
+      matching Apple's exact wording, here "Command Line Tools for Xcode 26.6-26.6" on macOS
+      26.6.1. A future wording change is what the GUI fallback exists for.
+
+      Still unexercised by design: that GUI fallback, which needs a human at the console.
+
 ## Configuration gaps still open
 
 - [ ] **`k9s` has no configuration**, and the `kubernetes` profile is a default that installs
