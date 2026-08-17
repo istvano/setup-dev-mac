@@ -6,6 +6,13 @@ rationale belongs in `DECISIONS.md`; unfinished work belongs in `TASKS.md`.
 
 ## Before first installation
 
+**On a brand-new Mac, follow [New machine](NEW-MACHINE.md) instead.** It is the ordered
+runbook from a boxed machine to a working environment, including what to export from the old
+Mac *before* wiping it. This section is for reviewing a change on a machine that is already
+set up — step 2 in particular cannot run on a fresh Mac, because `./script/test` requires the
+Xcode Command Line Tools and `REQUIRE_LINTERS=1` requires tools that the install itself
+provides.
+
 1. Read the selected Brewfile fragments and all `chezmoi/run_*` scripts.
 2. Run the static validation suite, requiring every check. Without the `REQUIRE_*`
    variables, five checks skip when their tool is absent and the suite still reports
@@ -149,11 +156,18 @@ keys; MLX and Python versions are entirely project-owned.
 
 ## Container substrate
 
-Colima is the default runtime (ADR-037), and this section is about *using* containers
-on the host. It is unrelated to testing the repository: `docs/TESTING.md` uses tart,
-ssh and rsync, and neither `script/vm` nor `script/test-install` references Docker or
-Colima at all. Do not start the substrate in order to run a VM test — it only competes
-for memory.
+Colima is the default runtime (ADR-037), and this section is about *using* containers on the
+host.
+
+Two different substrates are easy to confuse. The **host** substrate is the one this section
+creates. The **guest** substrate is what `script/test-install` exercises inside the test VM:
+it defaults to `--runtime colima` and runs `container-substrate --verify` there, so it has
+its own Colima. `script/vm` is the only piece that mentions neither Docker nor Colima.
+
+They are independent, and both are VMs, so **shut the host substrate down before a
+destructive VM run** — `colima stop`. Two live VMs on a 32 GB machine over-commit memory, and
+`script/test-install` warns when they would. `docs/TESTING.md` verifies the host substrate as
+a separate step precisely because it is a separate capability, not a prerequisite.
 
 The layer beneath project containers and clusters is declared rather than rebuilt by
 hand:
@@ -170,13 +184,17 @@ image registry and a persistent BuildKit builder. Nothing else — services with
 stay in the project that owns them, which is the boundary ADR-010 draws and ADR-037
 refines.
 
-**Nothing is started by `chezmoi apply`.** The VM commits 14 GiB of standing memory
-and takes minutes to create, so hook 25 reports its state and names this command
-instead. Sizing suits the 32 GB build machine; raise `SUBSTRATE_VM_MEMORY_GB` and
-`SUBSTRATE_VM_CPUS` on the 128 GB target.
+**Nothing is started by `chezmoi apply`.** The VM commits several GiB of standing memory and
+takes minutes to create, so hook 25 reports its state and names this command instead.
 
-**Stop it when you are not using it.** The VM never gives memory back to macOS, so
-14 GiB stays committed until `colima stop`. Measured on the build machine: running it
+**Sizing is derived from the machine, not configured.** `detect_memory_gb` takes 45% of
+`hw.memsize` (floor 4 GiB) and `detect_cpus` takes `hw.ncpu` minus two (floor 2), so the
+32 GB build machine yields 14 GiB / 8 CPUs and a 128 GB machine yields 57 GiB / 14 without
+anyone editing anything. `SUBSTRATE_VM_MEMORY_GB` and `SUBSTRATE_VM_CPUS` remain as
+overrides for a machine that needs a deliberate number — they are no longer the mechanism.
+
+**Stop it when you are not using it.** The VM never gives memory back to macOS, so its
+allocation stays committed until `colima stop`. Measured on the build machine: running it
 alongside a test guest put 22 GiB of 32 GB in use and 5 GB into swap. The network,
 registry and build cache all survive a stop/start, so stopping costs only the ~10
 second restart.

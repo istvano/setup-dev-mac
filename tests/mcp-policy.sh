@@ -145,8 +145,10 @@ python3 -c "$VALIDATOR" "$POLICY"
 
 # Prove the validator actually validates.
 #
-# mcp/managed-settings.json declares "allowedMcpServers": [], which is the deliberate
-# fail-closed state (mcp/README.md). But an empty list means the loop above never executes,
+# mcp/managed-settings.json once declared "allowedMcpServers": [] — the deliberate
+# fail-closed state. It now has six entries, so the loop does run; this fixture is what keeps
+# the rules exercised if it is ever emptied again, because an empty list means the loop above
+# never executes,
 # so this test printed "OK (0 allowed, 0 denied)" while the serverName rejection, the
 # npx/uvx pinning rule, the plaintext-http check and the wildcard-port check had not run at
 # all — the ADR-029 controls AGENTS.md calls a source of truth were untested by

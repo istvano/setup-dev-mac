@@ -35,7 +35,7 @@ colima delete default              # the container substrate VM
 configurations put it there; on a machine where the repository has never been
 applied, export it for the session.
 
-`k3d` is needed for the shared registry and comes from the opt-in `kubernetes`
+`k3d` is needed for the shared registry and comes from the `kubernetes`
 profile. Without it the substrate skips the registry and says so.
 
 ### 2. The container substrate — 3 min
@@ -47,7 +47,13 @@ profile. Without it the substrate skips the registry and says so.
 ./script/container-substrate --status
 ```
 
-`--verify` must exit 0 before going further. Expected output:
+`--verify` must exit 0 before going further — and then **stop it again with `colima stop`
+before step 4**. This step proves the host substrate works; it is not a prerequisite for the
+VM run, and leaving it up means two live VMs competing for memory on a 32 GB machine.
+`script/test-install` warns when that happens, and `docs/OPERATIONS.md` says the same.
+
+Expected output (sizing is derived from the machine, so these numbers are this build
+machine's — a larger Mac gets proportionally more):
 
 ```text
 VM mount type          virtiofs (as declared)
@@ -162,19 +168,33 @@ exercising the code path under test.
 ./script/test-install --runtime colima
 ```
 
-Reset, boot, sync the working tree, install the Command Line Tools,
-`./bootstrap install --yes`, `./script/verify`, the full test suite with
-`REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1`, then `./script/hardening-check`. A transcript
-lands in `~/.config/security-ai-workstation/vm/test-install-*.log`.
+The full sequence, in order: reset, boot, sync the working tree, `./bootstrap plan`,
+install the Command Line Tools, `./bootstrap install --yes`, **assert chezmoi settled**,
+`./script/verify`, the full test suite with `REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1`,
+**exercise the container substrate in the guest**, then `./script/hardening-check`. A
+transcript lands in `~/.config/security-ai-workstation/vm/test-install-*.log`.
 
-The Command Line Tools step stands in for the human. `bootstrap` deliberately runs
-`xcode-select --install` and stops with "Complete the Apple installer, then rerun" —
-correct for a person at a keyboard, and a wall for an unattended run. `test-install`
-does what that message tells the operator to do, between the two documented passes,
-rather than weakening `bootstrap`.
+The chezmoi-settled gate is not decoration: an install interrupted inside a `run_onchange`
+hook leaves the rest pending, and without it a half-configured guest passed the whole suite.
+The test-suite step is conditional on `dev` being in `--profiles`, since the linters come
+from that profile.
 
-One thing this consequently does NOT cover: `ensure_xcode_clt`'s trigger-and-stop
-path. It ends in a GUI dialog, so no unattended harness reaches it.
+**The Command Line Tools step is a duplicate, not a stand-in.** `bootstrap` installs them
+itself — it touches the on-demand sentinel, scrapes the package label out of
+`softwareupdate -l`, runs `sudo softwareupdate -i` and reads back `xcode-select -p`. The
+harness does the same thing first because it is marginally faster and keeps the default run
+unattended, which means bootstrap's own installer short-circuits on `xcode-select -p` and
+never runs.
+
+To exercise the real one, skip the harness step against a pristine guest:
+
+```bash
+./script/vm reset && ./script/test-install --skip-clt
+```
+
+Keep the VM window open for that run: if `softwareupdate` offers no package, `bootstrap`
+falls back to `xcode-select --install` and exits, and an unattended run cannot answer that
+dialog. That GUI fallback remains the one path no harness covers.
 
 `--runtime colima` is the default, because the container runtime is most of what this
 workstation is for. The run therefore also exercises the substrate **inside the
@@ -239,7 +259,7 @@ colima stop
 ## Reaching the guest
 
 ```bash
-./script/vm up                       # boot headless, wait for SSH
+./script/vm up                       # boot with a window, wait for SSH (--headless opts out)
 ./script/vm ssh                      # a shell in the guest
 ./script/vm status                   # what exists, how big, what is running
 ./script/sync-to-mac                 # push the working tree
@@ -276,27 +296,36 @@ On the M5 Max it *does* work, so `--runtime colima` there is the first opportuni
 to exercise hook 25 anywhere. `script/test-install` detects which machine it is on
 and says which case applies rather than assuming.
 
-`./bootstrap install` will stop almost immediately on a pristine guest:
+On a pristine guest `./bootstrap install` installs the Command Line Tools itself and
+carries on:
 
 ```text
-[INFO] Starting the Apple Xcode Command Line Tools installer.
-[ERROR] Complete the Apple installer, then rerun ./bootstrap install.
+[INFO] Installing the Xcode Command Line Tools. This needs sudo and takes a few minutes.
+[INFO] Installing: Command Line Tools for Xcode 26.6-26.6
+[OK]   Xcode Command Line Tools are installed.
 ```
 
-That is the documented two-phase flow, not a fault. Over SSH there is no dialog to
-complete, so install them from the command line and run bootstrap again:
+It only stops if `softwareupdate` offers no package, in which case it falls back to
+`xcode-select --install` and exits with "Complete the Apple installer, then rerun" — the old
+behaviour, now the fallback rather than the rule.
+
+The sentinel file is the non-obvious part: without
+`/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress`, `softwareupdate -l`
+reports "No new software available" even on a machine that has no Command Line Tools at all.
+Both `bootstrap` and `script/test-install` create it, scrape the label out of
+`softwareupdate -l` and read `xcode-select -p` back afterwards.
+
+Do not hardcode the label if you do this by hand — "Command Line Tools for Xcode 26.6-26.6"
+is what macOS 26.6.1 offered on one run, and it changes with the OS build. Scrape it:
 
 ```bash
 sudo touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
-softwareupdate -l          # now lists "Command Line Tools for Xcode ..."
-sudo softwareupdate -i "Command Line Tools for Xcode 26.6-26.6"
+label="$(softwareupdate -l 2>/dev/null |
+  sed -n 's/^ *\* Label: \(Command Line Tools for Xcode.*\)$/\1/p' | tail -1)"
+sudo softwareupdate -i "$label"
 sudo rm -f /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
 xcode-select -p            # must print a path before continuing
 ```
-
-The sentinel file is the non-obvious part: without it `softwareupdate -l` reports
-"No new software available" even on a machine that has no Command Line Tools at all.
-`script/test-install` does exactly this for you.
 
 Do not add `--yes` when testing by hand. The Homebrew installer prints its SHA-256
 and waits, and that prompt is part of what is being tested.

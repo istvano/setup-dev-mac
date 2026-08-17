@@ -70,9 +70,14 @@ security keys, password-manager references and SOPS/age-encrypted project files.
 ## Work that stays manual
 
 `docs/MANUAL-SECURITY.md` lists what this repository deliberately does not do for
-you, and why: FileVault and its recovery key, remote services, hardware keys, TCC
-permissions, browser sync, Touch ID for sudo, backup restore drills and the
-outbound firewall. Each entry says how to verify it rather than only what to do.
+you, and why: FileVault and its recovery key, remote services, hardware keys, the age
+and SSH identities, TCC permissions, BetterDisplay permissions, browser isolation,
+Touch ID for sudo, backups and restore drills, the outbound firewall, and the declared
+macOS defaults. Each entry says how to verify it rather than only what to do.
+
+The identity entry is the one that fails on every freshly installed machine, by design:
+`./script/identity --check` treats a locally generated, un-backed-up age key as a failure
+until you restore the right one.
 
 ## Recorded terminal sessions
 

@@ -77,13 +77,22 @@ comment pretending to be a test.
       `commit.gpgsign` is true. `key::` is now applied only to values that look like a
       public key, leaving a file path or a GPG key ID untouched.
 
-Still open — see the QA report for `file:line`: the `count_entries` `"0\n0"` latent
-arithmetic abort in `script/tools`; `container-substrate` inspecting only
-`k3d-$REGISTRY` while accepting either name, so a hand-created loopback registry reads as
-world-exposed and the offered remediation cannot work; `script/update` ignoring all
-arguments (so `--no-pager` does nothing) and diffing a different source than it applies;
-and the weaker assertions (`vscode --force` satisfiable by the dry-run branch, the
-`arm64-only` marker regex, the Ghostty theme check).
+- [x] **Third pass: the last four QA findings closed** (commit `037d7fd`). `script/tools`'
+      `count_entries` returned `"0\n0"` because `grep -c` prints the count *and* exits 1 —
+      now `|| true` plus `${n:-0}`, since a missing file prints nothing at all.
+      `container-substrate` accepted either registry name but inspected only
+      `k3d-$REGISTRY`, so a hand-created loopback registry read as world-exposed and the
+      offered remediation could not work — there is now a shared `registry_container_name()`
+      and `apply` refuses to recreate what k3d did not create. `script/update` parsed no
+      arguments (so `--no-pager` did nothing) and diffed a different source than it applied;
+      both now take one source. The weak assertions were anchored: `vscode --force` no longer
+      matches the dry-run branch, the `arm64-only` refutation matches declaration lines via
+      awk, and hook 25's `--verify` calls are pinned rather than its echo strings.
+
+      **Still genuinely open:** the Ghostty theme check remains shape-only. It rejects a
+      lowercase-hyphenated theme name but cannot tell a valid Ghostty theme from an invalid
+      one — `theme = mocha` passes the test and would still stop Ghostty starting. Only
+      `ghostty +validate-config` on a machine with Ghostty installed can catch that.
 
 - [x] **Documentation drift corrected (F24).** `README.md` and `docs/TESTING.md` both
       claimed `--runtime none` was the `test-install` default when it is colima — and
@@ -229,13 +238,17 @@ Everything else in this section depends on it, so it comes first.
       Kept as the record of what that run observed, not as a target to match.
 
       Transcript checked per SECURITY.md: mode 0600, zero `Password:` prompts.
-- [ ] Run with the FULL default selection. The pass above used
-      `--firewall none --password-manager none` to isolate the privileged-cask risk,
-      so 49 of 51 dependencies installed — and the two skipped, `lulu` and
-      `bitwarden`, are precisely the ones most likely to prompt. LuLu installs a
-      system extension, and Homebrew asks for those through its own dialog rather
-      than `sudo`, which NOPASSWD does not cover. Expect a stall rather than a clean
-      failure; watch it rather than leaving it unattended.
+- [x] **Run with the FULL default selection — done, repeatedly.** An earlier pass used
+      `--firewall none --password-manager none` to isolate the privileged-cask risk, leaving
+      `lulu` and `bitwarden` — precisely the two most likely to prompt — untested. LuLu
+      installs a system extension, and Homebrew asks for those through its own dialog rather
+      than `sudo`, which NOPASSWD does not cover, so a stall rather than a clean failure was
+      the expected failure mode.
+
+      It did not stall. Every recent run used `test-install`'s defaults, which are the full
+      default profile set plus `--firewall lulu --password-manager bitwarden`, and all
+      completed with exit 0 — including the `--skip-clt` run that also installed the Command
+      Line Tools from bootstrap itself. 70 packages, 32 PASS, guest suite green.
 - [x] Run with the macOS defaults and hardening. Both are now the default rather than
       opt-in (ADR-041). Verified in a guest: `macos-defaults --verify` reported every
       declared key in effect, `hardening-check` moved firewall and stealth to `[PASS]`
@@ -291,7 +304,9 @@ machine; the ones that need specific hardware are marked.
       Re-check on the current macOS: the answer is version-specific, and a newer
       release is the more likely one to have dropped a key.
 - [ ] Confirm `brew bundle check` passes for `kubernetes-cli`, the one
-      corrected token still enabled. The `mitmproxy` and `wireshark-app`
+      corrected token still enabled. (`mitmproxy` is no longer commented out and no longer in
+      `security.Brewfile` — it is live in `security-extra`. Only `wireshark-app` is still
+      commented out.) The `mitmproxy` and `wireshark-app`
       corrections are commented out in `profiles/security.Brewfile`; if they are
       re-enabled, verify them too rather than trusting the old token names.
 - [ ] Generate the OpenPGP key, publish the public key to the forge, and verify
@@ -324,7 +339,7 @@ machine; the ones that need specific hardware are marked.
       not found.
 - [x] `./script/test` passes, all 13 test scripts, with
       `REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1` and nothing skipped: shellcheck over
-      38 files, shfmt, actionlint, gitleaks, chezmoi template execution across 20
+      41 files, shfmt, actionlint, gitleaks, chezmoi template execution across 24
       templates x 3 configurations, and yamllint. The bash 3.2 constraint holds.
       Previously four of these skipped silently on this machine because the tools
       were not installed, and the suite still printed "All repository tests
@@ -468,7 +483,8 @@ Each of these stopped a run dead and none was visible by reading the code.
       and says so; `--yes` remains the documented way to answer yes. This affected
       every confirming command in the repository, not just the new ones.
 
-Found while reviewing the repository; none are fixed yet except where noted.
+Found while reviewing the repository. **All of these are now fixed** — the entries are
+kept as the record of what was wrong and how it was verified.
 
 - [x] `bootstrap` set `umask 077` in a function body, which leaked to the rest of
       the process — including `chezmoi init --apply` and therefore
@@ -480,15 +496,15 @@ Found while reviewing the repository; none are fixed yet except where noted.
       several commands. `sync-to-mac ./script/macos-defaults --dry-run` would have
       run `./script/macos-defaults`, whose default mode is apply. Fixed, and
       `tests/vm.sh` now guards against it in all three scripts.
-- [ ] `script/macos-defaults --section <typo>` passes vacuously: the section name
+- [x] **Fixed.** `script/macos-defaults --section <typo>` passed vacuously: the section name
       is never validated, so `selected()` matches nothing, every counter stays 0
       and `--verify` reports "All declared macOS defaults are in effect" and exits
       0. Contradicts the principle stated in `script/shell-files`,
       `script/vscode-extensions` and `script/check-tokens`.
-- [ ] `script/install-toolhive` absorbs unknown arguments instead of rejecting
+- [x] **Fixed.** `script/install-toolhive` absorbed unknown arguments instead of rejecting
       them, so a mistyped `--verify` reinstalls the binary it was asked to inspect.
       `script/install-tart` was written with an explicit rejection arm; port it.
-- [ ] Missing-value guards are inconsistent across option parsers. `snapshot`,
+- [x] **Fixed.** Missing-value guards were inconsistent across option parsers. `snapshot`,
       `macos-defaults`, `test-install` and `vm` check; `bootstrap` (11 options) and
       `render-brewfile` (6) do not, so `--git-name --yes` sets the name to `--yes`
       and leaves `ASSUME_YES` unset. Lift `require_value` out of

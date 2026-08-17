@@ -64,8 +64,10 @@ checklist.
   later. On the M1 Pro build machine no runtime starts in the guest, so
   `run_onchange_after_25_configure-container-runtime.sh.tmpl` is unprovable there;
   on the M5 Max target it can be exercised. `script/test-install` detects which
-  applies via `nested_virtualization_supported` and defaults to `--runtime none`,
-  which suits the machine where most runs happen.
+  applies via `nested_virtualization_supported` and defaults to `--runtime colima`,
+  because the container runtime is most of what this workstation is for: on the M1 Pro
+  the packages install and the wiring is verified while the daemon cannot start, and
+  the run says so rather than passing quietly. `--runtime none` skips it explicitly.
 - **Two guests per host**, per Apple's licence, on both machines. Golden plus one
   running clone is exactly two, so a profile matrix runs sequentially.
 - **Ghostty needs Metal** and is unverified in a VZ guest.
@@ -82,5 +84,8 @@ the upstream checksums rather than computing them from whatever the download
 returned. Re-read `team_id` with `codesign -dv <path>/tart.app` and only change it
 after establishing that a new signing identity is legitimate.
 
-`script/update-report` reports newer releases; `brew upgrade` will never move this
-binary.
+`brew upgrade` will never move this binary, because Homebrew did not install it.
+
+Nothing reports a newer tart release: `script/update-report` has a ToolHive section and no
+tart equivalent, so bumping this pin is something you have to remember rather than something
+you are told about. Tracked in `TASKS.md`.

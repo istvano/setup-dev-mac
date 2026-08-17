@@ -31,8 +31,14 @@ accepting one would give false assurance.
 exactness is the lever. Allowlist a pinned command and every unpinned variant
 fails the policy, which turns ADR-006 from a principle into a check.
 
-An empty `allowedMcpServers` array means no servers are permitted. That is the
-correct starting point: adding one is a deliberate act.
+An empty `allowedMcpServers` array means no servers are permitted, and that was the starting
+point — the array is no longer empty. Six servers are allowlisted; see the table below for
+what each is and how far it is trusted. Adding one remains a deliberate act, and removing
+them all is a valid fail-closed state rather than a broken file.
+
+Because an empty array also makes the validation loop in `tests/mcp-policy.sh` execute zero
+times, that test additionally runs against a fixture that must be rejected — otherwise
+emptying this file would silently retire every rule it enforces.
 
 ## Two kinds of entry
 

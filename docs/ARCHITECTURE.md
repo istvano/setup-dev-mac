@@ -74,18 +74,37 @@ Owns high-risk or Linux-specific work:
 
 ## Configuration flow
 
+Hooks run in filename order, and the numbers are the ordering mechanism rather than
+decoration — hook 12 precedes 15 because cloning over ssh and signing commits both depend on
+a key existing.
+
 ```text
 bootstrap
+  -> installs the Command Line Tools (softwareupdate; GUI installer as fallback)
+  -> installs Homebrew, after printing the installer's SHA-256
   -> installs trust set
+  -> prompts for the git identity
+  -> enables the application firewall (default; --no-hardening opts out)
   -> writes chezmoi data choices
   -> chezmoi apply
-       -> renders Brewfile from profiles
-       -> installs host packages
-       -> creates an age identity if none exists
-       -> configures runtimes
-       -> applies declared macOS defaults (default; --no-macos-defaults opts out)
-       -> provisions browser profiles when selected
+       -> before_10  renders the Brewfile from profiles, installs host packages
+       -> after_12   generates this machine's ssh key, unless 1Password holds them
+       -> after_15   restores the age identity from Bitwarden, or mints and flags one
+       -> after_20   installs the mise-managed runtimes
+       -> after_25   reports the container substrate; never starts it
+       -> after_30   reports the account login shell against the selected one
+       -> after_35   installs the pinned VS Code extensions when dev is selected
+       -> after_40   applies declared macOS defaults (default; --no-macos-defaults opts out)
+       -> after_45   provisions browser profiles when selected
+       -> after_90   prints the manual-security reminder
 ```
+
+The two identity hooks are deliberately asymmetric. An age key is **restored**, because
+files encrypted to an identity you no longer hold are unreadable, so a second identity is
+data loss. An ssh key is **generated per machine** and never moved, because a signing key is
+simply enrolled again. `script/identity` reports on both, and `script/verify` calls it
+non-fatally — identity is the part of a machine this repository deliberately cannot
+reproduce.
 
 Chezmoi apply hooks reach back into the repository for scripts. `.chezmoiroot`
 resolves `.chezmoi.sourceDir` to `<repo>/chezmoi`, so those paths must be built

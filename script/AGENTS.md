@@ -19,9 +19,11 @@ to them and contain minimal logic.
   earlier one: bash expands every argument to `local` before assigning any.
 - Target bash 3.2, which is what macOS ships. No `mapfile`, `readarray`,
   associative arrays or namerefs; `tests/shell-syntax.sh` rejects them (ADR-033).
-- Collect command options in an **array**, never a space-separated string. Every
-  script here sets `IFS=$'\n\t'`, so a string does not word-split on spaces and
-  the whole thing arrives as one unknown option.
+- Collect command options in an **array**, never a space-separated string. Nearly every
+  script here sets `IFS=$'\n\t'` (`script/setup` and `script/test` are the exceptions), so
+  a string does not word-split on spaces and the whole thing arrives as one unknown option.
+  Write the array regardless: a script that sets IFS today is the norm, and an option list
+  built as a string breaks the moment it is copied into one.
 - `confirm` fails CLOSED and refuses to ask when stdin is not a terminal. Do not
   reintroduce a bare `read` for a yes/no question: with stdin open but nobody
   answering — a pipeline, CI, an editor task runner — it blocks forever, and the

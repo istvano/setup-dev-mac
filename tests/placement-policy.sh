@@ -415,6 +415,35 @@ refute_match 'applies declared macOS defaults when requested' "$ROOT/docs/ARCHIT
 # anything. There are five, not four; the fifth is the atuin config parse.
 refute_match 'SKIPS four checks' "$ROOT/AGENTS.md"
 refute_match 'four checks skip' "$ROOT/docs/OPERATIONS.md"
+refute_match 'Four of those checks skip' "$ROOT/README.md"
+
+# EVERY doc that names the test-install default runtime, not just the two fixed first time.
+#
+# The F24 sweep corrected README.md and docs/TESTING.md and missed vm/README.md, which went
+# on asserting `--runtime none` for another two weeks. Naming the files individually is what
+# stops the third one being forgotten again.
+# shellcheck disable=SC2016  # backticks are literal markdown here, not a substitution
+refute_match 'defaults to .--runtime none.' \
+  "$ROOT/README.md" "$ROOT/docs/TESTING.md" "$ROOT/vm/README.md" "$ROOT/docs/OPERATIONS.md"
+
+# The package count README quotes has to track the ceiling, because it is the number a
+# reader uses to judge whether an addition is reasonable. It said 68 while the real default
+# was 70 — at the ceiling, with no headroom.
+assert_match 'install 70 packages with zsh, or 69 with fish' "$ROOT/README.md"
+
+# CI is not Linux-only: validate.yml has a macos-latest job that also runs ./bootstrap plan.
+refute_match 'CI remains Linux-only' "$ROOT/README.md"
+
+# security-extra installs no hardware-key tooling — ykman, age-plugin-yubikey and Secretive
+# are all commented out, so a doc promising them sends someone to the wrong profile.
+# shellcheck disable=SC2016  # backticks are literal markdown here, not a substitution
+refute_match 'security-extra. provides .age-plugin-yubikey' "$ROOT/docs/MANUAL-SECURITY.md"
+
+# The apply-hook flow in ARCHITECTURE.md must name every hook. It listed five of ten, and
+# the missing one whose absence mattered most was 12, whose position is load-bearing.
+for hook_number in 10 12 15 20 25 30 35 40 45 90; do
+  assert_match "_${hook_number} " "$ROOT/docs/ARCHITECTURE.md"
+done
 
 # neovim is $EDITOR in both shells and core.editor in git, so it must not be unconfigured.
 #

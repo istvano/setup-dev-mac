@@ -114,13 +114,15 @@ Host packages are defined by composable Brewfile fragments:
 - `dev`: editors, coding agents and local validation — shell, YAML, Actions,
   Dockerfile and image scanning
 - `security`: the general TLS and cryptographic toolkit
-- `productivity`: BetterDisplay, required for DDC monitor input switching
-- `cloud`: OpenTofu and module documentation
+- `productivity`: BetterDisplay, required for DDC monitor input switching, and Obsidian
+- `cloud`: OpenTofu, Terragrunt and module documentation
 - `cloud-aws`, `cloud-azure`, `cloud-gcp`: provider-specific control-plane CLIs
 - `kubernetes`: Kubernetes control-plane and interactive operations
 - `data`: embedded SQL CLIs and native database/API clients
-- `security-extra`: host-network and PKI tooling, hardware security keys,
-  privileged and macOS monitoring tools
+- `security-extra`: host-network and PKI tooling, interception proxies, and macOS
+  microphone/camera and per-process network monitors. Hardware-key tooling — `ykman`,
+  `age-plugin-yubikey`, Secretive — is present as commented-out lines, evaluated but not
+  installed, so selecting this profile gives you none of it
 - `security-scan`: the wider single-binary scanner set — SBOM, lockfile and
   credential scanning, image layer inspection (see ADR-015, ADR-040)
 - `backup`: restic and rclone for encrypted, verifiable off-site backup
@@ -134,10 +136,13 @@ Host packages are defined by composable Brewfile fragments:
 - `paid`: non-alternative paid additions
 
 The default profiles are `core,dev,security,productivity,backup,kubernetes`, which
-install 68 packages with zsh, or 67 with fish. Kubernetes is in the default because
+install 70 packages with zsh, or 69 with fish — which is the ceiling
+`tests/render-brewfile.sh` enforces, with no headroom left, so the next addition has to
+argue for raising it (ADR-013). Kubernetes is in the default because
 this workstation exists for Docker and Kubernetes development, so a default that
 cannot do it is incomplete rather than lean (ADR-038). The default carries one tool per job (ADR-022) and no language
-runtime: Node, Go, Java, Rust and pnpm come from mise (ADR-021), and any other
+runtime from Homebrew: Node, Go, pnpm, Rust, Python and the JVM set — two JDKs plus Maven,
+Gradle and Kotlin — all come from mise (ADR-021, ADR-042), and any other
 language is one `mise use -g <lang>` away. Specialist profiles are opt-in. Container runtimes, password managers and outbound firewalls use
 separate mutually exclusive fragments.
 
@@ -349,8 +354,11 @@ rendering, profile-catalogue consistency, chezmoi template execution, YAML,
 placement invariants, VM tooling, render idempotency, browser profiles and agent
 context.
 
-Four of those checks skip silently when their tool is absent. Require them, which
-is what CI does:
+Five of those checks skip when their tool is absent — shellcheck, the
+shfmt/actionlint/gitleaks set, chezmoi template execution, YAML, and the atuin config
+parse, which needs a Python 3.11+ for `tomllib` that no profile declares. Three of the five
+print "OK" while skipping, so a green local run reads as more coverage than it is. Require
+them, which is what CI does:
 
 ```bash
 REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1 ./script/test
@@ -413,12 +421,14 @@ test. It verifies that `.git` and the executable bits survived the transfer, sin
 both failures otherwise surface much later as unrelated errors, and it forwards the
 remote exit status.
 
-CI remains Linux-only static validation: it runs bash 5 while macOS ships bash 3.2
-(ADR-033), so it cannot prove macOS application behaviour.
+CI runs the suite twice: on `ubuntu-latest`, where bash 5 cannot prove macOS behaviour
+under the bash 3.2 the target ships (ADR-033), and on `macos-latest`, which additionally
+runs `./bootstrap plan`. Neither can boot a VM — hosted runners have no nested
+virtualisation — so `script/vm` and `script/test-install` are exercised only locally.
 
-Homebrew renames tokens continuously, so the declared package set is checked
-against upstream separately. This is the only check that needs network access,
-and it also runs weekly in CI:
+Homebrew renames tokens continuously, and VS Code extension ids change too, so both
+declared sets are checked against upstream separately. These are the only checks that need
+network access, and both run weekly in CI:
 
 ```bash
 ./script/check-tokens
@@ -439,7 +449,7 @@ Some of the workstation cannot be automated: FileVault's recovery key has to
 leave the machine, TCC consent dialogs exist precisely so no script may click
 them, and disabling a remote service you are connected over would strand you.
 
-[docs/MANUAL-SECURITY.md](docs/MANUAL-SECURITY.md) is the checklist — ten items,
+[docs/MANUAL-SECURITY.md](docs/MANUAL-SECURITY.md) is the checklist — eleven items,
 each with what to do, why it is not automated, and how to verify it. The last
 apply hook points at it, and `./script/hardening-check` reports which are done.
 
