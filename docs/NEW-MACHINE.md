@@ -20,12 +20,31 @@ that applies and ignore the other.
 The common case, and the safe one. The machine you already have keeps working and keeps its
 keys, so nothing has to be rescued and proceeding destroys nothing.
 
-- [ ] **Carry the GPG material across, if you sign commits with GPG.** This is the one thing
-      that cannot be regenerated: a new key is a new identity, and existing signatures do not
-      verify against it. Export the secret key, the ownertrust and a revocation certificate
-      from the machine that holds it — [Operations](OPERATIONS.md) has the commands. Check
-      the expiry while you are there (`gpg --list-secret-keys --keyid-format=long`); importing
-      a key that expires in a few weeks only moves the problem.
+- [ ] **Decide what happens to commit signing.** Unlike everything else here this is a
+      genuine choice, and both answers are defensible.
+
+      *Generate a fresh key on the new Mac* — then nothing has to be carried across at all.
+      This does not cost you your signed history, which is the usual reason people hesitate:
+      GitHub records a verification when it first checks a signature, and "will not re-verify
+      previously signed commits or retroactively adjust their verification status in response
+      to changes in the key's state", so existing commits stay Verified even after the old key
+      expires. Do leave the old public key on your GitHub account rather than deleting it —
+      deletion is the one case GitHub's documentation does not explicitly cover. Generate the
+      new key *after* the install, following
+      [Operations → Commit signing](OPERATIONS.md#commit-signing), and leave the signing-key
+      prompt in step 3 empty: signing stays inactive until `gitSigningKey` is set, so an empty
+      answer is a clean "not yet" rather than a broken config.
+
+      *Or carry the existing key across*, if you want one identity across machines or need to
+      decrypt something encrypted to it. Export the secret key, the ownertrust and a
+      revocation certificate — [Operations](OPERATIONS.md) has the commands — and check the
+      expiry first with `gpg --list-secret-keys --keyid-format=long`, since importing a key
+      that expires shortly only moves the problem.
+
+      Either way: the key's user ID must carry the same address as `user.email`, and that
+      address must be verified on your GitHub account — "your GPG key must be associated with
+      a verified email that matches your committer identity". Get this wrong and commits show
+      as Unverified with nothing locally to indicate why.
 - [ ] **Nothing to do about SSH.** The new Mac generates its own key and you enrol it
       *alongside* the existing one. Both stay valid — that is the point of one key per
       machine. Do not remove the old key from GitHub or from work.
@@ -213,7 +232,20 @@ advice for that selection — ignore it and confirm the agent is enabled instead
       ```bash
       git remote set-url origin git@github.com:istvano/setup-dev-mac.git
       ```
-- [ ] **Import GPG material** if you sign with GPG.
+- [ ] **Set up commit signing**, following whichever branch you chose in step 0.
+
+      Generating a fresh key here is the ordinary path on a machine that is not replacing
+      another. `gnupg` and `pinentry-mac` are already installed — they are in `core` — and
+      `~/.gnupg/gpg-agent.conf` is managed, so the passphrase prompt and its Keychain caching
+      work with no further setup. [Operations → Commit
+      signing](OPERATIONS.md#commit-signing) has the sequence: generate, record the key ID,
+      publish the public key with `gh gpg-key add`, then prove it with a signed empty commit
+      and `git log --show-signature`. Do the last step: a commit that succeeds is not the same
+      as a signature that verifies.
+
+      If you are importing an existing key instead, import the secret key and the ownertrust
+      — the ownertrust is the half that is easy to forget, and without it your own key is not
+      trusted in the new keyring.
 
 ---
 
