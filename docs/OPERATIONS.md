@@ -902,8 +902,38 @@ used for everything else.
 
 ## Kubernetes and GitOps
 
-The `kubernetes` profile is client-side only; no cluster runs on the host unless
-`kind` is started deliberately.
+The `kubernetes` profile is client-side only. No cluster runs on the host until you start
+one: `k3d` is the daily driver and `kind` is also installed, and both create clusters on the
+container runtime rather than on the host directly.
+
+**kubectl plugins come from krew**, installed by apply hook 28 and living in `~/.krew/bin`,
+which both shells add to PATH when the `kubernetes` profile is selected. Without that PATH
+entry krew reports a successful install and the plugin still cannot be invoked, which is the
+state this profile shipped in for some time.
+
+Declared plugins, all pinned by the kubernetes-sigs index and all native arm64:
+
+```bash
+kubectl images       # container images used across the cluster
+kubectl tree         # object hierarchy through ownerReferences
+kubectl neat         # strip clutter from a manifest before reading or committing it
+kubectl view-secret  # decode a secret without a base64 pipeline
+kubectl whoami       # which subject you are actually authenticated as
+kubectl sniff        # remote packet capture on a pod, via tcpdump
+kubectl krew install <name>   # anything else, deliberately and per machine
+```
+
+`popeye` is deliberately not among them: `profiles/kubernetes.Brewfile` records it as
+rejected under ADR-026 for being unmaintained, and installing it through krew would
+reintroduce by another route what was declined by the first.
+
+**For network debugging inside a cluster, no plugin is needed.** `netshoot` is a container
+image rather than a krew plugin, so it is used on demand and nothing is installed:
+
+```bash
+kubectl debug -it <pod> --image=nicolaka/netshoot          # attach to an existing pod
+kubectl run tmp --rm -it --image nicolaka/netshoot -- bash  # a throwaway toolbox pod
+```
 
 ```bash
 kubectx                      # choose a cluster, then confirm it before acting

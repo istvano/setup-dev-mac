@@ -117,7 +117,9 @@ Host packages are defined by composable Brewfile fragments:
 - `productivity`: BetterDisplay, required for DDC monitor input switching, and Obsidian
 - `cloud`: OpenTofu, Terragrunt and module documentation
 - `cloud-aws`, `cloud-azure`, `cloud-gcp`: provider-specific control-plane CLIs
-- `kubernetes`: Kubernetes control-plane and interactive operations
+- `kubernetes`: Kubernetes control-plane and interactive operations, including krew and
+  the declared kubectl plugins (`images`, `sniff`, `whoami`, `neat`, `tree`,
+  `view-secret`) installed by apply hook 28
 - `data`: embedded SQL CLIs and native database/API clients
 - `security-extra`: host-network and PKI tooling, interception proxies, and macOS
   microphone/camera and per-process network monitors. Hardware-key tooling — `ykman`,

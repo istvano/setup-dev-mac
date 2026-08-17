@@ -48,6 +48,20 @@ set -e __brew
 # Emitted only when Rancher is selected (ADR-037); Colima is the default.
 fish_add_path -ga $HOME/.rd/bin
 {{- end }}
+{{- if has "kubernetes" .profiles }}
+# krew installs kubectl plugins into ~/.krew/bin, and kubectl discovers plugins by scanning
+# PATH for `kubectl-*`. Without this, krew reports a successful install and the plugin still
+# cannot be run — which is the state the default profile shipped in.
+#
+# -a appends, so a plugin never shadows a declared Homebrew binary of the same name.
+#
+# This depends on the directory existing, because fish_add_path silently skips a missing one —
+# the same coupling documented for ~/.local/bin above. run_onchange_after_28 creates it with
+# `mkdir -p` before installing anything, so this does not depend on a plugin install having
+# succeeded. zsh needs no such guarantee because it exports PATH unconditionally; the two
+# shells differ here on purpose.
+fish_add_path -ga $HOME/.krew/bin
+{{- end }}
 
 # Rust comes from mise, which shims cargo and rustc; no Homebrew keg on PATH.
 

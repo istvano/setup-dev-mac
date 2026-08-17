@@ -441,9 +441,48 @@ refute_match 'security-extra. provides .age-plugin-yubikey' "$ROOT/docs/MANUAL-S
 
 # The apply-hook flow in ARCHITECTURE.md must name every hook. It listed five of ten, and
 # the missing one whose absence mattered most was 12, whose position is load-bearing.
-for hook_number in 10 12 15 20 25 30 35 40 45 90; do
+for hook_number in 10 12 15 20 25 26 28 30 35 40 45 90; do
   assert_match "_${hook_number} " "$ROOT/docs/ARCHITECTURE.md"
 done
+
+# krew must be usable, not merely installed.
+#
+# It was in the default profile for months while ~/.krew/bin was on no shell's PATH and no
+# plugin was declared: `kubectl krew install tree` reported success and `kubectl tree` then
+# could not be found, because kubectl discovers plugins by scanning PATH for `kubectl-*`.
+# Both halves are asserted, because either one alone leaves it broken.
+assert_match 'HOME/\.krew/bin' "$ROOT/chezmoi/dot_zshrc.tmpl"
+assert_match 'fish_add_path -ga [$]HOME/[.]krew/bin' "$ROOT/chezmoi/dot_config/fish/config.fish.tmpl"
+assert_match '^PLUGINS=\(' "$ROOT/chezmoi/run_onchange_after_28_krew-plugins.sh.tmpl"
+
+# fish needs the directory to exist, because fish_add_path silently skips a missing one — the
+# same coupling this file already enforces for ~/.local/bin. The hook creates it before
+# installing anything, so the PATH entry survives every plugin install failing.
+assert_match 'mkdir -p "[$]HOME/[.]krew/bin"' \
+  "$ROOT/chezmoi/run_onchange_after_28_krew-plugins.sh.tmpl"
+
+# popeye stays out. profiles/kubernetes.Brewfile rejected it under ADR-026 as unmaintained,
+# and its newest release is still v0.22.1 from January 2025. Adding it to the krew list would
+# reintroduce through one channel what was declined through another.
+refute_match 'krew install popeye|"popeye"' \
+  "$ROOT/chezmoi/run_onchange_after_28_krew-plugins.sh.tmpl"
+
+# tart is installed by an apply hook rather than a Brewfile, because it is tap-only and
+# ADR-020 rejects taps — vm/tart.lock plus the digest and Team ID checks in
+# script/install-tart are the trust story instead.
+assert_match 'install-tart' "$ROOT/chezmoi/run_onchange_after_26_install-tart.sh.tmpl"
+# --verify first, or every apply re-downloads ~50 MB from GitHub. The pattern escapes the
+# dashes: `assert_match -- '--verify' file` makes `--` the PATTERN and `--verify` a filename,
+# so grep errors on the missing file, still matches `--` in the real one, and the assertion
+# passes having checked nothing.
+assert_match '"[$]INSTALLER" [-][-]verify' "$ROOT/chezmoi/run_onchange_after_26_install-tart.sh.tmpl"
+# And it must not install a VM engine inside a VM: kern.hv_vmm_present is 1 in a guest and 0
+# on real hardware, so without this every test-install run would fetch tart into a machine
+# that is about to be deleted.
+assert_match 'kern\.hv_vmm_present' "$ROOT/chezmoi/run_onchange_after_26_install-tart.sh.tmpl"
+# tart must NOT appear in any Brewfile: it is not in homebrew-core and never should be added
+# via a tap.
+refute_match '^(brew|cask) "tart"' "$ROOT/profiles"
 
 # neovim is $EDITOR in both shells and core.editor in git, so it must not be unconfigured.
 #

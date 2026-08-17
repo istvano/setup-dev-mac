@@ -39,6 +39,21 @@ if [[ -d "$HOME/.rd/bin" ]]; then
 fi
 {{- end }}
 
+{{ if has "kubernetes" .profiles }}
+# krew installs kubectl plugins into ~/.krew/bin, and kubectl finds plugins by scanning PATH
+# for `kubectl-*`. Without this entry krew works — you can install a plugin and it reports
+# success — and then `kubectl tree` cannot be run, because nothing on PATH provides it. The
+# plugin manager was in the default profile for months in exactly that state.
+#
+# APPENDED, for the same reason as ~/.rd/bin above: a plugin must never shadow a declared
+# Homebrew binary of the same name.
+#
+# Not guarded on the directory existing, unlike ~/.rd/bin. krew creates ~/.krew/bin the first
+# time it installs a plugin, which is often AFTER this shell started, so an existence check
+# would leave the current session unable to run the plugin it just installed.
+[[ ":$PATH:" == *":$HOME/.krew/bin:"* ]] || export PATH="$PATH:$HOME/.krew/bin"
+{{- end }}
+
 # Rust comes from mise, which shims cargo and rustc; no Homebrew keg on PATH.
 
 # --- Completion --------------------------------------------------------------

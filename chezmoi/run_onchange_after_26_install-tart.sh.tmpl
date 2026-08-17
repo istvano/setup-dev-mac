@@ -1,0 +1,62 @@
+{{- if eq .chezmoi.os "darwin" -}}
+{{- $repo := dir .chezmoi.sourceDir -}}
+{{- $lock := joinPath $repo "vm/tart.lock" -}}
+#!/usr/bin/env bash
+# Install tart, the macOS VM engine the test harness runs on.
+#
+# tart is not a Homebrew package and deliberately never will be: it is tap-only, and ADR-020
+# rejects taps, so ADR-036 pins the release by digest in vm/tart.lock and script/install-tart
+# verifies both the SHA-256 and the Apple Team Identifier before installing. That is why this
+# is a hook rather than a Brewfile line — there is nothing for `brew bundle` to install.
+#
+# Pinned version: {{ output "sed" "-n" "s/^version=//p" $lock | trim }}
+#
+# That line is load-bearing. run_onchange hashes the RENDERED script, so embedding the pinned
+# version here is what makes bumping vm/tart.lock re-run this hook. Without it the hook would
+# run once, ever, and a lock bump would be silently ignored on every machine that had already
+# applied.
+set -Eeuo pipefail
+
+{{ template "brew-shellenv" . }}
+
+# Skipped inside a virtual machine.
+#
+# `kern.hv_vmm_present` is 1 in a guest and 0 on real hardware — measured on both. A VM
+# engine installed inside a VM is dead weight: the test guest is disposable, cannot nest on
+# this class of hardware, and has no reason to run a guest of its own. Without this gate every
+# `script/test-install` run would download tart into a machine that is about to be deleted.
+if [[ "$(sysctl -n kern.hv_vmm_present 2>/dev/null || echo 0)" == "1" ]]; then
+  echo "[INFO] Running in a VM, so tart is not installed here." >&2
+  exit 0
+fi
+
+INSTALLER={{ (joinPath $repo "script/install-tart") | quote }}
+[[ -x "$INSTALLER" ]] || {
+  echo "[WARN] $INSTALLER is missing, so tart was not installed." >&2
+  exit 0
+}
+
+# --verify first, so the common case costs nothing.
+#
+# `install-tart` with no argument always downloads and re-installs — by design, since its job
+# is to prove the archive against the digest rather than to trust what is on disk. Calling it
+# unconditionally from an apply hook would fetch ~50 MB from GitHub on every single
+# `chezmoi apply`. `--verify` checks the installed version, the signing team and the symlink
+# locally, and exits non-zero when any of them is wrong, which is exactly the condition that
+# should trigger a real install.
+if "$INSTALLER" --verify >/dev/null 2>&1; then
+  exit 0
+fi
+
+# Reported, never fatal. chezmoi stops at the first failing script, so a GitHub outage here
+# must not cost hooks 28, 30, 35, 40, 45 and 90. tart is test tooling: a machine without it is
+# fully usable, it just cannot run the VM harness until this succeeds.
+if "$INSTALLER"; then
+  echo "[OK] tart is installed and matches vm/tart.lock." >&2
+else
+  echo "[WARN] Could not install tart. The VM test harness will not work until it is." >&2
+  echo "       Retry with:  ./script/install-tart" >&2
+fi
+
+exit 0
+{{- end }}

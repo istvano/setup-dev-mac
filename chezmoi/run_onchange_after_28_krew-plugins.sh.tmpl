@@ -1,0 +1,82 @@
+{{- if and (eq .chezmoi.os "darwin") (has "kubernetes" .profiles) -}}
+#!/usr/bin/env bash
+# Install the declared kubectl plugins through krew.
+#
+# krew was in the default profile and did nothing useful: `kubectl krew` ran, but no plugin
+# was ever declared and ~/.krew/bin was on no shell's PATH, so a plugin installed by hand
+# reported success and then could not be invoked. Both halves are fixed — the shells add the
+# directory, this declares what belongs in it.
+#
+# Plugins: {{ range $i, $p := (list "images" "sniff" "whoami" "neat" "tree" "view-secret") }}{{ if $i }} {{ end }}{{ $p }}{{ end }}
+#
+# That line is load-bearing, not a summary: run_onchange hashes the rendered script, so the
+# list appearing in the body is what makes this hook re-run when the list changes. Edit the
+# list in one place — the `list` call above — and the hash follows.
+#
+# A deliberate exception to ADR-031, which is worth naming rather than glossing. These are
+# third-party binaries fetched at apply time, exactly the pattern rejected for shell plugin
+# managers like oh-my-zsh. What makes krew different, and it is a difference of degree: it is
+# a single reviewed manager, the index is curated by kubernetes-sigs, and each plugin's
+# version and download URL are pinned by that index rather than resolved from a branch. Every
+# one of these six was checked to ship a native darwin/arm64 build, because this repository
+# refuses to install Rosetta and an amd64-only plugin would be dead weight.
+#
+# popeye is deliberately absent. profiles/kubernetes.Brewfile records it as evaluated and
+# rejected under ADR-026 for being stale, and that has not changed: its newest release is
+# still v0.22.1 from January 2025. Installing it here would reintroduce through krew exactly
+# what was declined through Homebrew.
+set -Eeuo pipefail
+
+{{ template "brew-shellenv" . }}
+
+PLUGINS=({{ range $i, $p := (list "images" "sniff" "whoami" "neat" "tree" "view-secret") }}{{ if $i }} {{ end }}{{ $p | quote }}{{ end }})
+
+command -v kubectl >/dev/null 2>&1 || {
+  echo "[WARN] kubectl is not installed, so no krew plugins were installed." >&2
+  exit 0
+}
+command -v kubectl-krew >/dev/null 2>&1 || {
+  echo "[WARN] krew is not installed, so no plugins were installed." >&2
+  exit 0
+}
+
+# Created unconditionally, before anything is installed.
+#
+# config.fish.tmpl adds this to PATH with fish_add_path, which SILENTLY skips a directory that
+# does not exist. Creating it here means fish gets the entry even on a machine where every
+# plugin install below fails, rather than losing it in a way whose only symptom is a plugin
+# that cannot be found.
+mkdir -p "$HOME/.krew/bin"
+
+# The index has to exist before anything can be installed from it, and it does not on a fresh
+# machine. Non-fatal: an offline apply should skip the plugins, not abort every later hook.
+if ! kubectl krew update >/dev/null 2>&1; then
+  echo "[WARN] Could not update the krew index; skipping plugin installation." >&2
+  exit 0
+fi
+
+# Idempotent: ask krew what is present and install only the difference, so a re-apply is
+# silent and costs no network.
+installed="$(kubectl krew list 2>/dev/null || true)"
+failed=0
+for plugin in "${PLUGINS[@]}"; do
+  if printf '%s\n' "$installed" | grep -qx "$plugin"; then
+    continue
+  fi
+  echo "[INFO] Installing kubectl plugin: $plugin" >&2
+  kubectl krew install "$plugin" >/dev/null 2>&1 || {
+    echo "[WARN] Could not install kubectl plugin: $plugin" >&2
+    failed=$((failed + 1))
+  }
+done
+
+# Reported, never fatal. chezmoi stops at the first failing script, so a plugin that will not
+# download must not cost hooks 30, 35, 40, 45 and 90 — the macOS defaults, the browser
+# profiles and the security reminder.
+if ((failed > 0)); then
+  echo "[WARN] $failed kubectl plugin(s) could not be installed. Retry with:" >&2
+  echo "       kubectl krew install <name>" >&2
+fi
+
+exit 0
+{{- end }}

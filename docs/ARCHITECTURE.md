@@ -92,6 +92,8 @@ bootstrap
        -> after_15   restores the age identity from Bitwarden, or mints and flags one
        -> after_20   installs the mise-managed runtimes
        -> after_25   reports the container substrate; never starts it
+       -> after_26   installs tart from the pinned release, unless running in a VM
+       -> after_28   installs the declared kubectl plugins via krew
        -> after_30   reports the account login shell against the selected one
        -> after_35   installs the pinned VS Code extensions when dev is selected
        -> after_40   applies declared macOS defaults (default; --no-macos-defaults opts out)
