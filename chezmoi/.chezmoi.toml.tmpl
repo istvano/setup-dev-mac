@@ -27,7 +27,17 @@
        that split and drives dot_config/git/config-work.tmpl; a second mechanism deciding
        the same thing is how the two drift apart. */ -}}
 {{- $machineName := "" -}}
-{{- if eq .chezmoi.os "darwin" -}}
+{{- /* The lookPath guard is not defensive noise, it is required.
+
+       `output` on a binary that does not exist is a HARD template error, not an empty
+       string, and tests/chezmoi-templates.sh rewrites `eq .chezmoi.os "darwin"` to `true`
+       so that darwin-only bodies are really executed on Linux CI. Without the guard that
+       rewrite made this line run `scutil` on an Ubuntu runner and fail the whole job — the
+       macOS job passed, because scutil is there, so the break was invisible on a Mac.
+       lookPath returns "" for a missing binary, which is falsy, so the branch is skipped
+       instead of exploding. It also covers a real case: a Mac whose PATH has lost
+       /usr/sbin. */ -}}
+{{- if and (eq .chezmoi.os "darwin") (lookPath "scutil") -}}
 {{-   $machineName = output "scutil" "--get" "ComputerName" | trim -}}
 {{- else -}}
 {{-   $machineName = .chezmoi.hostname -}}

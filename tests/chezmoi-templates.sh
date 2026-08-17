@@ -215,6 +215,45 @@ for CONFIG in "${CONFIGS[@]}"; do
   done
 done
 
+# --- Every darwin body must render without a macOS-only binary on PATH.
+#
+# This exists because of a real break that this suite could not see. The forced-darwin
+# rewrite above made the config template run `scutil --get ComputerName` on an Ubuntu
+# runner, where scutil does not exist, and `output` on a missing binary is a HARD template
+# error — so the linux-static job failed while the macOS job and every local run stayed
+# green. A guard that only fires in CI is a guard you find out about from CI.
+#
+# PATH is rebuilt from an allowlist of tools a Linux runner has, rather than by trying to
+# hide the macOS-only ones: the set of macOS-only binaries is open-ended and would have to
+# be guessed, while the set this repository's templates legitimately shell out to is small
+# and known. A template that needs another portable tool fails here with a clear name to
+# add; a template that needs a macOS-only one fails here instead of in CI, which is the
+# entire point. The fix in that case is a `lookPath` guard, not an entry below.
+PORTABLE_PATH="$TMP/portable-bin"
+mkdir -p "$PORTABLE_PATH"
+for tool in chezmoi sh bash env sed awk grep tr cat cut sort uniq head tail \
+  dirname basename shasum git; do
+  resolved="$(command -v "$tool" 2>/dev/null)" || continue
+  ln -sf "$resolved" "$PORTABLE_PATH/$tool"
+done
+
+for template in "${TEMPLATES[@]}"; do
+  init_flags=()
+  [[ "$(basename "$template")" == ".chezmoi.toml.tmpl" ]] && init_flags=(--init)
+
+  if ! error="$(sed 's/eq \.chezmoi\.os "darwin"/true/g' "$template" |
+    PATH="$PORTABLE_PATH" chezmoi execute-template \
+      "${init_flags[@]+"${init_flags[@]}"}" \
+      --config "$TMP/full.toml" --source "$ROOT" 2>&1 >/dev/null)"; then
+    printf '%s: darwin body fails to render without macOS-only binaries on PATH.\n' \
+      "$template" >&2
+    printf 'This is what breaks the linux-static CI job. Guard the call with lookPath:\n' >&2
+    printf '  {{ if and (eq .chezmoi.os "darwin") (lookPath "<cmd>") }}\n' >&2
+    printf '%s\n' "$error" >&2
+    exit 1
+  fi
+done
+
 # --- .chezmoiignore is a template too, but has no .tmpl suffix.
 #
 # The selector above finds files by extension, so this file is invisible to it.
