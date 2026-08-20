@@ -1,6 +1,37 @@
+# Dependabot is enabled and it works. It opened a pull request for actions/checkout
+# within a minute of this repository being created — and that PR then sat unmerged for
+# nineteen days, until the same bump was made by hand and Dependabot closed its own PR
+# as superseded. The gap was never the mechanism, it was the noticing.
+#
+# So the answer is not more automation here. `script/update-report` now checks the
+# pinned action SHAs alongside every other pin, which puts a stale action in the place
+# updates are already reviewed rather than relying on anyone opening GitHub.
+#
+# NO AUTO-MERGE, deliberately. It is the obvious fix and it is the wrong one for this
+# repository: these actions run with the repository's own token, ADR-006 exists because
+# an unreviewed version change is the thing being guarded against, and a merge nobody
+# read is a version change nobody reviewed. Being slow to merge is a much smaller
+# problem than merging without looking. Dependabot's job is to notice; the merge stays
+# a decision.
+#
+# github-actions is the only ecosystem here, and that is not an oversight. Dependabot
+# reads dependency MANIFESTS, and this repository has none: the Homebrew tokens carry no
+# versions, and the mise runtimes, MCP server packages, uv tools, container digests and
+# the CI toolchain are all pinned in configuration files and workflow `run:` blocks that
+# Dependabot cannot parse. `script/update-report` covers those, which is why it exists.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    # One pull request for every action, rather than one per action. There are only two
+    # distinct actions today, but the failure mode being avoided is a queue of
+    # single-line PRs that each look too small to bother reading.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - dependencies
+      - github-actions

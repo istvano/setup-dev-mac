@@ -359,6 +359,51 @@ for line in sys.stdin.read().split():
 )
 
 echo
+echo '== Pinned GitHub Actions =='
+# Dependabot already watches these and opens a pull request. It works — it opened one
+# for actions/checkout within a minute of this repository being created. That PR then
+# sat unmerged for nineteen days, until the same bump was made by hand and Dependabot
+# closed its own PR as superseded.
+#
+# So the gap was never the mechanism, it was the noticing. This report is where pending
+# updates are already reviewed, so the actions belong here too: a stale pin surfaces in
+# the same place as a stale Homebrew package, whether or not anyone opened GitHub.
+#
+# Two questions per action, and the second matters more than the first:
+#
+#   1. is the pinned version still the latest release
+#   2. does the pinned SHA actually resolve to the tag the comment claims
+#
+# A comment saying "# v7.0.1" beside a SHA that is not v7.0.1 is worse than no comment:
+# review reads the comment, CI runs the SHA, and nothing else compares them.
+while IFS=$'\t' read -r repo sha version; do
+  tag_sha="$(curl -fsS --max-time 20 "https://api.github.com/repos/$repo/git/ref/tags/$version" 2>/dev/null |
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("object",{}).get("sha",""))' 2>/dev/null || true)"
+  if [[ -z "$tag_sha" ]]; then
+    warn "Could not resolve $repo@$version; pinned SHA is ${sha:0:12}."
+  elif [[ "$tag_sha" != "$sha" ]]; then
+    warn "$repo: the pin claims $version but that tag is ${tag_sha:0:12}, not ${sha:0:12}."
+    log 'The comment and the SHA disagree. Trust the SHA and correct the comment,'
+    log 'or repin deliberately — do not assume the comment is the true one.'
+  else
+    latest="$(curl -fsS --max-time 20 "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null |
+      python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name",""))' 2>/dev/null || true)"
+    if [[ -z "$latest" ]]; then
+      warn "Could not reach the $repo release API; pinned version is $version."
+    elif [[ "$latest" == "$version" ]]; then
+      success "$repo $version is current, and the SHA matches the tag."
+    else
+      warn "$repo $version is pinned; $latest is available."
+      log "Dependabot opens a PR for this. Merge it, or repin by hand with the SHA"
+      log "that $latest resolves to — never the tag alone (ADR-006)."
+    fi
+  fi
+done < <(
+  grep -rhoE 'uses: [^@[:space:]]+@[0-9a-f]{40} # v[0-9.]+' "$ROOT"/.github/workflows/*.yml |
+    sed -E 's/^uses: //; s/@/\t/; s/ # /\t/' | sort -u
+)
+
+echo
 echo '== Cleanup candidates =='
 warn 'Listed only. Removing a package is never automatic; see docs/OPERATIONS.md.'
 brew bundle cleanup --file="$brewfile" || true

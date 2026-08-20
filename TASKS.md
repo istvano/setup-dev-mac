@@ -555,7 +555,11 @@ verified from a Linux workstation and are therefore not yet proven.
 
 ## Pin hygiene
 
-- [ ] Check whether Dependabot is actually enabled. `.github/dependabot.yml` asks
-      for monthly `github-actions` updates, yet `actions/checkout` sat three major
-      versions behind until it was bumped by hand — so either the app is not
-      enabled on the repository or its pull requests are not being merged.
+- [ ] Merge Dependabot's pull requests, or repin by hand — but do not leave them
+      open. The question of whether it was enabled is answered: it is, and it
+      opened PR #1 for actions/checkout one minute after the repository was
+      created. That PR sat unmerged for nineteen days and Dependabot closed it
+      itself once the same bump was made by hand. Nothing is broken except the
+      habit. `script/update-report` now reports stale action pins so the drift
+      shows up where updates are already reviewed; auto-merge is declined in
+      `.github/dependabot.yml` and the reasoning is there.

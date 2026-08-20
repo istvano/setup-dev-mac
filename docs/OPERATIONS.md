@@ -1077,6 +1077,7 @@ version this repository pins by hand:
 | Pinned runtimes (mise) | the mise `[tools]` pins | `mise latest`, plus go.dev, nodejs.org and Adoptium |
 | Pinned packages | the six MCP servers, the Cline CLI, aider | npm and PyPI |
 | Pinned CI toolchain | shfmt, actionlint, gitleaks, chezmoi | the Go module proxy |
+| Pinned GitHub Actions | the SHA-pinned `uses:` lines | the GitHub releases and tags API |
 
 Three runtimes are compared against something other than "the newest release",
 because that is not what their pin means:
@@ -1089,6 +1090,17 @@ because that is not what their pin means:
   policy forbids.
 - **Java** against Adoptium's newest LTS. The pins are ordered, and the first is
   the default; adding a newer LTS at the end changes no project's JDK.
+
+The actions check asks two questions, and the second matters more: whether the
+pinned version is still current, and whether the pinned SHA actually resolves to
+the tag its comment claims. A comment naming a version the SHA is not is worse
+than no comment — review reads the comment while CI runs the SHA, and nothing
+else compares them.
+
+Dependabot also opens a pull request for a stale action and is left enabled for
+that. It is not set to auto-merge: these actions run with the repository's own
+token, and a merge nobody read is a version change nobody reviewed, which is what
+ADR-006 exists to prevent. The reasoning is in `.github/dependabot.yml`.
 
 An unreachable API always warns and never fails, so a network problem cannot be
 mistaken for a stale pin.
