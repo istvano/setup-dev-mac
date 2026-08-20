@@ -420,8 +420,6 @@ real hardware yet.
 - [ ] Consider whether `WORKSTATION_VM_DISK_FORMAT=asif` should become the default.
       It performs better and the host qualifies (macOS 26), but `raw` is the proven
       path and the difference has not been measured here.
-- [ ] `script/update-report` reports newer ToolHive releases only when `thv` is
-      installed. Give tart the same treatment so a stale `vm/tart.lock` is noticed.
 
 ## Findings from the first destructive runs
 

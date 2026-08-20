@@ -81,47 +81,35 @@ PY
 
 echo
 echo '== Pinned tools outside Homebrew =='
-# thv is optional and is not installed by default. Only report on it once it is
-# actually present: `brew outdated` cannot see it, so without this check an
-# installed copy would silently never update, but an uninstalled one should not
-# generate noise on every update.
-lock="$ROOT/mcp/toolhive.lock"
-if ! command_exists thv; then
-  log 'ToolHive is not installed; skipping. See docs/OPERATIONS.md#mcp-servers.'
-elif [[ -f "$lock" ]]; then
+# Every lock file in the repository, reported whether or not the tool is installed.
+#
+# thv used to be skipped when `thv` was absent, on the reasoning that an uninstalled
+# tool should not generate noise. That was the wrong test: the pin is what
+# script/install-toolhive WILL fetch, so a stale one is stale before the first install
+# and is worth knowing about precisely then — on a new machine, before the archive is
+# downloaded. It also left vm/tart.lock with no check at all, which is the gap TASKS.md
+# recorded. One loop now covers all three, and adding a lock file means adding a row.
+#
+# Each row is: lock path, human name, GitHub repo, and the command to run after bumping.
+while IFS='|' read -r lock_path name repo followup; do
+  lock="$ROOT/$lock_path"
+  [[ -f "$lock" ]] || continue
   pinned="$(grep -E '^version=' "$lock" | cut -d= -f2)"
-  latest="$(curl -fsS --max-time 20 https://api.github.com/repos/stacklok/toolhive/releases/latest 2>/dev/null |
+  latest="$(curl -fsS --max-time 20 "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null |
     python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)"
   if [[ -z "$latest" ]]; then
-    warn "Could not reach the ToolHive release API; pinned version is $pinned."
+    warn "Could not reach the $name release API; pinned version is $pinned."
   elif [[ "$pinned" == "$latest" ]]; then
-    success "ToolHive is at the latest release ($pinned)."
+    success "$name is at the latest release ($pinned)."
   else
-    warn "ToolHive $pinned is pinned; $latest is available."
-    log "Update mcp/toolhive.lock with the new version and its published digests,"
-    log "then run ./script/install-toolhive."
+    warn "$name $pinned is pinned; $latest is available."
+    log "Bump $lock_path — version AND digest together — then: $followup"
   fi
-fi
-
-# The containerised agent tools (ADR-043). Reported unconditionally, unlike thv above:
-# the pin is what script/ai-agent runs, so it is stale whether or not the image has ever
-# been pulled, and there is no local command to probe for its presence.
-lock="$ROOT/agent-tools/openhands.lock"
-if [[ -f "$lock" ]]; then
-  pinned="$(grep -E '^version=' "$lock" | cut -d= -f2)"
-  latest="$(curl -fsS --max-time 20 https://api.github.com/repos/OpenHands/OpenHands/releases/latest 2>/dev/null |
-    python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)"
-  if [[ -z "$latest" ]]; then
-    warn "Could not reach the OpenHands release API; pinned version is $pinned."
-  elif [[ "$pinned" == "$latest" ]]; then
-    success "OpenHands is at the latest release ($pinned)."
-  else
-    warn "OpenHands $pinned is pinned; $latest is available."
-    log "Resolve the new tag to its multi-arch index digest, then update BOTH fields"
-    log "in agent-tools/openhands.lock together:"
-    log "  docker buildx imagetools inspect ghcr.io/openhands/agent-canvas:$latest"
-  fi
-fi
+done <<'LOCKS'
+mcp/toolhive.lock|ToolHive|stacklok/toolhive|./script/install-toolhive
+vm/tart.lock|tart|openai/tart|./script/install-tart
+agent-tools/openhands.lock|OpenHands|OpenHands/OpenHands|docker buildx imagetools inspect ghcr.io/openhands/agent-canvas:<version>
+LOCKS
 
 echo
 echo '== Pinned runtimes (mise) =='
