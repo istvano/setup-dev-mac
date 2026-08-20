@@ -2037,21 +2037,39 @@ third-party packages and waived for one's own build system is not an invariant.
 
 ### What replaces it
 
-Four pinned `go install` lines, chezmoi included. Three consequences:
+Three pinned `go install` lines — shfmt, actionlint and gitleaks — plus a pinned,
+digest-verified binary download for chezmoi.
 
-- **The curl-pipe is gone rather than pinned.** chezmoi is written in Go, so it
-  comes from the same mechanism as the other three and the remote-script execution
-  disappears entirely. A `go install` build cannot self-upgrade and reports its
-  version as `dev`; nothing in this repository parses either, and the subcommands
-  the tests use are all present.
-- **Pinning brings integrity, not just reproducibility.** `go install` verifies
-  the module against the Go checksum database, so a pinned version is a verified
-  one. That is a stronger guarantee than the release tarball downloads elsewhere in
-  this repository get, and it costs nothing.
-- **gitleaks moves to `github.com/gitleaks/gitleaks/v8`**, its canonical path. The
-  old `zricethezav` path serves the identical commit, but only through a GitHub
-  redirect, and `vm/tart.lock` already argues against letting review depend on a
-  redirect that upstream can retire.
+- **The curl-pipe is gone rather than pinned.** Nothing fetches a script from a web
+  server and hands it to a shell any more.
+- **Pinning brings integrity, not just reproducibility.** `go install` verifies the
+  module against the Go checksum database, and the chezmoi download is checked
+  against the digest published in the release's own checksums file. Both are
+  verified; neither was before.
+
+### Two corrections, because the first attempt shipped broken
+
+This ADR originally claimed chezmoi would come from `go install` "like the other
+three", and that gitleaks should move to `github.com/gitleaks/gitleaks/v8` as its
+"canonical path". Both were wrong, CI failed on the first push, and the reasons
+are worth keeping rather than quietly editing away.
+
+**A Go module's identity is the path its own `go.mod` declares.** The gitleaks
+repository moved to `github.com/gitleaks/gitleaks`, so that spelling looks
+canonical in a browser — but v8.30.1 still declares
+`module github.com/zricethezav/gitleaks/v8`, and `go install` refuses a path that
+disagrees with the declaration. The check that missed this asked the module proxy
+whether the version *resolved*, which it does under both spellings. Resolution is
+not installability, and verifying the cheaper property reads like verifying the
+real one.
+
+**chezmoi cannot be `go install`ed at all.** Its `go.mod` carries a replace
+directive, and `go install pkg@version` rejects any module that does, because the
+replacement would make the build differ from an ordinary one. No amount of pinning
+fixes that; it needs a different acquisition method. The released binary plus a
+published digest is that method, and it is the pattern `script/install-toolhive`
+and `script/install-tart` already use — so the answer was in the repository
+before the question was asked.
 
 `tests/placement-policy.sh` asserts both rules against the workflows, checking the
 code rather than the comments — the workflow now explains both rules in prose, and

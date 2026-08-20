@@ -37,15 +37,37 @@ jobs:
           # SDKMAN over. A go-install build cannot self-upgrade and reports its
           # version as "dev"; nothing here needs either.
           #
-          # gitleaks is under github.com/gitleaks/gitleaks, its canonical path.
-          # The old github.com/zricethezav path still resolves, but only through a
-          # GitHub redirect, and vm/tart.lock already argues against letting review
-          # depend on a redirect staying in place.
+          # gitleaks keeps the github.com/zricethezav path. The GitHub repository
+          # moved to github.com/gitleaks/gitleaks, and an earlier version of this
+          # file "corrected" the import to match — which does not build. A Go
+          # module's identity is the path its own go.mod DECLARES, and v8.30.1
+          # still declares `module github.com/zricethezav/gitleaks/v8`. The proxy
+          # answers metadata for both spellings, so the mistake survived a check
+          # that only resolved the version; `go install` validates the declared
+          # path and refused it. Follow the go.mod, not the browser URL.
           go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-          go install github.com/gitleaks/gitleaks/v8@v8.30.1
-          go install github.com/twpayne/chezmoi/v2@v2.72.0
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
           echo "$HOME/go/bin" >>"$GITHUB_PATH"
+
+          # chezmoi cannot be `go install`ed at all: its go.mod carries a replace
+          # directive, and `go install pkg@version` refuses any module that does,
+          # because the replacement would make the build differ from a normal one.
+          # So it comes as its released binary, pinned by version AND verified
+          # against the digest published in the release's own checksums file.
+          #
+          # That is the pattern script/install-toolhive and script/install-tart
+          # already use for the same problem, and it is a stronger guarantee than
+          # the `sh -c "$(curl ...)"` this replaced: that fetched whatever the web
+          # server served, unpinned and unverified.
+          CHEZMOI_VERSION=2.72.0
+          CHEZMOI_SHA256=0d6665b96c527d57fdc562bf19e808f80f48c2d977062c03e3e65c6b09eafbce
+          curl -fsSL -o /tmp/chezmoi.tar.gz \
+            "https://github.com/twpayne/chezmoi/releases/download/v${CHEZMOI_VERSION}/chezmoi_${CHEZMOI_VERSION}_linux_amd64.tar.gz"
+          echo "${CHEZMOI_SHA256}  /tmp/chezmoi.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf /tmp/chezmoi.tar.gz -C "$HOME/.local/bin" chezmoi
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
       # script/test discovers shell scripts by shebang via script/shell-files,
       # so the previously skipped extensionless scripts under script/ are now
       # linted. CI no longer maintains its own duplicate file selector.
