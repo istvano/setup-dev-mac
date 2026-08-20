@@ -1974,6 +1974,23 @@ Licensing is mixed and worth naming: `cline`, `@cline/sdk`, `@cline/agents` and
 The IDE half is unrelated to any of this and takes the channel it always would:
 `saoudrizwan.claude-dev` pinned in `vscode/extensions.list` under ADR-032.
 
+**The hub daemon binds loopback — verified, not assumed.** `cline hub start` in the test
+guest listens on `127.0.0.1:25463` and nothing else; `cline hub status` independently
+reports `ws://127.0.0.1:25463/hub`. Checked four ways: the listener row itself, the
+full-socket list for the hub's PID, an `lsof -nP -i -sTCP:LISTEN` sweep for an IPv6 or
+wildcard bind, and four separate hub starts under different environments. No `0.0.0.0`
+bind appeared in any of them.
+
+This mattered because `AGENTS.md`'s binding invariant applies to a host daemon exactly as
+it does to a published container port, and the npm package is only a resolver wrapper, so
+the listener could not be inspected by reading it. `lsof -nP -iTCP -sTCP:LISTEN | grep -i
+cline` does find it: the process is the Bun-embedded prebuilt binary and reports `COMMAND`
+as `cline`, not `node`.
+
+**But the idle hub opens an outbound connection to `otel.cline.bot`**, and that is
+recorded here rather than in ADR-046 because ADR-046's audit never covered cline at all.
+See the correction in that ADR.
+
 ### aider: Homebrew builds what PyPI ships prebuilt, and the interpreter clashes
 
 `brew "aider"` is current and not deprecated, so it was a real candidate. Two things
@@ -2213,6 +2230,39 @@ A fourth was caught while fixing the first: `mise exec -- go` **installs** a
 missing toolchain in order to run it, so the obvious fix would have let a
 telemetry hook trigger a Go download. `mise which` reports a path, installs
 nothing, and resolves the pinned version rather than the newest.
+
+### The audit missed Cline
+
+The scope above says "every package in every profile, plus the mise runtimes, the
+editor extensions, the MCP servers, the CI toolchain and the containerised agent
+tools." Cline arrives through mise — `"npm:cline"` in
+`chezmoi/dot_config/mise/config.toml.tmpl`, inside the `dev` block, and `dev` is in
+`DEFAULT_PROFILES`. So it is installed on every default machine, and it appears
+nowhere in this ADR: not in the closed table, not in the opt-in table, not in
+"checked, nothing found".
+
+It has telemetry. `cline hub start` on an otherwise idle guest — no credentials
+configured, no task running — immediately opens and holds a TLS connection to
+`otel.cline.bot` (34.49.39.67, confirmed by the certificate's CN, not by reverse
+DNS alone). An OpenTelemetry collector is not an ambiguous endpoint.
+
+**Three plausible opt-outs do not stop it.** The hub was started four times and the
+connection was present every time, including with `DO_NOT_TRACK=1`,
+`CLINE_TELEMETRY_DISABLED=1` and `OTEL_SDK_DISABLED=true` all set at once. The peer
+was re-confirmed as `otel.cline.bot` under those variables specifically, so this is
+not a different endpoint being miscounted.
+
+`DO_NOT_TRACK=1` is set by both shells and is labelled above as an informal
+convention rather than a mechanism. This is the first measured case of a tool on
+this machine ignoring it, which is worth having as evidence rather than as a
+caveat.
+
+What is NOT established: the payload. An open connection to a telemetry collector
+is proof of a channel, not of what traverses it; nothing here inspected the data.
+Finding a real opt-out — a config key, a build flag, or the conclusion that there
+is none — is tracked in `TASKS.md` and is the open question. Until it is answered
+this ADR's claim to have audited the mise runtimes is incomplete, and saying so is
+cheaper than a reader assuming otherwise.
 
 `tests/placement-policy.sh` now asserts each of these against the hook's code
 with its comments stripped, so a version that explains the rule while not

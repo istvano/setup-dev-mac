@@ -535,11 +535,17 @@ Everything here is a macOS-only check. The tools are declared and the static
 invariants are enforced by `tests/agent-tools.sh`, but four claims could not be
 verified from a Linux workstation and are therefore not yet proven.
 
-- [ ] Confirm the Cline CLI's local hub daemon binds `127.0.0.1`. The compiled
-      binary starts one and probes ports to rediscover it; the published npm
-      package is only a resolver wrapper, so the listener could not be inspected.
-      `lsof -nP -iTCP -sTCP:LISTEN | grep -i cline`. If it binds `0.0.0.0`, that
-      is a stop: the binding invariant applies to a host daemon too.
+- [ ] Find Cline's telemetry opt-out, or establish that there is none. `cline hub
+      start` on an idle guest — no credentials, no task — opens and holds a TLS
+      connection to `otel.cline.bot`, confirmed by the certificate CN. `DO_NOT_TRACK=1`,
+      `CLINE_TELEMETRY_DISABLED=1` and `OTEL_SDK_DISABLED=true` set together do NOT stop
+      it, re-confirmed against that peer specifically. cline is installed on every
+      default machine (`"npm:cline"` sits in the `dev` block and `dev` is in
+      `DEFAULT_PROFILES`), and ADR-046's audit never covered it — the correction is in
+      that ADR. Look for a config key or build flag; if there is none, the question
+      becomes whether a default-profile tool may report usage at all, which is an
+      ADR-044 and ADR-046 decision rather than a fix. The payload was not inspected,
+      so "what it sends" is still unknown.
 - [ ] Determine whether the Cline CLI auto-updates in the background, and turn it
       off if it can be. Its `postinstall.mjs` refers to a background auto-update
       restarting the hub, which would mean `"npm:cline"` pins the version
