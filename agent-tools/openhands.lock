@@ -1,0 +1,33 @@
+# Pinned image for OpenHands Agent Canvas, a containerised agent tool (ADR-043).
+#
+# A workstation tool that happens to ship as a container. It is NOT the container
+# substrate — script/container-substrate owns only stateless objects and ADR-037
+# forbids adding a service with data to it — and it is NOT a project service under
+# ADR-010, because no project owns it. ADR-043 is the category it sits in.
+#
+# The directory is agent-tools/, not containers/. tests/placement-policy.sh reserves
+# a top-level containers/ directory and always has: that name is where a shared
+# workstation compose stack would go, which is the thing ADR-010 refuses. A pin file
+# is not a stack, but the guard is deliberately unarguable and worth more intact than
+# reinterpreted. One lock per tool, as in mcp/toolhive.lock and vm/tart.lock.
+#
+# The digest, not the tag, is what script/ai-agent runs. A tag is mutable; ADR-006
+# and the MCP policy both refuse a floating version, and an image is the case that
+# rule was written for. `version` is here so a human can tell at a glance which
+# release the digest is, and so script/update-report can compare it upstream.
+#
+# The digest below is the multi-arch image INDEX, not a per-architecture manifest.
+# Docker selects the linux/arm64 member from it. Pinning a child manifest instead
+# would work on this machine and break on any other, which is a worse failure than
+# not pinning at all because it looks deliberate.
+#
+# To bump: read the release notes, resolve the new tag to its index digest, and
+# replace both fields together. Never move `version` without moving `digest`.
+#
+#   docker buildx imagetools inspect ghcr.io/openhands/agent-canvas:<version>
+#
+# Verify against what the registry reports for the tag you reviewed, not against
+# whatever a local `docker pull` happened to fetch.
+image=ghcr.io/openhands/agent-canvas
+version=1.14.0
+digest=sha256:fe0891ff55113a2c837de070c775055feeb149f3dec98149565ae1e8617c48af

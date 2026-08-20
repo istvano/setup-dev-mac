@@ -315,6 +315,14 @@ case "$toml_status" in
     ;;
   *) exit "$toml_status" ;;
 esac
+# ADR-010, by name. A top-level containers/ directory is where a shared workstation
+# compose stack would go, and the managed-home one is where its data would land; both
+# are the thing ADR-010 refuses, so neither name may exist at all.
+#
+# ADR-043 pins containerised agent tools, which is a different thing — a lock file is
+# not a stack — and they live in agent-tools/ rather than here. The guard is
+# deliberately unarguable and is worth more intact than reinterpreted, so the category
+# took the other name instead of an exception.
 [[ ! -e "$ROOT/containers" ]]
 [[ ! -e "$ROOT/chezmoi/private_dot_config/security-ai-workstation/containers" ]]
 
@@ -602,5 +610,36 @@ assert_match '^WITH_HARDENING=true$' "$ROOT/script/test-install"
 # "on", so a bare `[[ x == true ]] &&` would turn --no-hardening into a silent no-op.
 assert_match 'bootstrap_args\+=\(--no-macos-defaults\)' "$ROOT/script/test-install"
 assert_match 'bootstrap_args\+=\(--no-hardening\)' "$ROOT/script/test-install"
+
+# Nothing mise declares may float. ADR-030 pinned the runtimes for exactly the reason
+# ADR-006 pins image tags, but nothing enforced it, and the npm: backend added by
+# ADR-044 is the easiest place for "latest" to come back: it is what `mise use -g`
+# writes by default, so it arrives from a convenience command rather than a decision.
+refute_match '^[^#]*=[[:space:]]*"latest"' "$ROOT/chezmoi/dot_config/mise/config.toml.tmpl"
+
+# Cline's CLI comes from npm through mise, never from Homebrew: the formula is
+# deprecated upstream, which script/check-tokens fails on, and it depends on a Homebrew
+# node beside mise's. See ADR-044.
+assert_match '^"npm:cline" = "[0-9]+\.[0-9]+\.[0-9]+"$' \
+  "$ROOT/chezmoi/dot_config/mise/config.toml.tmpl"
+refute_match '^[[:space:]]*(brew|cask) "(cline|aider)"' "$ROOT/profiles"
+
+# CI installs the four tools that decide whether a change may merge — shfmt,
+# actionlint, gitleaks and chezmoi. Both of these rules were broken there while being
+# enforced everywhere else: the workflow used `go install …@latest`, which
+# tests/mcp-policy.sh refuses in an MCP package spec, and fetched chezmoi by piping a
+# web server's script into sh, which AGENTS.md forbids and which ADR-042 gave as a
+# reason to reject SDKMAN outright.
+#
+# Checked against the CODE, not the file. The workflow now explains both rules in its
+# comments, and matching that prose would fail the version that gets it right — which
+# teaches the next author to delete the explanation instead of keeping the behaviour.
+# Same reasoning as the port and socket checks in tests/agent-tools.sh.
+workflow_code="$(mktemp "${TMPDIR:-/tmp}/workflows.XXXXXX")"
+trap 'rm -f "$workflow_code"' EXIT
+grep -vhE '^[[:space:]]*#' "$ROOT"/.github/workflows/*.yml >"$workflow_code"
+
+refute_match '@latest' "$workflow_code"
+refute_match 'curl[^|]*\|[[:space:]]*(sh|bash)|sh -c "\$\(curl' "$workflow_code"
 
 echo 'Placement policy: OK'

@@ -12,19 +12,40 @@ jobs:
     steps:
       # Actions are pinned to commit SHAs so CI honours the immutable-reference
       # rule this repository already applies to container images (ADR-006).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install validation tools
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck python3-yaml
           # shfmt, actionlint, gitleaks and chezmoi are not available in a
           # current-enough form from apt.
-          go install mvdan.cc/sh/v3/cmd/shfmt@latest
-          go install github.com/rhysd/actionlint/cmd/actionlint@latest
-          go install github.com/zricethezav/gitleaks/v8@latest
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
+          #
+          # PINNED, for the reason ADR-006 pins image tags and
+          # tests/mcp-policy.sh refuses @latest in an MCP package spec. These four
+          # decide whether a change is allowed to merge, so a floating version
+          # here is a wider exposure than a floating version anywhere the rule was
+          # already enforced. tests/placement-policy.sh now asserts they stay
+          # pinned, and script/update-report reports when they fall behind.
+          #
+          # `go install` resolves the exact version and verifies it against the Go
+          # checksum database, so pinning buys integrity and not only
+          # reproducibility.
+          #
+          # chezmoi comes from the same mechanism rather than
+          # `sh -c "$(curl … get.chezmoi.io)"`, which was unreviewed remote-script
+          # execution of exactly the kind AGENTS.md forbids and ADR-042 rejected
+          # SDKMAN over. A go-install build cannot self-upgrade and reports its
+          # version as "dev"; nothing here needs either.
+          #
+          # gitleaks is under github.com/gitleaks/gitleaks, its canonical path.
+          # The old github.com/zricethezav path still resolves, but only through a
+          # GitHub redirect, and vm/tart.lock already argues against letting review
+          # depend on a redirect staying in place.
+          go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          go install github.com/gitleaks/gitleaks/v8@v8.30.1
+          go install github.com/twpayne/chezmoi/v2@v2.72.0
           echo "$HOME/go/bin" >>"$GITHUB_PATH"
-          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
       # script/test discovers shell scripts by shebang via script/shell-files,
       # so the previously skipped extensionless scripts under script/ are now
       # linted. CI no longer maintains its own duplicate file selector.
@@ -33,7 +54,7 @@ jobs:
   macos-render:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: brew install shellcheck shfmt actionlint gitleaks yamllint chezmoi
       - run: ./script/test
       - run: ./bootstrap plan

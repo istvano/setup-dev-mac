@@ -48,6 +48,16 @@ substrate-status:
 substrate-verify:
   ./script/container-substrate --verify
 
+# --- Containerised agent tools (ADR-043) ------------------------------------
+
+# Run OpenHands Agent Canvas from the digest pinned in agent-tools/openhands.lock.
+openhands:
+  ./script/ai-agent openhands
+
+# Print the docker command openhands would run, changing nothing.
+openhands-plan:
+  ./script/ai-agent openhands --dry-run
+
 # --- Local macOS test VM (ADR-036) ------------------------------------------
 
 # Install the tart release pinned in vm/tart.lock.

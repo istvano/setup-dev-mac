@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# Repository scripts live one level above .chezmoi.sourceDir; see .chezmoiroot.
+exec {{ joinPath (dir .chezmoi.sourceDir) "script/ai-agent" | quote }} "$@"

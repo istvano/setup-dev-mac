@@ -57,6 +57,26 @@ Clusters are project-owned too. A `k3d.yaml` belongs in the project repository,
 because the k3s version, the pod and service CIDRs and the ingress ports are all
 project decisions, and CIDRs cannot be changed after a cluster is created.
 
+### Containerised agent tools
+
+A third case sits between the two above, and ADR-043 names it rather than leaving
+it to be filed wrongly. An agent tool such as OpenHands is not a project's service —
+no project owns it — and it is not substrate either, because it keeps conversations,
+settings and provider credentials in `~/.openhands`.
+
+`agent-tools/*.lock` pins the image and `script/ai-agent` runs it, under four
+conditions the test suite enforces: addressed by digest and never by tag, every
+published port bound to `127.0.0.1`, no `/var/run/docker.sock`, and exactly one state
+directory plus one project mount.
+
+The isolation is real, so it costs something. The agent uses the container's
+toolchain, not the host's — Python and Node are in the image, Go, Java and Rust are
+not — and it never sees the host's Git identity, credentials or signing key, so its
+commits are unsigned and pushing happens from the host.
+
+The directory is `agent-tools/`, not `containers/`: that name is reserved by
+`tests/placement-policy.sh` for the shared compose stack ADR-010 refuses.
+
 ### Isolated Linux VM
 
 Provided by the `lab` profile: Lima for scriptable Linux VMs, UTM for GUI VMs

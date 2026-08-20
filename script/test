@@ -24,6 +24,7 @@ TESTS=(
   vm
   idempotency
   browser-profiles
+  agent-tools
   agents
 )
 

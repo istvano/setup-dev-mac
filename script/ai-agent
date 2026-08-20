@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# Run a containerised agent tool from the image pinned in agent-tools/openhands.lock.
+#
+# This is the executable half of ADR-043. The decision record explains why the
+# category exists; what matters here is the four constraints it imposes, all of which
+# are enforced below rather than left to whoever types the docker command:
+#
+#   1. the image is addressed by DIGEST, never by tag
+#   2. every published port binds 127.0.0.1
+#   3. no container gets /var/run/docker.sock
+#   4. exactly one state directory and one project mount, both named here
+#
+# Upstream's quickstart satisfies none of 1-3. It runs `:1.14.0` and `-p 8000:8000`,
+# and a Docker port mapping with no host part binds 0.0.0.0 — on a laptop that joins
+# untrusted networks that publishes an agent with filesystem access to the network,
+# which is a real exposure and not a theoretical one.
+#
+#   ai-agent openhands              run it
+#   ai-agent openhands --dry-run    print the command, change nothing
+#
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+LOCK="$ROOT/agent-tools/openhands.lock"
+DRY_RUN=false
+
+usage() {
+  cat <<'EOF'
+Usage: script/ai-agent openhands [--dry-run]
+
+  openhands    OpenHands Agent Canvas, on http://127.0.0.1:8000
+  --dry-run    print the docker command without running it
+
+Environment:
+  OPENHANDS_PROJECTS_PATH   directory holding the projects the agent may touch
+                            (default: ~/projects). It must already exist.
+
+What the agent can and cannot do:
+
+  It can read and WRITE every file under the projects path. That is the point of
+  running it, but it is the widest grant here, so keep that directory to the
+  projects you actually want an agent in rather than pointing it at ~.
+
+  It cannot reach your Git identity, credentials or signing key: none of them is
+  mounted. Commits it makes are unsigned and carry a container-local identity.
+  Review and push from the host.
+
+  Its toolchain is the image's, not yours. Python and Node are inside; Go, Java
+  and Rust are not, so for those projects it can edit but cannot build or test
+  what it wrote.
+EOF
+}
+
+# One key per line, `key=value`, comments and blanks ignored. Kept deliberately dumb:
+# this file is read by a test as well, and a parser that accepts more than the format
+# allows is a parser that lets a malformed lock through.
+lock_value() {
+  local key="$1" value
+  value="$(grep -E "^$key=" "$LOCK" | head -n 1 | cut -d= -f2-)"
+  [[ -n "$value" ]] || die "$LOCK: missing '$key='."
+  printf '%s' "$value"
+}
+
+require_docker() {
+  command_exists docker ||
+    die "docker is not installed. Select a container runtime with './bootstrap install --runtime colima'."
+  docker info >/dev/null 2>&1 ||
+    die "The Docker daemon is not reachable. Start the substrate with 'just substrate'."
+}
+
+run_openhands() {
+  local image digest version projects state reference
+  image="$(lock_value image)"
+  digest="$(lock_value digest)"
+  version="$(lock_value version)"
+
+  # The digest is the whole trust story, so it is checked here and not only in the
+  # test suite: a truncated or tag-shaped value must fail before it reaches docker,
+  # which would happily resolve `image@` to something else.
+  [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    die "$LOCK: digest is not a sha256 digest: $digest"
+  reference="$image@$digest"
+
+  projects="${OPENHANDS_PROJECTS_PATH:-$HOME/projects}"
+  [[ -d "$projects" ]] ||
+    die "Projects directory does not exist: $projects
+Create it, or set OPENHANDS_PROJECTS_PATH to the directory the agent should see."
+
+  # The state directory is created; the projects directory is not. State is ours to
+  # manage and starts empty. A missing projects path is a typo, and silently creating
+  # an empty one would start an agent that can see nothing and say nothing about why.
+  #
+  # Not under --dry-run, which promises to change nothing. Creating a directory is a
+  # change, and a preview that quietly makes one is a preview nobody can trust.
+  state="$HOME/.openhands"
+  [[ "$DRY_RUN" == true ]] || mkdir -p "$state"
+
+  # Both paths match the VOLUME declarations in the image itself, so this follows the
+  # image's own contract rather than guessing at one.
+  #
+  # 8000 is published on loopback. 8002 is NOT published: the image exposes it for
+  # noVNC, which OH_ENABLE_VNC=false leaves off by default. Leaving it out is a
+  # decision, not an oversight — publishing a VNC console would widen this well past
+  # what running an agent needs.
+  #
+  # No /var/run/docker.sock. That would let the agent start containers of its own,
+  # which is a documented OpenHands backend and is exactly the general-purpose socket
+  # mount the security invariants refuse. The in-container local backend is what this
+  # supports.
+  local args=(
+    docker run --rm -it
+    --name openhands
+    --publish 127.0.0.1:8000:8000
+    --volume "$state:/home/openhands/.openhands"
+    --volume "$projects:/projects"
+    "$reference"
+  )
+
+  if [[ "$DRY_RUN" == true ]]; then
+    # printf %q per argument, not "${args[*]}", so a path containing a space stays one
+    # argument in the printed command instead of becoming two.
+    printf '%q ' "${args[@]}"
+    printf '\n'
+    return 0
+  fi
+
+  log "OpenHands Agent Canvas $version"
+  log "Projects (read-write for the agent): $projects"
+  log "State: $state"
+  log "Open http://127.0.0.1:8000 once it has started. Ctrl-C stops it."
+  "${args[@]}"
+}
+
+main() {
+  local tool=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) DRY_RUN=true ;;
+      --help | -h)
+        usage
+        exit 0
+        ;;
+      -*) die "Unknown option: $1" ;;
+      *)
+        [[ -z "$tool" ]] || die "Only one tool may be given: $tool, $1"
+        tool="$1"
+        ;;
+    esac
+    shift
+  done
+
+  [[ -f "$LOCK" ]] || die "Missing $LOCK."
+
+  case "$tool" in
+    openhands)
+      # Not under --dry-run. Reviewing the command you are about to run is most useful
+      # BEFORE the substrate is up, and refusing to print it until a daemon answers
+      # makes the preview useless exactly when it is wanted.
+      [[ "$DRY_RUN" == true ]] || require_docker
+      run_openhands
+      ;;
+    "")
+      usage
+      exit 1
+      ;;
+    *) die "Unknown tool: $tool" ;;
+  esac
+}
+
+main "$@"

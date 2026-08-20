@@ -316,6 +316,13 @@ Two further carve-outs, stated rather than left to look like oversights:
   all sit in `dev`. They are not substitutes: each reaches a different model
   provider, and the plurality is the reason for having them. The rule targets
   redundant tools, not deliberate access to different backends.
+
+  ADR-044 extended this to five, and the channel differs for each because the
+  packaging does, not because the rule bent: `codex` and `claude-code` are casks,
+  `opencode` a formula, `cline` an `npm:` tool declared in mise's config, and
+  `aider` a pinned `uv` tool installed by chezmoi hook 29. None of the last two
+  is in a Brewfile, and `tests/placement-policy.sh` asserts they stay out.
+  OpenHands is a sixth, in a container, under ADR-043.
 - **`curl` and `xh` coexist in `core`.** `curl` is what scripts and the
   bootstrap call and must not be removed; `xh` is for interactive API work,
   which is a daily task on this machine. Removing `xh` as a duplicate was the
@@ -605,6 +612,15 @@ Runtimes are now pinned to explicit minor versions. Bumping one is a reviewed
 edit. `rust = "stable"` is retained deliberately: mise delegates Rust to rustup,
 where `stable` names a release channel that rustup resolves and records, not an
 unpinned fetch.
+
+**A reviewed edit is not the same as a reviewed edit that happens.** `go` sat at
+1.25 until Go 1.27 shipped, at which point it fell outside Go's two-major support
+window and stopped receiving security fixes — with no edit, no failure and no
+report, because nothing compared the pin to anything. Pinning removes surprise
+changes; it does not remove the obligation to look. `script/update-report` now
+carries that check for every pin here, and asks each one the question its policy
+actually poses: whether Go is still *supported*, whether `node` is still the active
+LTS, whether the JDK list still contains the newest LTS.
 
 ### The zsh keymap is set explicitly
 
@@ -1848,3 +1864,200 @@ here closes that gap rather than opening a new question.
 `sbt` and `scala` are deliberately not declared yet. They are available from the same
 manager and should be added when Scala SDK or Spark connector work actually starts, rather
 than installed against the possibility.
+
+## ADR-043: Containerised agent tools are a declared category
+
+**Status:** accepted. Refines ADR-010 and ADR-037.
+
+ADR-037 drew a line and named it precisely: the repository may own container
+**substrate** that holds no application state — a network, an image cache, a build
+cache, all rebuildable from nothing — and must not own **services with data**, which
+stay project-local under ADR-010.
+
+OpenHands fits neither side. It is not a project's service: no project owns it, and
+its lifecycle is the workstation's rather than any repository's. It is not substrate
+either: it keeps conversations, settings and provider credentials in `~/.openhands`.
+Left unclassified it would have gone into `script/container-substrate`, where ADR-037
+explicitly forbids it, or into a project that does not exist.
+
+So there is a third category, deliberately narrow: **a workstation tool that ships as
+a container**. `agent-tools/*.lock` pins them and `script/ai-agent` runs them.
+
+### The four conditions
+
+A tool may enter this category only with all four, and `tests/agent-tools.sh` enforces
+each one rather than trusting the launcher to keep getting it right:
+
+1. **Pinned by digest.** The lock file carries `image`, `version` and `digest`, and the
+   launcher runs `image@digest`. `version` is for humans and for
+   `script/update-report`; the digest is what executes. This is ADR-006's objection to
+   mutable tags applied where it started.
+2. **Loopback only.** Every published port binds `127.0.0.1`. Upstream's quickstart
+   uses `-p 8000:8000`, which binds `0.0.0.0` — on a laptop that joins untrusted
+   networks that publishes an agent with filesystem write access to everyone on the
+   network. The image also exposes 8002 for noVNC; it is deliberately not published.
+3. **No Docker socket.** OpenHands has a backend mode that runs agents in containers of
+   its own, and enabling it means mounting `/var/run/docker.sock`. That is the
+   general-purpose socket mount the security invariants refuse, and the refusal costs a
+   feature — which is the point at which an invariant is worth something.
+4. **One state directory and one project mount.** `~/.openhands` and one projects root
+   from `OPENHANDS_PROJECTS_PATH`. Nothing else: not the home directory, not `~/.ssh`,
+   not a kubeconfig. The test counts the mounts, because "one more mount" is how this
+   erodes.
+
+### Why the directory is not called `containers/`
+
+`tests/placement-policy.sh` has always asserted that no top-level `containers/`
+directory exists, and that the managed-home equivalent does not either. That name is
+where a shared workstation compose stack would live, which is exactly what ADR-010
+refuses. A lock file is not a stack, so an exception could have been argued — but the
+guard's value is that it is unarguable, and it is worth more intact than reinterpreted.
+The category took `agent-tools/` instead. One lock per tool, as in `mcp/toolhive.lock`
+and `vm/tart.lock`.
+
+### What the boundary costs, stated rather than discovered
+
+The agent runs with the container's toolchain, not the host's. The image carries Python
+and Node; it carries no Go, Java or Rust, so for projects in those languages the agent
+can edit files but cannot build or test what it wrote. Nor does it reach the host's Git
+identity, credentials or signing key — commits it makes are unsigned and carry a
+container-local identity, so review and push happen on the host.
+
+Both are consequences of the isolation being real. They are recorded here because
+discovering them mid-task reads as breakage rather than as design.
+
+## ADR-044: aider comes from uv and Cline from npm; neither comes from Homebrew
+
+**Status:** accepted. Extends the AI carve-out in ADR-022.
+
+Homebrew is this repository's host package manager and the first thing to try. For
+these two it is the wrong answer, for different reasons, and both are worth recording
+because the obvious `brew "aider"` / `brew "cline"` will look correct to the next
+reader.
+
+### Cline: the formula is deprecated, and npm is the live channel
+
+`brew "cline"` exists. homebrew-core has **deprecated** it — "uses non-FOSS
+`@anthropic-ai/claude-agent-sdk` and pre-built binaries" — and `script/check-tokens`
+fails on any deprecated token, so declaring it would turn the scheduled
+`.github/workflows/tokens.yml` run red. It is also stale: 3.0.3 against npm's 3.0.55.
+And it `depends_on node`, which would put a Homebrew Node beside mise's and give the
+toolchain version two places to be decided, the precise objection in ADR-021.
+
+The CLI is declared as `"npm:cline"` in `chezmoi/dot_config/mise/config.toml.tmpl`,
+beside the `node` pin that satisfies it. Upstream says `npm i -g cline`; that would
+install under whichever Node prefix mise currently owns, vanish at the next `node`
+bump, run every lifecycle script in the tree, and leave the version undeclared. mise's
+`npm:` backend keeps the pin in the file that already decides the Node version, orders
+`node` ahead of `npm:` tools, and installs through an embedded package manager that
+denies dependency lifecycle scripts by default.
+
+The prebuilt binary is real and is not glossed over: `cline` resolves a Bun-embedded
+executable from a per-platform optional dependency. What makes it acceptable here is
+the evidence npm carries with it — an integrity hash, a registry signature and an SLSA
+v1 provenance attestation — which is a better record than the deprecated formula
+offered, and the same shape of trust already accepted for tart and ToolHive.
+
+No `allow_builds` is needed, and adding one would be a mistake. The package's
+`postinstall.mjs` only hard-links that binary to `bin/.cline` as a startup
+optimisation, and `bin/cline` walks `node_modules` for it at runtime when the link is
+absent. Denying the script costs launch latency, not function.
+
+`@cline/llms` depends on `ollama-ai-provider-v2`. That is an API **client**, not the
+Ollama runtime, so ADR-025 holds. It is stated because `profiles/AGENTS.md` warns that
+the placement test matches literal tokens and cannot see a bundled engine — this is the
+case that warning is about, so the reading is recorded rather than the check trusted.
+
+Licensing is mixed and worth naming: `cline`, `@cline/sdk`, `@cline/agents` and
+`@cline/cli` are Apache-2.0; `@cline/llms` and `@cline/core` publish no licence field.
+
+The IDE half is unrelated to any of this and takes the channel it always would:
+`saoudrizwan.claude-dev` pinned in `vscode/extensions.list` under ADR-032.
+
+### aider: Homebrew builds what PyPI ships prebuilt, and the interpreter clashes
+
+`brew "aider"` is current and not deprecated, so it was a real candidate. Two things
+decided against it.
+
+**The interpreter.** `aider-chat` requires Python `<3.13,>=3.10`. mise pins
+`python = "3.13"`, so mise's interpreter cannot host it. Adding a second mise Python
+would put a version of the wrong kind of thing into the file that declares runtimes.
+`uv tool install --python 3.12` fetches a standalone CPython 3.12 into
+`~/.local/share/uv/python/` and uses it for that one venv: it never becomes `python3`
+on `PATH` and never competes with mise's 3.13.
+
+**The build.** Homebrew compiles numpy and scipy from source, so the formula pulls
+`gcc`, `openblas`, `freetype`, `jpeg-turbo` and a `python@3.12` keg — the heaviest
+dependency graph in the `dev` profile. PyPI publishes arm64 wheels for all of them, so
+uv installs the same software with no compiler involved. The lighter option is also the
+one that keeps Homebrew free of a language runtime.
+
+This is not a new channel. `docs/OPERATIONS.md` already answers "a Python CLI with no
+Homebrew formula" with `uv tool install`, for `huggingface_hub[cli]` and `crawl4ai`.
+What is new is that aider is a default part of `dev` rather than something typed by
+hand when wanted, so `run_onchange_after_29_uv-tools.sh.tmpl` installs it at the pinned
+version on a new machine.
+
+### Neither is a second tool for a job already covered
+
+ADR-022's carve-out says AI coding agents are not one job, because each reaches a
+different provider and the plurality is the reason for having them. That still holds
+and now covers five: `codex`, `claude-code`, `opencode`, `cline` and `aider`. aider is
+the one that needs a distinct justification, since `opencode` is also
+provider-agnostic — it earns its place on a different working model, a git-native
+edit-and-commit loop over a repository map, rather than on a different backend.
+
+## ADR-045: CI's own toolchain is pinned, and installed without a curl-pipe
+
+**Status:** accepted. Applies ADR-006 to the place it was missing.
+
+`.github/workflows/validate.yml` installed the four tools that decide whether a
+change may merge like this:
+
+```yaml
+go install mvdan.cc/sh/v3/cmd/shfmt@latest
+go install github.com/rhysd/actionlint/cmd/actionlint@latest
+go install github.com/zricethezav/gitleaks/v8@latest
+sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
+```
+
+Both halves contradicted rules this repository enforces elsewhere:
+
+- **`@latest`.** `tests/mcp-policy.sh` fails any MCP package spec that floats,
+  and ADR-029 requires an explicit version on every one. The linters that gate
+  every merge floated anyway.
+- **The curl-pipe.** AGENTS.md forbids unreviewed remote-script execution beyond
+  the documented Homebrew bootstrap, and ADR-042 gave *exactly this* as a reason
+  to reject SDKMAN — "curl-pipe-bash, which ADR-006 and AGENTS.md forbid". A tool
+  was declined for the thing CI did on every run.
+
+That is the part worth recording: the rule was not merely unapplied here, it was
+applied hard enough elsewhere to reject a tool. An invariant enforced against
+third-party packages and waived for one's own build system is not an invariant.
+
+### What replaces it
+
+Four pinned `go install` lines, chezmoi included. Three consequences:
+
+- **The curl-pipe is gone rather than pinned.** chezmoi is written in Go, so it
+  comes from the same mechanism as the other three and the remote-script execution
+  disappears entirely. A `go install` build cannot self-upgrade and reports its
+  version as `dev`; nothing in this repository parses either, and the subcommands
+  the tests use are all present.
+- **Pinning brings integrity, not just reproducibility.** `go install` verifies
+  the module against the Go checksum database, so a pinned version is a verified
+  one. That is a stronger guarantee than the release tarball downloads elsewhere in
+  this repository get, and it costs nothing.
+- **gitleaks moves to `github.com/gitleaks/gitleaks/v8`**, its canonical path. The
+  old `zricethezav` path serves the identical commit, but only through a GitHub
+  redirect, and `vm/tart.lock` already argues against letting review depend on a
+  redirect that upstream can retire.
+
+`tests/placement-policy.sh` asserts both rules against the workflows, checking the
+code rather than the comments — the workflow now explains both rules in prose, and
+a check that matched the explanation would teach the next author to delete it.
+
+The `macos-render` job's `brew install` is deliberately left alone: Homebrew has no
+version pinning, and using it is how everything else on the host arrives. Runner
+images stay on `ubuntu-latest` and `macos-latest`, where pinning would trade a
+supply-chain gain for silent bit-rot.

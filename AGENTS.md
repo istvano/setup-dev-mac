@@ -59,6 +59,10 @@ These are deliberate defaults, not placeholders:
   the project that owns them. The repository owns only STATELESS substrate: the
   runtime VM, one shared network, an image cache and a build cache (ADR-037). Never
   add a service with data to `script/container-substrate`.
+- A workstation tool that ships as a container and holds state is neither substrate
+  nor a project service. ADR-043 gives that narrow case its own home in
+  `agent-tools/*.lock` plus `script/ai-agent`, on four conditions: digest not tag,
+  loopback only, no Docker socket, one state directory and one project mount.
 - Every container port the repository publishes binds `127.0.0.1`. A Docker port
   mapping without a host part binds `0.0.0.0`; on a laptop that joins untrusted
   networks that is a real exposure, not a theoretical one.
@@ -89,6 +93,9 @@ Homebrew formula exists.
 - `mcp/managed-settings.json`: the approved MCP server catalogue.
 - `mcp/toolhive.lock`: the pinned ToolHive release and its digests.
 - `vm/tart.lock`: the pinned Tart release, its digest and its signing team.
+- `agent-tools/*.lock`: pinned images for containerised agent tools (ADR-043),
+  run by `script/ai-agent`. Not `containers/` — that name is reserved against the
+  shared compose stack ADR-010 refuses, and `tests/placement-policy.sh` enforces it.
 - `chezmoi/`: user configuration and idempotent apply hooks.
 - `script/`: orchestration, validation and maintenance commands.
 - `script/container-substrate`: the declared container substrate — the Colima VM,
@@ -192,6 +199,10 @@ The minimum validation gate is `./script/test`. It covers:
   cannot half-revert
 - the VM tooling: that the tart pin is complete, that the installer still verifies
   the digest and signing team, and that no script joins arguments with `"$*"`
+- the containerised agent tools: a complete image pin, a digest rather than a tag,
+  loopback-only publishing, no Docker socket mount and exactly two volume mounts
+- that nothing floats: no `"latest"` in mise's config, and no `@latest` or
+  curl-pipe-shell in a workflow (ADR-045)
 - rendering idempotency
 - Codex instruction and skill structure
 
@@ -209,6 +220,12 @@ Shell scripts are discovered by shebang via `script/shell-files`, never by
 filename extension. Selecting by extension previously skipped every
 extensionless script in `script/`, which hid three install-breaking defects.
 Do not reintroduce a separate file selector in tests or CI.
+
+Pinned versions are checked by `./script/update-report`, which covers the mise
+runtimes, the MCP server packages, the Cline and aider pins, the two lock files and
+CI's own toolchain. It needs network and macOS, so no test enforces currency —
+run it before assuming a pin is fresh. Go is the cautionary case: it sat one
+release behind, then silently became unsupported (ADR-030).
 
 When changing Homebrew tokens, render the Brewfile and verify current tokens on
 macOS. Project repositories own their own Compose validation. Linux CI is static

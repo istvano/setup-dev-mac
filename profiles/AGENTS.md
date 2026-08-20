@@ -39,6 +39,12 @@ These files define software installed directly on macOS.
   chezmoi/dot_config/mise/config.toml.tmpl (ADR-021).
 - One tool per job in the default profile (ADR-022). If an installed tool
   already covers the use case, extend its configuration instead.
+- Do not add `aider`, `cline` or OpenHands here. All three were evaluated and
+  placed elsewhere on purpose (ADR-043, ADR-044): the `cline` formula is
+  deprecated upstream and would fail `./script/check-tokens`; `brew "aider"`
+  compiles numpy and scipy and needs a Python mise's pin cannot host; OpenHands
+  has no Homebrew token at all and runs as a pinned container.
+  `tests/placement-policy.sh` asserts the first two stay out of `profiles/`.
 - Do not add native databases, vector stores or automated scanners when a
   container provides equivalent functionality without material degradation.
 - Paid or conditionally licensed software must be isolated in the appropriate

@@ -849,6 +849,108 @@ restic backup ~/workspace ~/Documents \
 Keep a note of which models a project depends on in that project's own
 repository. That is the reproducible artefact; the weights themselves are not.
 
+## AI coding agents
+
+Six of them, arriving by five different channels because their packaging differs.
+ADR-022 explains why more than one is not a duplicate; ADR-044 and ADR-043 explain
+the channels.
+
+| Tool | Channel | Declared in |
+|---|---|---|
+| `codex`, `claude-code` | Homebrew cask | `profiles/dev.Brewfile` |
+| `opencode` | Homebrew formula | `profiles/dev.Brewfile` |
+| `cline` (CLI) | mise `npm:` backend | `chezmoi/dot_config/mise/config.toml.tmpl` |
+| Cline (editor) | VS Code extension | `vscode/extensions.list` |
+| `aider` | `uv` tool, pinned | `chezmoi/run_onchange_after_29_uv-tools.sh.tmpl` |
+| OpenHands | container, pinned by digest | `agent-tools/openhands.lock` |
+
+### aider
+
+Installed by chezmoi hook 29 when the `dev` profile is selected, at the version
+pinned in that hook. It is deliberately not a Homebrew formula: `aider-chat` needs
+Python `<3.13` while mise pins 3.13, and Homebrew would compile numpy and scipy from
+source. `uv` fetches its own CPython 3.12 for this one virtualenv, which never becomes
+`python3` on `PATH`.
+
+```bash
+uv tool list              # aider-chat and its version
+aider --version
+```
+
+To bump it, edit the `list` call in the hook — the version appears in the script body
+on purpose, because `run_onchange` hashes the rendered script — then `chezmoi apply`.
+The hook passes `--force`, so a pin change reinstalls over the previous version.
+
+### Cline
+
+Two halves that are installed separately and share nothing but a name. The editor
+extension is in `vscode/extensions.list`; the CLI comes from mise:
+
+```bash
+mise install              # after a pin change
+cline --version
+```
+
+The Homebrew formula is deprecated upstream and must not be used — `script/check-tokens`
+fails on it. See ADR-044.
+
+Two things to check on a machine where the CLI is new, because neither could be
+verified from the published package:
+
+```bash
+lsof -nP -iTCP -sTCP:LISTEN | grep -i cline   # the local hub daemon must bind 127.0.0.1
+cline --help                                  # look for an auto-update switch
+```
+
+If the CLI updates itself in the background, the mise pin describes the version
+installed once rather than the version running — the same caveat
+`profiles/local-llm.Brewfile` records for LM Studio. Turn it off if there is a setting
+for it.
+
+### OpenHands
+
+Runs as a container from the digest in `agent-tools/openhands.lock` (ADR-043). It needs
+the container substrate up:
+
+```bash
+just substrate
+just openhands-plan    # print the docker command, change nothing
+just openhands         # then open http://127.0.0.1:8000
+```
+
+The agent sees one directory: `OPENHANDS_PROJECTS_PATH`, default `~/projects`. It must
+already exist — the launcher refuses rather than creating an empty one — and everything
+under it is **read-write** for the agent, so keep it to the projects you want an agent
+in rather than pointing it at `~`. State lives in `~/.openhands`.
+
+Three limits are structural, not bugs:
+
+- **The toolchain is the container's.** Python and Node are in the image; Go, Java and
+  Rust are not. For those projects the agent can edit but cannot build or test.
+- **No Git identity reaches it.** Its commits are unsigned and carry a container-local
+  identity. Review and push from the host.
+- **No Docker socket.** OpenHands can run agents in containers of its own, which needs
+  `/var/run/docker.sock`; that mount is refused, so the in-container local backend is
+  what this supports.
+
+The frontend carries a baked-in PostHog key, so the web UI reports usage unless told
+not to. Find the opt-out in its settings on first run.
+
+Confirm the bind after starting it:
+
+```bash
+lsof -nP -iTCP:8000 -sTCP:LISTEN   # 127.0.0.1 only, never *:8000
+lsof -nP -iTCP:8002 -sTCP:LISTEN   # empty: noVNC is exposed by the image, not published
+```
+
+`script/update-report` reports when a newer OpenHands release exists. Bumping means
+resolving the new tag to its multi-arch **index** digest and moving `version` and
+`digest` together:
+
+```bash
+docker buildx imagetools inspect ghcr.io/openhands/agent-canvas:<version>
+```
+
 ## Backup
 
 Selecting the `backup` profile installs `restic` and `rclone`. This supplements
@@ -966,7 +1068,32 @@ Review before upgrading. `script/update-report` changes nothing:
 ```
 
 It reports declared-but-missing packages, everything with an update available,
-and Homebrew's cleanup candidates. Upgrade deliberately, one package at a time:
+and Homebrew's cleanup candidates — and then, in four further sections, every
+version this repository pins by hand:
+
+| Section | Covers | Compared against |
+|---|---|---|
+| Pinned tools outside Homebrew | ToolHive, OpenHands | GitHub releases |
+| Pinned runtimes (mise) | the mise `[tools]` pins | `mise latest`, plus go.dev, nodejs.org and Adoptium |
+| Pinned packages | the six MCP servers, the Cline CLI, aider | npm and PyPI |
+| Pinned CI toolchain | shfmt, actionlint, gitleaks, chezmoi | the Go module proxy |
+
+Three runtimes are compared against something other than "the newest release",
+because that is not what their pin means:
+
+- **Go** against go.dev's stable list, which *is* the supported set. Go supports
+  the two most recent majors and nothing older, so the report distinguishes "a
+  newer one exists" from `OUT OF SUPPORT`. The second is not a suggestion.
+- **Node** against the current active LTS, which the pin tracks deliberately.
+  Comparing it to the newest release would warn every run about a version the
+  policy forbids.
+- **Java** against Adoptium's newest LTS. The pins are ordered, and the first is
+  the default; adding a newer LTS at the end changes no project's JDK.
+
+An unreachable API always warns and never fails, so a network problem cannot be
+mistaken for a stale pin.
+
+Upgrade deliberately, one package at a time:
 
 ```bash
 brew upgrade <name>

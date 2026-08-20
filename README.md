@@ -170,6 +170,21 @@ on loopback, and the model weights are the trust surface rather than the app.
 See [Operations](docs/OPERATIONS.md#local-ai-models) and
 [ADR-025](docs/DECISIONS.md).
 
+## AI coding agents
+
+Six, by five channels, because their packaging differs rather than the rule
+bending: `codex` and `claude-code` as casks, `opencode` as a formula, the Cline
+CLI as an `npm:` tool in mise's config, `aider` as a pinned `uv` tool, and
+OpenHands as a digest-pinned container run by `just openhands`. Cline's editor
+half is in `vscode/extensions.list`.
+
+Neither aider nor Cline comes from Homebrew: the `cline` formula is deprecated
+upstream, and `brew "aider"` would compile numpy and scipy against a Python that
+mise's pin cannot host. OpenHands is isolated deliberately — it sees one projects
+directory, binds loopback, and gets no Docker socket and no Git credentials.
+See [Operations](docs/OPERATIONS.md#ai-coding-agents),
+[ADR-043 and ADR-044](docs/DECISIONS.md).
+
 ## Project containers
 
 Colima is the default runtime: a CLI-managed Linux VM on Virtualization.framework
@@ -334,6 +349,7 @@ automatically and no repository is created for you; follow
 .
 ├── AGENTS.md          # Repository-wide Codex instructions
 ├── TASKS.md           # Unfinished work only
+├── agent-tools/       # Pinned images for containerised agent tools
 ├── bootstrap          # Minimal trust bootstrap
 ├── chezmoi/           # Dotfiles, configuration and apply hooks
 ├── docs/              # Architecture, decisions and operations

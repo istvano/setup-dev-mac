@@ -536,3 +536,42 @@ remains cannot be settled from documentation alone.
 - [ ] Enable FileVault and store the recovery key offline.
 - [ ] Configure encrypted Time Machine alongside the restic repository.
 - [ ] Configure `granted` for the accounts in use before running cloud scans.
+
+## AI coding agents (ADR-043, ADR-044)
+
+Everything here is a macOS-only check. The tools are declared and the static
+invariants are enforced by `tests/agent-tools.sh`, but four claims could not be
+verified from a Linux workstation and are therefore not yet proven.
+
+- [ ] Confirm the Cline CLI's local hub daemon binds `127.0.0.1`. The compiled
+      binary starts one and probes ports to rediscover it; the published npm
+      package is only a resolver wrapper, so the listener could not be inspected.
+      `lsof -nP -iTCP -sTCP:LISTEN | grep -i cline`. If it binds `0.0.0.0`, that
+      is a stop: the binding invariant applies to a host daemon too.
+- [ ] Determine whether the Cline CLI auto-updates in the background, and turn it
+      off if it can be. Its `postinstall.mjs` refers to a background auto-update
+      restarting the hub, which would mean `"npm:cline"` pins the version
+      installed once rather than the version running — the LM Studio problem
+      recorded in `profiles/local-llm.Brewfile`. Record the answer in ADR-044
+      either way; a pin that does not hold must not be documented as one.
+- [ ] Find the OpenHands frontend's telemetry opt-out. The image carries a
+      baked-in PostHog key, so the web UI reports usage by default.
+- [ ] Check file ownership after OpenHands writes to a project. The container
+      runs as uid 10001 while Colima presents host files as the login user's uid.
+      If writes land wrong, fix it in the launcher and record why — do not reach
+      for `--user`, which would make the image's own home unwritable.
+
+## Pin hygiene
+
+- [ ] Remove `darwin_amd64` from `mcp/toolhive.lock`. ADR-036 removed Intel
+      support and `require_supported_mac` fails on `x86_64`, so the digest is for
+      a platform this repository refuses to run on — and `vm/tart.lock` already
+      dropped its amd64 entry for exactly that reason, noting that listing one
+      "would imply this works on a platform ADR-036 removed". Doing it means
+      touching the key list in `tests/mcp-policy.sh` and the arch mapping in
+      `script/install-toolhive`, which is why it was not folded into a version
+      refresh.
+- [ ] Check whether Dependabot is actually enabled. `.github/dependabot.yml` asks
+      for monthly `github-actions` updates, yet `actions/checkout` sat three major
+      versions behind until it was bumped by hand — so either the app is not
+      enabled on the repository or its pull requests are not being merged.

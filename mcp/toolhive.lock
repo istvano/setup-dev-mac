@@ -5,6 +5,6 @@
 # To bump: change version, fetch the new archives, and replace the digests with
 # the values published in the release. Verify against the upstream checksums
 # rather than computing them from whatever the download happened to return.
-version=0.41.0
-darwin_arm64=08a6dd7093f17f1190fdb191bc6634acf43849dbe7cb9e782b9558c14f215ca6
-darwin_amd64=4c0310f8d5a60203f3b0d2c9b27910b839e1156aee769c13547b4d047877e580
+version=0.44.0
+darwin_arm64=d7274af3d38fd1ddf088ee783411403a9a901d18aa9d3d340c835981dd6daf5e
+darwin_amd64=47cb4cec8944190233f5c00f92014a6cd068d70c5440491f6faab7db76c735d6

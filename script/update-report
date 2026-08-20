@@ -103,6 +103,273 @@ elif [[ -f "$lock" ]]; then
   fi
 fi
 
+# The containerised agent tools (ADR-043). Reported unconditionally, unlike thv above:
+# the pin is what script/ai-agent runs, so it is stale whether or not the image has ever
+# been pulled, and there is no local command to probe for its presence.
+lock="$ROOT/agent-tools/openhands.lock"
+if [[ -f "$lock" ]]; then
+  pinned="$(grep -E '^version=' "$lock" | cut -d= -f2)"
+  latest="$(curl -fsS --max-time 20 https://api.github.com/repos/OpenHands/OpenHands/releases/latest 2>/dev/null |
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)"
+  if [[ -z "$latest" ]]; then
+    warn "Could not reach the OpenHands release API; pinned version is $pinned."
+  elif [[ "$pinned" == "$latest" ]]; then
+    success "OpenHands is at the latest release ($pinned)."
+  else
+    warn "OpenHands $pinned is pinned; $latest is available."
+    log "Resolve the new tag to its multi-arch index digest, then update BOTH fields"
+    log "in agent-tools/openhands.lock together:"
+    log "  docker buildx imagetools inspect ghcr.io/openhands/agent-canvas:$latest"
+  fi
+fi
+
+echo
+echo '== Pinned runtimes (mise) =='
+# Go sat at 1.25 until 1.27 shipped, which put it outside Go's two-major support window,
+# and nothing noticed because nothing looked. This is what looks.
+#
+# `mise latest <tool>` answers most of these, and it is the right tool for them: it needs
+# no new upstream API and it knows what mise would actually install. `mise outdated` is NOT
+# the command — it respects the pin, so with go = "1.25" it reports the newest 1.25.x and
+# says nothing about 1.27 existing, which is the precise blindness that let this happen.
+#
+# But a check is only worth having if what it compares against is what the pin MEANS. Three
+# pins encode a policy other than "newest", so each is asked of the source that knows that
+# policy — see the exclusion list below. Comparing those against "newest" would emit a
+# warning on every run for a version the policy forbids, and a report that always warns is
+# a report nobody reads.
+#
+# Read from the APPLIED config rather than the template in this repository, because that
+# is what mise actually obeys; a pin edited but never applied is worth reporting as the
+# old value.
+mise_config="$HOME/.config/mise/config.toml"
+if ! command_exists mise; then
+  log 'mise is not installed; skipping the runtime pins.'
+elif [[ ! -f "$mise_config" ]]; then
+  warn "No $mise_config; run 'chezmoi apply' before trusting this section."
+else
+  # Four tools are excluded from the `mise latest` loop because "newest" is not what their
+  # pin means, and reporting it would be noise that trains the reader to skim past warnings:
+  #
+  #   rust    a release channel rustup resolves, not a version (ADR-030)
+  #   java    a list of distribution-qualified strings; asked of Adoptium below
+  #   node    pinned to the ACTIVE LTS on purpose. mise's newest is 26, which is not LTS,
+  #           so this loop would warn on every run about a version policy forbids.
+  #   go      pinned within Go's two-major support window, which is the whole point — and
+  #           mise's index lags go.dev (it offered 1.26.6 while 1.27.0 was out), so the
+  #           authoritative source is the only one that can answer the support question.
+  #
+  # The other five are ordinary "track the newest line" pins and mise answers them well.
+  while IFS=$'\t' read -r tool pinned; do
+    latest_version="$(mise latest "$tool" 2>/dev/null || true)"
+    if [[ -z "$latest_version" ]]; then
+      warn "Could not ask mise for the latest $tool; pinned version is $pinned."
+    elif [[ "$latest_version" == "$pinned"* ]]; then
+      success "$tool $pinned is the newest line ($latest_version)."
+    else
+      warn "$tool $pinned is pinned; $latest_version is available."
+    fi
+  done < <(
+    python3 - "$mise_config" <<'PY'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as handle:
+    tools = tomllib.load(handle).get("tools", {})
+
+for name, pin in tools.items():
+    if name.startswith("npm:") or name in {"rust", "java", "node", "go"}:
+        continue
+    if isinstance(pin, str):
+        print(f"{name}\t{pin}")
+PY
+  )
+
+  # Go, against go.dev rather than mise. Go supports the two most recent majors and nothing
+  # older, so the question is not "is there a newer one" but "is this one still supported" —
+  # a distinction that matters, because 1.25 was one release behind for months and then
+  # silently became unsupported without changing. The stable list IS the supported set.
+  pinned_go="$(python3 -c '
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as handle:
+    print(tomllib.load(handle).get("tools", {}).get("go", ""))
+' "$mise_config")"
+  supported_go="$(curl -fsS --max-time 20 "https://go.dev/dl/?mode=json" 2>/dev/null |
+    python3 -c '
+import json
+import re
+import sys
+
+versions = []
+for release in json.load(sys.stdin):
+    if release.get("stable"):
+        match = re.match(r"go(\d+\.\d+)", release.get("version", ""))
+        if match:
+            versions.append(match.group(1))
+print(" ".join(versions))
+' 2>/dev/null || true)"
+  if [[ -z "$supported_go" ]]; then
+    warn "Could not reach go.dev; pinned Go is $pinned_go."
+  elif [[ " $supported_go " != *" $pinned_go "* ]]; then
+    warn "Go $pinned_go is pinned and is OUT OF SUPPORT. Supported: $supported_go."
+    log "Go supports only the two most recent majors. Move to one of those."
+  elif [[ "$supported_go" == "$pinned_go"* ]]; then
+    success "Go $pinned_go is the newest supported release."
+  else
+    success "Go $pinned_go is in support (newest is ${supported_go%% *})."
+  fi
+
+  # Node, against nodejs.org rather than mise. The pin tracks the ACTIVE LTS deliberately,
+  # so the newest release is the wrong comparison — it is routinely a non-LTS line.
+  pinned_node="$(python3 -c '
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as handle:
+    print(tomllib.load(handle).get("tools", {}).get("node", ""))
+' "$mise_config")"
+  lts_node="$(curl -fsS --max-time 20 https://nodejs.org/dist/index.json 2>/dev/null |
+    python3 -c '
+import json
+import sys
+
+for release in json.load(sys.stdin):
+    if release.get("lts"):
+        print(release["version"].lstrip("v").split(".")[0])
+        break
+' 2>/dev/null || true)"
+  if [[ -z "$lts_node" ]]; then
+    warn "Could not reach nodejs.org; pinned Node is $pinned_node."
+  elif [[ "$pinned_node" == "$lts_node" ]]; then
+    success "Node $pinned_node is the current active LTS."
+  else
+    warn "Node $pinned_node is pinned; $lts_node is the current active LTS."
+  fi
+
+  # Java separately: the pins name a distribution and mise's answer would mix vendors, so
+  # ask Adoptium which LTS is newest. Reported as information, not drift — the list is
+  # ordered deliberately and its first entry is the default (see the config's comment).
+  pinned_java="$(
+    python3 - "$mise_config" <<'PY'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as handle:
+    java = tomllib.load(handle).get("tools", {}).get("java", [])
+
+print(" ".join(java) if isinstance(java, list) else java)
+PY
+  )"
+  newest_lts="$(curl -fsS --max-time 20 https://api.adoptium.net/v3/info/available_releases 2>/dev/null |
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("most_recent_lts",""))' 2>/dev/null || true)"
+  if [[ -z "$newest_lts" ]]; then
+    warn "Could not reach the Adoptium API; pinned JDKs are $pinned_java."
+  elif [[ "$pinned_java" == *"temurin-$newest_lts"* ]]; then
+    success "JDKs $pinned_java include the newest LTS ($newest_lts)."
+  else
+    warn "JDKs $pinned_java are pinned; temurin-$newest_lts is the newest LTS."
+  fi
+fi
+
+echo
+echo '== Pinned packages =='
+# The MCP server specs, the Cline CLI and the aider tool. All are exact versions by policy
+# — ADR-029 for the MCP catalogue, ADR-044 for the other two — so every one of them is a
+# version that only a reviewed edit moves, and therefore one that goes stale in silence.
+#
+# Declared state is the source here, not installed state: these are what the next machine
+# would get.
+while IFS=$'\t' read -r registry package pinned; do
+  case "$registry" in
+    npm) url="https://registry.npmjs.org/${package//\//%2F}" ;;
+    pypi) url="https://pypi.org/pypi/$package/json" ;;
+    *) continue ;;
+  esac
+  latest_version="$(curl -fsS --max-time 20 "$url" 2>/dev/null |
+    python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+print(data.get("dist-tags", {}).get("latest") or data.get("info", {}).get("version", ""))
+' 2>/dev/null || true)"
+  if [[ -z "$latest_version" ]]; then
+    warn "Could not reach $registry for $package; pinned version is $pinned."
+  elif [[ "$latest_version" == "$pinned" ]]; then
+    success "$package $pinned is current."
+  else
+    warn "$package $pinned is pinned; $latest_version is available."
+  fi
+done < <(
+  python3 - "$ROOT" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1])
+
+# The MCP catalogue: every spec is "<resolver> ... <name>@<version>" and the resolver
+# decides the registry. tests/mcp-policy.sh already guarantees the version is present.
+settings = json.loads((root / "mcp" / "managed-settings.json").read_text())
+for entry in settings.get("allowedMcpServers", []):
+    command = entry.get("serverCommand") or []
+    registry = {"npx": "npm", "uvx": "pypi"}.get(command[0] if command else "")
+    if not registry:
+        continue
+    for argument in command[1:]:
+        match = re.fullmatch(r"(@?[\w./-]+)@([\w.-]+)", argument)
+        if match:
+            print(f"{registry}\t{match.group(1)}\t{match.group(2)}")
+            break
+
+# The two template-declared pins. Read as text on purpose: rendering a chezmoi template
+# needs chezmoi and a config, and the pin is a literal in both files either way.
+mise = (root / "chezmoi/dot_config/mise/config.toml.tmpl").read_text()
+for name, version in re.findall(r'"npm:([\w@./-]+)"\s*=\s*"([\w.-]+)"', mise):
+    print(f"npm\t{name}\t{version}")
+
+hook = (root / "chezmoi/run_onchange_after_29_uv-tools.sh.tmpl").read_text()
+for name, version in set(re.findall(r'"([\w.-]+)==([\w.-]+)"', hook)):
+    print(f"pypi\t{name}\t{version}")
+PY
+)
+
+echo
+echo '== Pinned CI toolchain =='
+# shfmt, actionlint, gitleaks and chezmoi decide whether a change may merge. They were
+# installed with @latest until they were pinned, which made them the least reviewed code
+# with the most authority over this repository. Pinned code goes stale, so it gets a check
+# rather than a promise.
+while IFS=$'\t' read -r module pinned; do
+  latest_version="$(curl -fsS --max-time 20 "https://proxy.golang.org/$module/@latest" 2>/dev/null |
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("Version",""))' 2>/dev/null || true)"
+  if [[ -z "$latest_version" ]]; then
+    warn "Could not reach the Go module proxy for $module; pinned version is $pinned."
+  elif [[ "$latest_version" == "$pinned" ]]; then
+    success "$module $pinned is current."
+  else
+    warn "$module $pinned is pinned; $latest_version is available."
+  fi
+done < <(
+  grep -oE 'go install [^ ]+@v[0-9][^ ]*' "$ROOT/.github/workflows/validate.yml" |
+    sed -E 's|^go install ||' |
+    python3 -c '
+import sys
+
+# The install path may name a command package inside the module (…/cmd/shfmt). The proxy
+# answers for modules, so walk the path back to the segment the version applies to.
+for line in sys.stdin.read().split():
+    path, _, version = line.rpartition("@")
+    parts = path.split("/")
+    if "cmd" in parts:
+        path = "/".join(parts[: parts.index("cmd")])
+    print(f"{path}\t{version}")
+'
+)
+
 echo
 echo '== Cleanup candidates =='
 warn 'Listed only. Removing a package is never automatic; see docs/OPERATIONS.md.'

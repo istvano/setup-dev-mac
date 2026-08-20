@@ -1,0 +1,81 @@
+{{- if and (eq .chezmoi.os "darwin") (has "dev" .profiles) -}}
+#!/usr/bin/env bash
+# Install the declared standalone Python CLIs as isolated uv tools.
+#
+# docs/OPERATIONS.md already answers "a Python CLI with no Homebrew formula" with
+# `uv tool install`, for huggingface_hub and crawl4ai. Both are typed by hand when
+# wanted. aider is different: it is a default part of the dev profile, so it needs to
+# arrive on a new machine without anyone remembering a command.
+#
+# Tools: {{ range $i, $t := (list "aider-chat==0.86.2") }}{{ if $i }} {{ end }}{{ $t }}{{ end }}
+#
+# That line is load-bearing, not a summary: run_onchange hashes the rendered script, so
+# the list appearing in the body is what makes this hook re-run when a pin changes. Edit
+# the list in one place — the `list` call above — and the hash follows. Same construction
+# as hook 28.
+#
+# WHY NOT Homebrew. `brew "aider"` exists and is current, but Homebrew builds numpy and
+# scipy from source, so it drags in gcc, openblas, freetype, jpeg-turbo and a python@3.12
+# keg — by far the heaviest dependency graph in the dev profile. PyPI publishes arm64
+# wheels for all of them, so uv installs the same software with no compiler involved.
+#
+# WHY --python 3.12, and it is not a whim. aider-chat requires Python <3.13,>=3.10.
+# dot_config/mise/config.toml.tmpl pins python = "3.13", so mise's interpreter CANNOT host
+# it, and adding a second mise python would put a version of the wrong tool in the file
+# that declares runtimes. uv fetches its own standalone CPython 3.12 into
+# ~/.local/share/uv/python/ and uses it for this venv only: it never becomes `python3` on
+# PATH and never competes with mise's 3.13. See ADR-044.
+#
+# Pinned with ==, not left floating, for the reason ADR-030 pins the runtimes: a version
+# that can move with no edit to a tracked file is not declared state.
+set -Eeuo pipefail
+
+{{ template "brew-shellenv" . }}
+
+TOOLS=({{ range $i, $t := (list "aider-chat==0.86.2") }}{{ if $i }} {{ end }}{{ $t | quote }}{{ end }})
+
+command -v uv >/dev/null 2>&1 || {
+  echo "[WARN] uv is not installed, so no Python CLIs were installed." >&2
+  exit 0
+}
+
+# Idempotent: ask uv what is present and install only the difference, so a re-apply is
+# silent and costs no network.
+#
+# `uv tool list` prints one line per tool as "<name> v<version>", each followed by its
+# executables prefixed with "- ". Measured against uv 0.12.5 rather than assumed:
+#
+#   aider-chat v0.86.2
+#   - aider
+#
+# The comparison below is a whole-line exact match, which is what makes the executable
+# lines harmless — "- aider" can never equal "aider-chat v0.86.2". It also means a
+# version that differs from the pin does not match, so changing the pin reinstalls
+# rather than seeing the name and deciding the work is done.
+installed="$(uv tool list 2>/dev/null || true)"
+failed=0
+for spec in "${TOOLS[@]}"; do
+  name="${spec%%==*}"
+  version="${spec##*==}"
+  if printf '%s\n' "$installed" | grep -qx "$name v$version"; then
+    continue
+  fi
+  echo "[INFO] Installing Python CLI: $spec" >&2
+  # --force so a pin change reinstalls over the previous version rather than reporting
+  # that the tool is already present and leaving the old one in place.
+  uv tool install --force --python 3.12 "$spec" >/dev/null 2>&1 || {
+    echo "[WARN] Could not install Python CLI: $spec" >&2
+    failed=$((failed + 1))
+  }
+done
+
+# Reported, never fatal. chezmoi stops at the first failing script, so a tool that will not
+# download must not cost hooks 30, 35, 40, 45 and 90 — the macOS defaults, the browser
+# profiles and the security reminder.
+if ((failed > 0)); then
+  echo "[WARN] $failed Python CLI(s) could not be installed. Retry with:" >&2
+  echo "       uv tool install --force --python 3.12 <spec>" >&2
+fi
+
+exit 0
+{{- end }}
