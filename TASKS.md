@@ -528,6 +528,33 @@ remains cannot be settled from documentation alone.
 - [ ] Enable FileVault and store the recovery key offline.
 - [ ] Configure encrypted Time Machine alongside the restic repository.
 - [ ] Configure `granted` for the accounts in use before running cloud scans.
+- [ ] **Manual:** give Terminal.app a colour scheme, or decide deliberately not to.
+      Ghostty's `theme =` applies to Ghostty and nothing else, so the built-in
+      terminal shows whatever profile it was left on — verified as the stock `Basic`
+      on the build machine, with only the six Apple profiles present. Import a
+      `.terminal` profile (Catppuccin publishes them), then Terminal > Settings >
+      Profiles > select > Default.
+
+      Two things to know before bothering. **Terminal.app has no truecolor**, only
+      256 colours, so a Catppuccin profile fixes the 16 ANSI colours and the
+      shell prompt while `bat` (pinned to `--theme="Catppuccin Mocha"`), delta,
+      eza and starship keep emitting hex and get approximated. Close, not
+      matching, and worst exactly where colour carries meaning — diffs and syntax
+      highlighting. That is Terminal.app, not something a profile fixes.
+
+      And **`script/macos-defaults` cannot express the colours.** Its rows are
+      `category|scope|domain|key|type|value` with scalar types only; Terminal's
+      colours are archived `NSColor` blobs inside a per-profile `Window Settings`
+      dictionary. Making this reproducible needs a `.terminal` file shipped and
+      imported, which is a new mechanism rather than a new row. The profile
+      SELECTION is expressible — `Default Window Settings` and
+      `Startup Window Settings` are plain strings, two ordinary rows.
+
+      So the open decision is whether Terminal.app is in scope at all. ADR-022
+      makes Ghostty the terminal, and `vscode/README.md`'s boundary — "the scripts
+      do not edit settings.json, that file is yours" — arguably covers a Terminal
+      profile too. Doing it by hand costs two minutes; automating it crosses a
+      stated boundary and should be an ADR amendment, not a quiet addition.
 
 ## AI coding agents (ADR-043, ADR-044)
 
