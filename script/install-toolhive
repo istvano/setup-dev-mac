@@ -52,19 +52,6 @@ lock_value() {
 
 VERSION="$(lock_value version)"
 
-platform_key() {
-  local arch
-  case "$(uname -m)" in
-    arm64) arch=arm64 ;;
-    x86_64) arch=amd64 ;;
-    *) die "Unsupported architecture: $(uname -m)" ;;
-  esac
-  case "$(uname -s)" in
-    Darwin) printf 'darwin_%s' "$arch" ;;
-    *) die "ToolHive is pinned here for macOS only." ;;
-  esac
-}
-
 if [[ "$MODE" == "verify" ]]; then
   [[ -x "$BINARY" ]] || die "thv is not installed at $BINARY"
   installed="$("$BINARY" version 2>/dev/null | head -n 1 || true)"
@@ -79,7 +66,13 @@ require_supported_mac
 command_exists curl || die "curl is required."
 command_exists shasum || die "shasum is required."
 
-KEY="$(platform_key)"
+# A constant, not a lookup. This used to be a platform_key() function switching on
+# `uname -m` and `uname -s`, with an x86_64 branch that could never run: it was
+# consulted three lines below require_supported_mac, which exits on anything that is
+# not arm64 macOS. Resolving an architecture the caller has already guaranteed only
+# creates a second place for the answer to be wrong. script/install-tart reads its
+# single-platform lock the same way.
+KEY="darwin_arm64"
 EXPECTED="$(lock_value "$KEY")"
 ARCHIVE="toolhive_${VERSION}_${KEY}.tar.gz"
 URL="https://github.com/stacklok/toolhive/releases/download/v${VERSION}/${ARCHIVE}"

@@ -191,18 +191,31 @@ if [[ ! -f "$LOCK" ]]; then
   echo 'ToolHive pin: not present (ToolHive is optional)'
   exit 0
 fi
-for key in version darwin_arm64 darwin_amd64; do
+for key in version darwin_arm64; do
   grep -qE "^$key=..*" "$LOCK" || {
     echo "$LOCK: missing or empty '$key'" >&2
     exit 1
   }
 done
-for key in darwin_arm64 darwin_amd64; do
-  digest="$(grep -E "^$key=" "$LOCK" | cut -d= -f2)"
-  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
-    echo "$LOCK: $key is not a sha256 digest: $digest" >&2
-    exit 1
-  }
-done
+digest="$(grep -E '^darwin_arm64=' "$LOCK" | cut -d= -f2)"
+[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+  echo "$LOCK: darwin_arm64 is not a sha256 digest: $digest" >&2
+  exit 1
+}
+
+# No amd64 digest. This file REQUIRED one until the entry was found to be dead: it
+# named an archive that require_supported_mac makes unreachable, because that guard
+# runs before script/install-toolhive resolves an archive name. Two lock files in one
+# repository were under opposite rules — tests/vm.sh:47 refuted the same key that this
+# file demanded — so the demand became a refutation and they now agree.
+#
+# Refuted rather than merely dropped, because the release page publishes both archives
+# and the obvious way to bump this file is to copy both digests across.
+if grep -qE '^darwin_amd64=' "$LOCK"; then
+  echo "$LOCK: darwin_amd64 is back. ADR-036 removed Intel support and" >&2
+  echo 'require_supported_mac fails on x86_64, so that archive can never be' >&2
+  echo 'downloaded. Pin the arm64 digest only, as vm/tart.lock does.' >&2
+  exit 1
+fi
 
 echo 'ToolHive pin: OK'

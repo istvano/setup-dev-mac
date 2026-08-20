@@ -563,14 +563,6 @@ verified from a Linux workstation and are therefore not yet proven.
 
 ## Pin hygiene
 
-- [ ] Remove `darwin_amd64` from `mcp/toolhive.lock`. ADR-036 removed Intel
-      support and `require_supported_mac` fails on `x86_64`, so the digest is for
-      a platform this repository refuses to run on — and `vm/tart.lock` already
-      dropped its amd64 entry for exactly that reason, noting that listing one
-      "would imply this works on a platform ADR-036 removed". Doing it means
-      touching the key list in `tests/mcp-policy.sh` and the arch mapping in
-      `script/install-toolhive`, which is why it was not folded into a version
-      refresh.
 - [ ] Check whether Dependabot is actually enabled. `.github/dependabot.yml` asks
       for monthly `github-actions` updates, yet `actions/checkout` sat three major
       versions behind until it was bumped by hand — so either the app is not

@@ -2,9 +2,21 @@
 # file is the only record of which build is trusted, and `brew upgrade` will
 # never move it. script/update-report reports when a newer release exists.
 #
-# To bump: change version, fetch the new archives, and replace the digests with
-# the values published in the release. Verify against the upstream checksums
-# rather than computing them from whatever the download happened to return.
+# One digest, not one per architecture. The release publishes a darwin_amd64
+# archive too, and this file used to pin it; the entry was dead weight from the
+# day ADR-036 removed Intel support. require_supported_mac fails on x86_64, and
+# it runs BEFORE script/install-toolhive resolves an archive name, so the amd64
+# digest named a download that could not be reached on any machine allowed to run
+# this repository. vm/tart.lock already stated the rule this broke: listing a
+# digest for a platform ADR-036 removed "would imply this works" there.
+#
+# tests/mcp-policy.sh now refutes darwin_amd64 rather than requiring it, matching
+# tests/vm.sh. Asserting the absence is what stops a future bump from pasting both
+# digests back in out of symmetry with the release page.
+#
+# To bump: change version, fetch the new archive, and replace the digest with the
+# value published in the release's own toolhive_<version>_checksums.txt. Verify
+# against those upstream checksums rather than computing them from whatever the
+# download happened to return.
 version=0.44.0
 darwin_arm64=d7274af3d38fd1ddf088ee783411403a9a901d18aa9d3d340c835981dd6daf5e
-darwin_amd64=47cb4cec8944190233f5c00f92014a6cd068d70c5440491f6faab7db76c735d6
