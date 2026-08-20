@@ -265,3 +265,40 @@ Not security-critical, but part of the same review:
 
 Record the keys `--verify` reports as drifted — those are the ones this macOS
 version silently ignores, and the list is version-specific.
+
+## 11. Editor telemetry
+
+ADR-046 opts this workstation out of telemetry wherever it can be done from a
+file this repository owns. Two editors cannot be, because
+`vscode/README.md` states the boundary: *"The scripts do not edit `settings.json`
+— that file is yours."* Owning the telemetry key would mean owning the file, so
+these two are yours to set.
+
+Both ship with telemetry **on**.
+
+**VS Code.** Settings → search `telemetry` → *Telemetry Level* → `off`, or in
+`settings.json`:
+
+```json
+"telemetry.telemetryLevel": "off"
+```
+
+`off` is the only value that also stops crash reports; `error` and `crash` still
+send. Verified against code.visualstudio.com/docs/configure/telemetry.
+
+**Zed.** `~/.config/zed/settings.json`:
+
+```json
+"telemetry": { "diagnostics": false, "metrics": false }
+```
+
+Both keys are needed — `diagnostics` covers crash reports and `metrics` covers
+usage. Verified against Zed's own `docs/src/telemetry.md`.
+
+**OpenHands**, if you run it, carries a PostHog key baked into the image, so its
+web UI reports usage until told otherwise in its settings. There is no file this
+repository can set for a value compiled into someone else's container.
+
+Everything else is handled: the shell configuration exports the four verified
+variables, and chezmoi hook 31 sets the three that need a command. See ADR-046
+for what was checked and what could not be.

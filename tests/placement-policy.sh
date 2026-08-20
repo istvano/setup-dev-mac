@@ -642,4 +642,35 @@ grep -vhE '^[[:space:]]*#' "$ROOT"/.github/workflows/*.yml >"$workflow_code"
 refute_match '@latest' "$workflow_code"
 refute_match 'curl[^|]*\|[[:space:]]*(sh|bash)|sh -c "\$\(curl' "$workflow_code"
 
+# Telemetry opt-out (ADR-046) must be identical in both shells.
+#
+# zsh is the default and fish is the alternative, so a variable added to one and
+# forgotten in the other produces a machine whose telemetry posture depends on which
+# shell was opened — which is not a posture at all. Compared as SETS rather than
+# asserted one by one, so adding a fifth variable to one file fails here instead of
+# being noticed a year later.
+# `|| true` on both, and it is load-bearing rather than defensive habit. Under
+# `set -Eeuo pipefail` a pipeline whose last grep matches nothing fails the assignment
+# and kills the script on the spot — so without it, the one case these checks exist to
+# catch (the block deleted from BOTH shells) exited 1 with no message at all, and the
+# guard below was unreachable. Measured, not assumed: `bash -x` ended at this line.
+# tests/lib.sh warns about the same shape for bare `! grep`.
+zsh_vars="$(grep -oE '^export [A-Z_]+=' "$ROOT/chezmoi/dot_zshrc.tmpl" |
+  sed -E 's/^export //; s/=$//' | grep -E 'ANALYTICS|TELEMETRY|CHECKPOINT|DO_NOT_TRACK' | sort || true)"
+fish_vars="$(grep -oE '^set -gx [A-Z_]+ ' "$ROOT/chezmoi/dot_config/fish/config.fish.tmpl" |
+  sed -E 's/^set -gx //; s/ $//' | grep -E 'ANALYTICS|TELEMETRY|CHECKPOINT|DO_NOT_TRACK' | sort || true)"
+if [[ "$zsh_vars" != "$fish_vars" ]]; then
+  echo 'The telemetry opt-out differs between the two shells (ADR-046).' >&2
+  echo "zsh:  $(tr '\n' ' ' <<<"$zsh_vars")" >&2
+  echo "fish: $(tr '\n' ' ' <<<"$fish_vars")" >&2
+  exit 1
+fi
+# And the set must not be empty, or the comparison above passes trivially once both
+# files lose the block — the failure mode that makes a two-sided check worthless.
+[[ -n "$zsh_vars" ]] || {
+  echo 'No telemetry opt-out variables found in either shell (ADR-046).' >&2
+  exit 1
+}
+assert_match '^export HOMEBREW_NO_ANALYTICS=1$' "$ROOT/chezmoi/dot_zshrc.tmpl"
+
 echo 'Placement policy: OK'

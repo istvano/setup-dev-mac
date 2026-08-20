@@ -2061,3 +2061,99 @@ The `macos-render` job's `brew install` is deliberately left alone: Homebrew has
 version pinning, and using it is how everything else on the host arrives. Runner
 images stay on `ubuntu-latest` and `macos-latest`, where pinning would trade a
 supply-chain gain for silent bit-rot.
+
+## ADR-046: Telemetry is opted out of, everywhere it can be
+
+**Status:** accepted
+
+This workstation handles credentials, client work and security tooling. What it
+has installed, when, and how often it is used is not information anyone else
+needs. Where a tool collects it, this repository turns it off; where it cannot,
+the fact is written down rather than left as an assumption.
+
+The rule is not "block network access" — Homebrew still downloads, `trivy` still
+fetches its database. It is narrower: **no tool reports our usage of it to its
+vendor.**
+
+### What the audit found
+
+Every package in every profile, plus the mise runtimes, the editor extensions,
+the MCP servers, the CI toolchain and the containerised agent tools. Three
+categories came out of it, and the distinction between them is the useful part.
+
+**On by default — closed:**
+
+| Tool | What it sent | How it is off now |
+|---|---|---|
+| Homebrew | usage analytics to InfluxDB, 365-day retention | `HOMEBREW_NO_ANALYTICS=1`, both shells |
+| Azure CLI | `collect_telemetry` reads with `fallback=True` in `telemetry.py` | `AZURE_CORE_COLLECT_TELEMETRY=false` |
+| VS Code | usage and crash reports | `telemetry.telemetryLevel: "off"` — MANUAL |
+| Zed | usage metrics and crash reports | `telemetry.diagnostics` + `.metrics` — MANUAL |
+| OpenHands | PostHog key baked into the image | its own settings — MANUAL |
+
+Homebrew is the one that mattered most. It runs on every install, update and
+upgrade, and what it reports is the list of what this machine has.
+
+**Off, local, or opt-in by default — pinned shut anyway:**
+
+| Tool | Default | Set anyway because |
+|---|---|---|
+| Go | telemetry is `local`: collected, not uploaded | `go telemetry off` declines collection entirely; hook 31 |
+| gcloud | reports only if you opted in at install | an installer question answered once is not a decision anyone remembers; hook 31 |
+| aider | analytics are opt-in and it prompts | `--analytics-disable` answers before it asks, inside an interactive session; hook 31 |
+| Claude Code | OTel export is opt-in via `CLAUDE_CODE_ENABLE_TELEMETRY` | left unset, which is the off state |
+
+Pinning a default is not redundant. A default is the vendor's choice and can be
+changed in a release; a written setting is ours and changes when we change it.
+
+**Checked, nothing found:** `mise`, `uv`, `opencode`, `k9s`, `helm`, `trivy`,
+`docker` (the CLI — Docker Desktop is not installed; Colima is the runtime),
+`obsidian` (its documentation states plainly: "We do not collect any telemetry
+data"), `starship`, `gh`, `chezmoi`, `ghostty`, `restic`, `rclone`, and the rest
+of `core`.
+
+That phrasing is deliberate. **Nothing found is not the same as nothing there.**
+These were checked against vendor documentation and, where it was quicker to
+read than to search, source. A tool that collects quietly and documents nothing
+would pass this audit, so the conclusion is "no evidence", not "proven clean".
+
+### Where each opt-out lives, and why
+
+**Environment variables go in both shell configurations.** They apply per
+invocation with no state to drift, and there is no file to reconcile.
+`tests/placement-policy.sh` compares the two shells as sets: an opt-out present
+in zsh and missing from fish would mean the machine's posture depended on which
+terminal was opened, which is not a posture.
+
+Only variables whose effect was **verified** are set. A plausible-looking
+variable that nothing reads is worse than none — it reads as coverage and
+provides none. `DO_NOT_TRACK=1` is the one exception and is labelled as such: it
+is an informal convention (consoledonottrack.com), honoured by whichever tools
+chose to, set as a blanket signal and never as a substitute for a specific
+variable.
+
+**Three settings have no variable** and are written by the tool into its own
+config, so `run_onchange_after_31_telemetry-optout.sh.tmpl` runs them once per
+machine. Each step is guarded on the tool being present, is a no-op when the
+setting is already correct, and never fails the apply — chezmoi stops at the
+first failing script, and a telemetry setting must not cost the macOS defaults,
+the browser profiles or the security reminder that run after it.
+
+**Two editors are manual, deliberately.** `vscode/README.md` already states that
+this repository does not edit `settings.json` — "that file is yours". Setting the
+telemetry key would mean owning the file, and the boundary is worth more than the
+automation. They are steps 11 in `docs/MANUAL-SECURITY.md`, beside the other
+decisions only a human can make.
+
+### What this does not cover
+
+Applications that phone home as part of their function rather than as telemetry:
+a browser's safe-browsing lookups, `trivy`'s vulnerability database, Homebrew's
+own downloads. Those are the tool working, not the tool reporting, and blocking
+them belongs to the outbound firewall (LuLu) as a per-application decision rather
+than here.
+
+Nor does it cover a tool that adds telemetry in a later release. Nothing detects
+that. `script/update-report` lists what changed before an upgrade, and a new
+analytics notice is the kind of thing that appears in release notes — which is an
+argument for reading them, not a control.

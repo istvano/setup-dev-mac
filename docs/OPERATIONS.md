@@ -1102,6 +1102,10 @@ brew upgrade <name>
 Casks containing system extensions or kernel components deserve extra scrutiny,
 because upgrading them changes privileged code.
 
+Upgrades are also when telemetry comes back: a tool can add it in a release, and
+nothing detects that. ADR-046 lists what was opted out of and how; release notes
+are the only place a new analytics notice appears.
+
 Homebrew renames and deprecates tokens continuously. Check the declared set
 against upstream before an install, and on a schedule from CI:
 

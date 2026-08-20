@@ -182,6 +182,34 @@ command -v bat >/dev/null 2>&1 && alias cat='bat --paging=never'
 export GPG_TTY="$TTY"
 export LESS='-R'
 
+# --- Telemetry opt-out (ADR-046) ---------------------------------------------
+#
+# Only variables whose effect was VERIFIED against the tool's own documentation
+# or source. A plausible-looking variable that nothing reads is worse than none:
+# it reads as coverage and provides none. What could not be verified is listed in
+# ADR-046 as unverified rather than set here on the chance that it works.
+#
+# Kept in step with dot_config/fish/config.fish.tmpl; tests/placement-policy.sh
+# asserts both shells carry the same set, because a telemetry opt-out that
+# depends on which shell you happened to open is not an opt-out.
+#
+# Homebrew analytics are ON by default and go to InfluxDB with 365-day retention
+# (docs.brew.sh/Analytics). This is the widest one here: brew runs on every
+# install and update, and it reports what is installed.
+export HOMEBREW_NO_ANALYTICS=1
+# Azure CLI defaults to collecting: `collect_telemetry` reads with fallback=True
+# in azure/cli/core/telemetry.py. Set even though cloud-azure is opt-in, because
+# the variable costs nothing on a machine that never installs it.
+export AZURE_CORE_COLLECT_TELEMETRY=false
+# HashiCorp's checkpoint service, which the cloud profile's OpenTofu and
+# Terragrunt inherit from their Terraform lineage. It checks for new versions and
+# reports the current one on run.
+export CHECKPOINT_DISABLE=1
+# consoledonottrack.com: an informal cross-tool convention, not a standard, and
+# honoured only by tools that chose to. It is set as a blanket signal for
+# anything that reads it, NOT as a substitute for the specific variables above.
+export DO_NOT_TRACK=1
+
 # A stricter umask is deliberately not set here: Homebrew fails to build several
 # formulae under umask 077. Rely on FileVault and per-file modes instead.
 

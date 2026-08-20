@@ -95,6 +95,18 @@ set -gx VISUAL $EDITOR
 # value of the variable flags to '-l'".
 set -gx LESS -R
 
+# --- Telemetry opt-out (ADR-046) ---------------------------------------------
+#
+# The same four variables as dot_zshrc.tmpl, and they must stay the same four:
+# tests/placement-policy.sh compares the two shells, because an opt-out that
+# depends on which shell you opened is not an opt-out. The reasoning for each one
+# is in dot_zshrc.tmpl and ADR-046; only variables whose effect was verified
+# against upstream documentation or source are here.
+set -gx HOMEBREW_NO_ANALYTICS 1
+set -gx AZURE_CORE_COLLECT_TELEMETRY false
+set -gx CHECKPOINT_DISABLE 1
+set -gx DO_NOT_TRACK 1
+
 # ripgrep reads its configuration ONLY through this variable — there is no default path it
 # looks in. Without it, ~/.config/ripgrep/ripgreprc is an inert file and rg silently runs at
 # its defaults. Kept in step with dot_zshrc.tmpl.

@@ -285,6 +285,9 @@ Do not weaken these without explicit user approval and a documented decision:
   production-safe.
 - Interactive shells, host firewalls and password managers remain mutually
   exclusive choices.
+- No tool reports our usage of it to its vendor (ADR-046). Verified opt-outs only:
+  a variable nothing reads is worse than none. Both shells carry the identical set,
+  and `tests/placement-policy.sh` compares them.
 - The account login shell is not reassigned automatically, and `/etc/shells` is
   not edited.
 
