@@ -286,9 +286,39 @@ ensure_xcode_clt() {
   die "Complete the Apple installer, then rerun ./bootstrap install."
 }
 
+# Homebrew's analytics, declined persistently rather than only in the two shells.
+#
+# ADR-046 named this the widest opt-out in the repository: analytics go to InfluxDB with
+# 365-day retention, on every install, update and upgrade, reporting the list of what
+# this machine has. It was implemented as HOMEBREW_NO_ANALYTICS in dot_zshrc.tmpl and
+# config.fish.tmpl — which covers an interactive prompt and nothing else.
+#
+# The install itself is the thing that was not covered. Hook 10 runs `brew bundle` from a
+# chezmoi run script with no interactive environment, so the whole selection was reported
+# on every first install. Measured, not inferred: after a complete ./script/test-install
+# the guest still answered "InfluxDB analytics are enabled."
+#
+# `brew analytics off` records analyticsdisabled in Homebrew's own git config, so it holds
+# for every invocation regardless of environment — shells, run scripts, launchd, CI. It is
+# idempotent and silent, so this runs on every bootstrap rather than only the first.
+#
+# Placed HERE, in ensure_homebrew, because ordering is the whole point: hook 31 sets the
+# other opt-outs but runs long after hook 10 has already installed and reported.
+decline_homebrew_analytics() {
+  command_exists brew || return 0
+  # `brew analytics state` prints "InfluxDB analytics are disabled." when it is off.
+  if brew analytics state 2>/dev/null | grep -q 'InfluxDB analytics are disabled'; then
+    return 0
+  fi
+  log "Declining Homebrew analytics for this machine (ADR-046)."
+  brew analytics off ||
+    warn "Could not disable Homebrew analytics; run 'brew analytics off'."
+}
+
 ensure_homebrew() {
   if activate_homebrew; then
     success "Homebrew is installed at $(brew_prefix)."
+    decline_homebrew_analytics
     return
   fi
   confirm "Install Homebrew from brew.sh?" || die "Homebrew is required."
@@ -318,16 +348,21 @@ ensure_homebrew() {
   # That prompt is the last chance to stop after reviewing the digest printed above,
   # and suppressing it unconditionally would remove a deliberate review step from
   # the one remote script this repository executes (SECURITY.md).
+  # HOMEBREW_NO_ANALYTICS is exported for the installer's own run, not only afterwards.
+  # The installer ends by running `brew update`, and that happens before any setting this
+  # script could write — so without the variable the very first brew invocation on a new
+  # machine is also the first one to report. The persistent setting is applied below.
   if [[ "$ASSUME_YES" == "1" ]]; then
-    NONINTERACTIVE=1 /bin/bash "$installer"
+    NONINTERACTIVE=1 HOMEBREW_NO_ANALYTICS=1 /bin/bash "$installer"
   else
-    /bin/bash "$installer"
+    HOMEBREW_NO_ANALYTICS=1 /bin/bash "$installer"
   fi
   rm -f "$installer"
   # Discovered rather than assumed, through brew_prefix, so the prefix has exactly
   # one definition and it lives in script/lib/common.sh.
   activate_homebrew || die "Homebrew installed but no brew binary was found in
 $(printf '%s ' "${HOMEBREW_PREFIXES[@]}")."
+  decline_homebrew_analytics
 }
 
 # Apple supports /etc/pam.d/sudo_local for exactly this purpose; it survives

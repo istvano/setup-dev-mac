@@ -86,6 +86,8 @@ after establishing that a new signing identity is legitimate.
 
 `brew upgrade` will never move this binary, because Homebrew did not install it.
 
-Nothing reports a newer tart release: `script/update-report` has a ToolHive section and no
-tart equivalent, so bumping this pin is something you have to remember rather than something
-you are told about. Tracked in `TASKS.md`.
+`script/update-report` reports a newer tart release. Its "Pinned tools outside Homebrew"
+section covers every lock file in the repository — this one, `mcp/toolhive.lock` and
+`agent-tools/openhands.lock` — and reports each whether or not the tool is installed,
+because a stale pin is stale before the first install and that is exactly when it is worth
+knowing. Applying the bump is still a review decision; you are simply told it is available.

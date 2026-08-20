@@ -2075,6 +2075,18 @@ before the question was asked.
 code rather than the comments — the workflow now explains both rules in prose, and
 a check that matched the explanation would teach the next author to delete it.
 
+**And a third correction, from the same root.** Moving chezmoi off `go install`
+also moved it out of `script/update-report`'s staleness check, because that section
+finds its tools by grepping `go install …@v…` out of the workflow. The section named
+four tools and checked three, and nothing failed — a check that does not run cannot
+fail. chezmoi now has its own query against its GitHub releases, which is what the
+workflow downloads from; the module proxy would answer, but it would answer for a
+version that cannot be installed, which is this ADR's original mistake repeated.
+`tests/placement-policy.sh` asserts that `CHEZMOI_VERSION` is read there, and that
+the pin in the workflow carries both a version and a 64-character digest — the
+existing guards only refused `@latest` and curl-pipe-shell, so a pin that lost its
+checksum would have passed all of them.
+
 The `macos-render` job's `brew install` is deliberately left alone: Homebrew has no
 version pinning, and using it is how everything else on the host arrives. Runner
 images stay on `ubuntu-latest` and `macos-latest`, where pinning would trade a
@@ -2103,7 +2115,7 @@ categories came out of it, and the distinction between them is the useful part.
 
 | Tool | What it sent | How it is off now |
 |---|---|---|
-| Homebrew | usage analytics to InfluxDB, 365-day retention | `HOMEBREW_NO_ANALYTICS=1`, both shells |
+| Homebrew | usage analytics to InfluxDB, 365-day retention | `brew analytics off` in `bootstrap`, plus `HOMEBREW_NO_ANALYTICS=1` in both shells |
 | Azure CLI | `collect_telemetry` reads with `fallback=True` in `telemetry.py` | `AZURE_CORE_COLLECT_TELEMETRY=false` |
 | VS Code | usage and crash reports | `telemetry.telemetryLevel: "off"` — MANUAL |
 | Zed | usage metrics and crash reports | `telemetry.diagnostics` + `.metrics` — MANUAL |
@@ -2156,6 +2168,55 @@ machine. Each step is guarded on the tool being present, is a no-op when the
 setting is already correct, and never fails the apply — chezmoi stops at the
 first failing script, and a telemetry setting must not cost the macOS defaults,
 the browser profiles or the security reminder that run after it.
+
+**Homebrew's own setting is persistent, and it is set in `bootstrap`, not in hook
+31.** `brew analytics off` records `analyticsdisabled` in Homebrew's git config,
+which applies to every invocation whatever the environment. The environment
+variable stays as well: it covers the Homebrew installer's own `brew update`,
+which runs before any setting this repository could have written.
+
+Ordering is the reason it lives in `ensure_homebrew`. Hook 10 installs the entire
+selection with `brew bundle`, and hook 31 runs twenty-one hooks later.
+
+### What the first implementation got wrong
+
+Recorded rather than quietly fixed, because all three defects share one shape and
+it is the shape this repository is most vulnerable to: **a check that cannot fail
+reads exactly like a check that passed.**
+
+**Two of the three hook-31 settings never applied, on any machine.** The hook's
+only PATH setup is `brew-shellenv`, and neither `go` (mise) nor `aider` (uv) is a
+Homebrew package, so both `command -v` guards were false and the hook exited 0
+having done nothing. An absent tool is a legitimate and silent skip, so nothing
+distinguished this from success. It was reported as verified because the machine
+it was tried on happened to carry a Homebrew `go`. Found by asking the test guest
+what `go telemetry` actually said after a complete install: `local`.
+
+**Homebrew's opt-out did not cover the install.** It was an environment variable
+in two interactive shell configurations, and the 121-package `brew bundle` runs
+from a chezmoi run script that inherits neither. So the single widest exposure in
+this ADR — brew reporting the list of what this machine has, on every install —
+happened in full on every first install, while the ADR recorded it as closed.
+Measured, not reasoned: the guest answered "InfluxDB analytics are enabled" after
+a complete `./script/test-install`.
+
+**Fixing the PATH bug naively would have stalled every apply.** With stdin
+attached, `aider --analytics-disable --exit` writes the setting and then offers to
+log in to OpenRouter, opens a callback listener on `localhost:8484` and waits five
+minutes for a browser — invisibly, under the hook's own `>/dev/null 2>&1`. And its
+success marker was `~/.aider.conf.yml`, a file aider never creates, so the step
+would have repeated on every apply. `</dev/null` reduces it to four seconds; the
+marker is `~/.aider/analytics.json`, and the exit status is not the test because
+aider exits non-zero on that path having already written the setting.
+
+A fourth was caught while fixing the first: `mise exec -- go` **installs** a
+missing toolchain in order to run it, so the obvious fix would have let a
+telemetry hook trigger a Go download. `mise which` reports a path, installs
+nothing, and resolves the pinned version rather than the newest.
+
+`tests/placement-policy.sh` now asserts each of these against the hook's code
+with its comments stripped, so a version that explains the rule while not
+following it fails.
 
 **Two editors are manual, deliberately.** `vscode/README.md` already states that
 this repository does not edit `settings.json` — "that file is yours". Setting the

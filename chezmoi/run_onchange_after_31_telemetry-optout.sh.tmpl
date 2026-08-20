@@ -16,6 +16,17 @@
 # Every step is guarded on the tool being present and is a no-op when the setting is
 # already correct, so a re-apply is silent and costs no network.
 #
+# FINDING THE TOOLS IS THE HARD PART, and the first version of this hook got it wrong.
+# brew-shellenv puts /opt/homebrew/bin on PATH and nothing else. gcloud is fine there —
+# the gcloud-cli cask declares google-cloud-sdk/bin/gcloud as a Binary artifact, which
+# Homebrew symlinks into the prefix. But go comes from mise and aider from uv, so
+# `command -v` failed for both, the hook exited 0, and two of its three settings were
+# never applied on any machine this repository provisioned — while reading as a clean
+# run, because an absent tool is a legitimate and silent skip.
+#
+# The fix is per-tool rather than one long PATH, because the right answer differs:
+# mise resolves its own toolchains, and uv simply installs to a known directory.
+#
 # NOT here, deliberately:
 #
 #   VS Code and Zed. Both are settings.json edits, and vscode/README.md states the
@@ -29,14 +40,34 @@ set -Eeuo pipefail
 
 {{ template "brew-shellenv" . }}
 
+# uv installs tool executables into ~/.local/bin, which is not on a run script's PATH.
+# The same prepend dot_zshrc.tmpl does at line 8, and for the same reason.
+[[ ":$PATH:" == *":$HOME/.local/bin:"* ]] || export PATH="$HOME/.local/bin:$PATH"
+
 # Go's telemetry defaults to "local": counters are written to disk and NOT uploaded
 # unless the mode is changed to "on". So this is not closing an open channel — it is
 # declining to collect at all, which is the stricter of the two and the one worth
 # stating. `go telemetry` was added in Go 1.23; the guard covers an older toolchain.
-if command -v go >/dev/null 2>&1 && go telemetry >/dev/null 2>&1; then
-  if [[ "$(go telemetry 2>/dev/null)" != "off" ]]; then
+#
+# Located through mise, not through PATH. Go is a mise runtime — no profile declares
+# `brew "go"` — so `command -v go` is false in a run script however the PATH is arranged.
+# mise IS a Homebrew package, so brew-shellenv above finds it.
+#
+# `mise which`, NOT `mise exec`, and the difference is not stylistic. `mise exec` installs
+# a missing tool in order to run it: measured against a home with no mise config, it
+# downloaded Go 1.26.7 just to answer `go telemetry`. A telemetry opt-out must never be
+# able to trigger a toolchain download, and the header above promises no network on a
+# re-apply. `mise which` only reports a path, exits non-zero when the tool is absent, and
+# resolves the PINNED version rather than the newest — 1.26.6 here, not 1.26.7.
+#
+# Prepending mise's shim directory was the other option. It hardcodes
+# ~/.local/share/mise/shims, a path mise owns and may move, and works only once something
+# has generated the shims. Asking mise cannot go stale that way.
+go_bin="$(mise which go 2>/dev/null || true)"
+if [[ -n "$go_bin" ]] && "$go_bin" telemetry >/dev/null 2>&1; then
+  if [[ "$("$go_bin" telemetry 2>/dev/null)" != "off" ]]; then
     echo "[INFO] Disabling Go telemetry collection." >&2
-    go telemetry off || echo "[WARN] Could not set Go telemetry to off." >&2
+    "$go_bin" telemetry off || echo "[WARN] Could not set Go telemetry to off." >&2
   fi
 fi
 
@@ -54,12 +85,51 @@ fi
 # aider's analytics are opt-in and it asks before enabling them. --analytics-disable
 # records a permanent "no" so the question is answered before it is asked, which
 # matters for a tool that prompts inside an interactive session.
-if command -v aider >/dev/null 2>&1; then
-  if ! grep -qs '^analytics-disable: *true' "$HOME/.aider.conf.yml" 2>/dev/null; then
-    echo "[INFO] Disabling aider analytics." >&2
-    aider --analytics-disable --exit >/dev/null 2>&1 ||
-      echo "[WARN] Could not disable aider analytics; run 'aider --analytics-disable'." >&2
+#
+# THREE things here are load-bearing, and each one was learned by running it.
+#
+# `</dev/null`. With stdin attached, `aider --analytics-disable --exit` writes the
+# setting and then keeps going: it offers to log in to OpenRouter, opens a callback
+# listener on localhost:8484 and waits five minutes for a browser. Under the
+# `>/dev/null 2>&1` below the operator sees none of that — an apply that appears to
+# hang, taking hooks 35, 40, 45 and 90 with it. With stdin closed it exits in four
+# seconds. A stalled apply is worse than a failed one, because `exit 0` at the end of
+# this file cannot rescue it.
+#
+# The marker is aider's own state file. `--analytics-disable` writes
+# permanently_disable into ~/.aider/analytics.json; it does NOT write
+# ~/.aider.conf.yml, which is what this guard used to read. aider never creates that
+# file, so the guard could not be satisfied and the step repeated on every apply.
+#
+# The exit STATUS is not the test. aider exits non-zero on the no-API-key path even
+# though the setting was already written, so trusting the status would print a warning
+# after a success and, worse, hide the reverse. The file is checked afterwards instead.
+aider_optout_recorded() {
+  grep -qs '"permanently_disable"[[:space:]]*:[[:space:]]*true' \
+    "$HOME/.aider/analytics.json" 2>/dev/null
+}
+
+if command -v aider >/dev/null 2>&1 && ! aider_optout_recorded; then
+  echo "[INFO] Disabling aider analytics." >&2
+  # Bounded explicitly: macOS ships no timeout(1), and a future aider that prompts
+  # despite a closed stdin must not be able to stall the apply. 60s is generous for a
+  # step measured at four.
+  aider --analytics-disable --exit </dev/null >/dev/null 2>&1 &
+  aider_pid=$!
+  aider_waited=0
+  while ((aider_waited < 60)) && kill -0 "$aider_pid" 2>/dev/null; do
+    sleep 1
+    aider_waited=$((aider_waited + 1))
+  done
+  if kill -0 "$aider_pid" 2>/dev/null; then
+    kill -TERM "$aider_pid" 2>/dev/null || true
+    sleep 1
+    kill -KILL "$aider_pid" 2>/dev/null || true
+    echo "[WARN] aider did not finish within ${aider_waited}s and was stopped." >&2
   fi
+  wait "$aider_pid" 2>/dev/null || true
+  aider_optout_recorded ||
+    echo "[WARN] Could not disable aider analytics; run 'aider --analytics-disable'." >&2
 fi
 
 # Never fatal. chezmoi stops at the first failing script, so a telemetry setting that

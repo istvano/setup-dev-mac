@@ -33,7 +33,20 @@ brewfile="$tmp_dir/Brewfile"
   --firewall "$firewall" \
   --output "$brewfile"
 
-brew bundle check --verbose --file="$brewfile"
+# --no-upgrade, because this command answers PRESENCE and not currency.
+#
+# Without it, `brew bundle check` treats an installed-but-outdated package as an
+# unsatisfied dependency, so a correctly provisioned machine fails this check the moment
+# any one of its 121 packages has a newer version upstream. That is not drift in the
+# declared state; it is the rest of the world moving, and script/update-report already
+# has an "Outdated packages" section for it.
+#
+# Found by a ./script/test-install run that failed here because yq 4.53.6 was published
+# during the hour the install took. The guest had 4.53.4, installed exactly as declared;
+# `brew bundle check --no-upgrade` called the Brewfile satisfied and the unflagged check
+# called it broken. A destructive install test whose result depends on upstream release
+# timing cannot gate anything.
+brew bundle check --no-upgrade --verbose --file="$brewfile"
 chezmoi doctor
 
 # Identity is reported here but does not fail this command.

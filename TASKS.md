@@ -552,6 +552,20 @@ verified from a Linux workstation and are therefore not yet proven.
       runs as uid 10001 while Colima presents host files as the login user's uid.
       If writes land wrong, fix it in the launcher and record why — do not reach
       for `--user`, which would make the image's own home unwritable.
+- [ ] Decide who creates `~/projects`. `script/ai-agent openhands` refuses when the
+      projects directory is absent, which it is on a machine that has just been
+      installed — so the first `just openhands` on a new Mac fails with a correct
+      but unexpected error. Either the launcher creates it or `docs/OPERATIONS.md`
+      says to; it should not be discovered by hitting it.
+
+## Telemetry follow-up (ADR-046)
+
+- [ ] Exercise the gcloud arm of hook 31. It is the one telemetry setting never
+      run: `cloud-gcp` is opt-in, so no `./script/test-install` selection has ever
+      installed `gcloud-cli`, and the other two arms in that hook were both broken
+      in ways only running them revealed. Install with `--profiles
+      core,dev,cloud-gcp` and confirm `gcloud config get-value
+      disable_usage_reporting` reads `True` afterwards.
 
 ## Pin hygiene
 

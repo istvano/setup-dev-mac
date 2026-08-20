@@ -673,4 +673,105 @@ fi
 }
 assert_match '^export HOMEBREW_NO_ANALYTICS=1$' "$ROOT/chezmoi/dot_zshrc.tmpl"
 
+# ADR-046, hook 31: the tools it configures are not Homebrew packages.
+#
+# The hook's only PATH setup is the brew-shellenv template, which puts
+# /opt/homebrew/bin on PATH and nothing else. But `go` is installed by mise and
+# `aider` by uv, so neither is in that prefix, and `command -v` found neither. The
+# hook ran, exited 0 and changed nothing — on every machine this repository has
+# provisioned. Measured in the test guest after a complete ./script/test-install:
+# `go telemetry` still reported "local", and ~/.aider/analytics.json did not exist.
+#
+# An absent tool is a legitimate skip AND a silent one, which is precisely why this
+# needs a test rather than a comment: at runtime the defect is indistinguishable
+# from correct behaviour. The commit that introduced the hook reported it verified,
+# because the machine it was tried on happened to carry a Homebrew go.
+hook31="$ROOT/chezmoi/run_onchange_after_31_telemetry-optout.sh.tmpl"
+hook31_code="$(mktemp "${TMPDIR:-/tmp}/hook31.XXXXXX")"
+trap 'rm -f "$workflow_code" "$hook31_code"' EXIT
+grep -vhE '^[[:space:]]*#' "$hook31" >"$hook31_code"
+
+# Asserted against the CODE, not the file: the hook explains itself at length, and
+# matching its prose would pass on a version that says the right thing and does
+# nothing. Same reasoning as the workflow checks above.
+# Go is resolved THROUGH mise rather than assumed on PATH. mise itself is a
+# Homebrew package, so brew-shellenv finds it, and `mise exec` then knows where the
+# pinned toolchain is without this file hardcoding a shim directory that mise is
+# free to move. uv has no equivalent, so aider needs its bin directory added —
+# ~/.local/bin, the same path dot_zshrc.tmpl already prepends for the same reason.
+assert_match 'mise (exec|which)' "$hook31_code"
+assert_match '[.]local/bin' "$hook31_code"
+
+# aider's opt-out must close stdin, and must be judged by the marker aider writes.
+#
+# Two defects, both found by running it rather than reading it. With stdin left
+# attached, `aider --analytics-disable --exit` writes the setting and then keeps
+# going: it offers to log in to OpenRouter, opens a callback listener on
+# localhost:8484 and waits five minutes for a browser that is not there. Under the
+# hook's own >/dev/null 2>&1 the operator sees none of that, so `chezmoi apply`
+# stalls in silence and hooks 35, 40, 45 and 90 never run. With </dev/null it exits
+# in four seconds. That single redirection is the whole difference.
+#
+# It also exits NON-ZERO on that path, so the exit status cannot be the success
+# test. The marker is ~/.aider/analytics.json, where aider records
+# permanently_disable. ~/.aider.conf.yml — what the guard used to read — is a file
+# aider never creates, so the guard could never be satisfied and the step would
+# repeat on every single apply.
+assert_match 'analytics[.]json' "$hook31_code"
+assert_match 'permanently_disable' "$hook31_code"
+refute_match 'aider[.]conf[.]yml' "$hook31_code"
+assert_match '</dev/null' "$hook31_code"
+
+# Homebrew's opt-out must be persistent, not merely exported by the two shells.
+#
+# HOMEBREW_NO_ANALYTICS is set in dot_zshrc.tmpl and config.fish.tmpl and nowhere
+# else, so it covers an interactive prompt and nothing else. Hook 10 installs the
+# whole selection with `brew bundle` from a chezmoi run script, which inherits no
+# interactive environment — so the widest exposure ADR-046 set out to close ("brew
+# runs on every install and update, and it reports what is installed") happened in
+# full, on every first install. Measured in the guest: after a complete
+# ./script/test-install, `brew analytics state` still reported
+# "InfluxDB analytics are enabled."
+#
+# `brew analytics off` records analyticsdisabled in Homebrew's own git config, so it
+# holds for every invocation whatever the environment. It belongs in bootstrap,
+# BEFORE hook 10 installs anything — not in hook 31, which runs long after.
+assert_match 'analytics off' "$ROOT/bootstrap"
+
+# CI's chezmoi pin needs the same staleness check as the other three tools.
+#
+# script/update-report's "Pinned CI toolchain" section finds what to check by
+# grepping `go install …@v…` out of the workflow. chezmoi cannot be go-installed —
+# its go.mod carries a replace directive — so when it moved to a pinned binary
+# download it dropped out of that grep in silence, leaving the section covering
+# three of the four tools its own comment names. Nothing failed, because a check
+# that does not run cannot fail.
+assert_match 'CHEZMOI_VERSION' "$ROOT/script/update-report"
+
+# And the pin itself must carry a version AND a digest. The workflow checks above
+# only refuse @latest and curl-pipe-shell, so a version with no checksum — or a
+# checksum quietly deleted — would have passed all of them.
+assert_match 'CHEZMOI_VERSION=[0-9]+[.][0-9]+[.][0-9]+' "$workflow_code"
+assert_match 'CHEZMOI_SHA256=[0-9a-f]{64}' "$workflow_code"
+
+# `brew bundle check` must ask about PRESENCE, not currency, in both places it is used.
+#
+# Without --no-upgrade it reports a package that is installed but merely outdated as
+# unsatisfied, which conflates two questions this repository deliberately separates:
+# script/verify answers "is the declared state installed" (its own header says so, as
+# does AGENTS.md), and script/update-report answers "what would an update change" in a
+# dedicated "Outdated packages" section immediately after this check.
+#
+# Not theoretical. A ./script/test-install run failed at the verify step because yq
+# 4.53.6 was published during the hour the install took: the guest had 4.53.4 installed
+# correctly, `brew bundle check --no-upgrade` called the Brewfile satisfied, and the
+# unflagged check called it broken. That made the destructive install test
+# non-deterministic on upstream release timing — a red result for a machine that was
+# provisioned exactly as declared.
+#
+# In update-report the same flag also stops the section titled "Declared but not
+# installed" from listing packages that ARE installed, duplicating the section below it.
+assert_match 'bundle check[^\n]*--no-upgrade' "$ROOT/script/verify"
+assert_match 'bundle check[^\n]*--no-upgrade' "$ROOT/script/update-report"
+
 echo 'Placement policy: OK'

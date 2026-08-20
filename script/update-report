@@ -18,6 +18,18 @@ for command in brew chezmoi jq; do
 done
 
 selection="$(chezmoi data)"
+
+# The selection has to exist before any of it can be read. chezmoi answers `data` on a
+# machine that has never been applied too — it just answers with its own built-in
+# variables and none of ours — so every jq below then failed on null with
+#   jq: error (at <stdin>:280): Cannot iterate over null (null)
+# which says nothing about the actual problem: bootstrap has not run here. Checked once,
+# by name, rather than letting four extractions each fail their own way.
+jq -e 'has("profiles")' <<<"$selection" >/dev/null 2>&1 || die "No workstation selection is recorded on this machine.
+chezmoi has no 'profiles' value, which means ./bootstrap install has not run here.
+This report describes what an UPDATE would change, so it needs an installed machine.
+  ./bootstrap plan && ./bootstrap install"
+
 profiles="$(jq -er '.profiles | join(",")' <<<"$selection")"
 # Required, not optional. Rendering the wrong shell fragment would make the
 # cleanup section at the end of this report list the selected shell itself as a
@@ -40,7 +52,12 @@ brewfile="$tmp_dir/Brewfile"
   --output "$brewfile" >/dev/null
 
 echo '== Declared but not installed =='
-if brew bundle check --verbose --file="$brewfile" >"$tmp_dir/check" 2>&1; then
+# --no-upgrade so this section answers the question its own heading asks. Without it,
+# `brew bundle check` counts an installed-but-outdated package as unsatisfied, so
+# packages that ARE installed were listed here — and then listed again, correctly, under
+# "Outdated packages" immediately below. One report, two sections, same package, two
+# different meanings.
+if brew bundle check --no-upgrade --verbose --file="$brewfile" >"$tmp_dir/check" 2>&1; then
   success 'Every declared package is installed.'
 else
   grep -E '^(Formula|Cask|Tap|Homebrew Bundle)' "$tmp_dir/check" || cat "$tmp_dir/check"
@@ -331,6 +348,17 @@ echo '== Pinned CI toolchain =='
 # installed with @latest until they were pinned, which made them the least reviewed code
 # with the most authority over this repository. Pinned code goes stale, so it gets a check
 # rather than a promise.
+#
+# THREE of the four come from `go install` and are asked of the Go module proxy. chezmoi is
+# the fourth and needs its own query, below: it cannot be go-installed at all, because its
+# go.mod carries a replace directive and `go install pkg@version` refuses any module that
+# does. It arrives as a pinned binary download instead.
+#
+# That difference silently narrowed this section once already. The loop finds its tools by
+# grepping `go install …@v…` out of the workflow, so when chezmoi moved to a binary
+# download it simply stopped being one of the rows — leaving a section that named four
+# tools and checked three, with nothing failing, because a check that does not run cannot
+# fail. tests/placement-policy.sh now asserts CHEZMOI_VERSION is read here.
 while IFS=$'\t' read -r module pinned; do
   latest_version="$(curl -fsS --max-time 20 "https://proxy.golang.org/$module/@latest" 2>/dev/null |
     python3 -c 'import json,sys; print(json.load(sys.stdin).get("Version",""))' 2>/dev/null || true)"
@@ -357,6 +385,29 @@ for line in sys.stdin.read().split():
     print(f"{path}\t{version}")
 '
 )
+
+# chezmoi, asked of its GitHub releases rather than the Go module proxy. The proxy would
+# answer — chezmoi is a Go module — but it would answer for a version that cannot be
+# installed, which is the exact mistake ADR-045 records: resolution is not
+# installability. The release list is what the workflow actually downloads from.
+chezmoi_pinned="$(grep -oE '^[[:space:]]*CHEZMOI_VERSION=[0-9][^[:space:]]*' \
+  "$ROOT/.github/workflows/validate.yml" | head -n 1 | cut -d= -f2 || true)"
+if [[ -z "$chezmoi_pinned" ]]; then
+  warn 'No CHEZMOI_VERSION found in validate.yml; the CI chezmoi pin is unchecked.'
+else
+  chezmoi_latest="$(curl -fsS --max-time 20 \
+    'https://api.github.com/repos/twpayne/chezmoi/releases/latest' 2>/dev/null |
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)"
+  if [[ -z "$chezmoi_latest" ]]; then
+    warn "Could not reach the chezmoi release API; pinned version is $chezmoi_pinned."
+  elif [[ "$chezmoi_latest" == "$chezmoi_pinned" ]]; then
+    success "chezmoi $chezmoi_pinned is current."
+  else
+    warn "chezmoi $chezmoi_pinned is pinned; $chezmoi_latest is available."
+    log 'Bump CHEZMOI_VERSION and CHEZMOI_SHA256 TOGETHER in validate.yml. Take the'
+    log "digest from that release's own checksums file, not from the download."
+  fi
+fi
 
 echo
 echo '== Pinned GitHub Actions =='
