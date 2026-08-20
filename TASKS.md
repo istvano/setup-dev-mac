@@ -409,12 +409,6 @@ real hardware yet.
 
 ## Follow-up from ADR-036
 
-- [ ] Decide whether `mcp/toolhive.lock`'s `darwin_amd64` digest and
-      `script/install-toolhive`'s `x86_64` branch should go. They are now
-      unreachable — `require_supported_mac` fails on Intel first — but
-      `tests/mcp-policy.sh` requires the key to be present, so removing it is a
-      three-file change and was left out of the Intel sweep deliberately rather
-      than by oversight.
 - [ ] Verify `nested_virtualization_supported` returns true on the M5 Max. Only its
       negative branch is confirmed, on the M1 Pro, where `hw.optional.arm.FEAT_NV`
       is absent. If the sysctl is not the right signal on M3+ silicon, every
