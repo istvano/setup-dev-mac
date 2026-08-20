@@ -55,12 +55,21 @@ These files define software installed directly on macOS.
 
 ## Validation
 
-Run:
+`./script/tools --write` comes first, and skipping it fails both
+`./tests/render-brewfile.sh` and `./script/test`: `docs/TOOLS.md` is generated from
+the purpose comments in these files, and that test fails while it is stale. The
+failure names its own fix, but this list previously contained two commands that
+could not pass and no step that would make them.
 
 ```bash
+./script/tools --write     # regenerate docs/TOOLS.md from the purpose comments
 ./script/render-brewfile --output /tmp/workstation.Brewfile
 ./tests/render-brewfile.sh
 ./tests/profiles.sh
 ./script/check-tokens
 ./script/test
 ```
+
+The end-to-end procedure for adding a package, applying it, and the separate
+manual path for removing one is in `docs/OPERATIONS.md` under "Adding a package"
+and "Package reconciliation".

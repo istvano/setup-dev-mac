@@ -140,6 +140,9 @@ ambiguous.
 renders that exact Brewfile and checks it with Homebrew Bundle before running
 `chezmoi doctor`.
 
+To change which packages are installed rather than to apply an existing checkout,
+see "Adding a package" and "Package reconciliation" below.
+
 ### Migrating an older configuration
 
 Configurations created before the current data keys existed need `shell`,
@@ -1136,7 +1139,100 @@ timestamped file under `~/.config/security-ai-workstation/snapshots/`. The
 repository declares intent; snapshots record what is actually present, which is
 what an incident review needs.
 
+## Adding a package
+
+Packages are declared, not installed by hand. Add the entry to the right profile
+fragment and apply; `brew install` on its own leaves the machine holding software
+the declared state does not mention, which `./script/verify` will not notice and
+the next machine will not have.
+
+Choose the fragment first. `profiles/AGENTS.md` holds the placement rules — the
+short version is that mutually exclusive tools live in separate fragments, cloud
+providers and privileged security tools are opt-in rather than default, language
+runtimes belong to mise and never to a Brewfile, and ADR-022 allows one tool per
+job in the default profile. Check whether something installed already covers the
+use case before adding a second.
+
+**The default selection is full.** ADR-013 caps it at 70 entries and it currently
+sits at exactly 70, so adding anything to `core`, `dev`, `security`,
+`productivity`, `backup` or `kubernetes` fails `./script/test` immediately with
+`Default Brewfile exceeds 70 entries: 71`. That brake is the intended behaviour,
+not an obstacle to route around: every default entry is software that runs on the
+host on every machine. Three ways forward, in order of preference —
+
+1. Put it in an opt-in fragment instead. Nothing is capped there, and most tools
+   do not need to be on every machine.
+2. Displace something. If the new tool replaces an installed one, remove that
+   entry in the same change and the count holds.
+3. Raise the ceiling, which means amending ADR-013 with the reason. A reviewed
+   decision, not routine maintenance.
+
+Read the comment above the check in `tests/render-brewfile.sh` before choosing
+option 3. It records why the number is a brake on casual additions and why it
+cannot be read as a security metric on its own — replacing Rancher Desktop with
+Colima raised the count by three while reducing what was actually installed.
+
+```bash
+# 1. Declare it. The purpose comment is REQUIRED, not a convention:
+#    tests/render-brewfile.sh rejects a bare entry with
+#    "dependency needs a purpose comment".
+$EDITOR profiles/dev.Brewfile        # brew "foo"  # What it does, and why on the host.
+
+# 2. Confirm the token exists. Homebrew renames continuously — mitmproxy became a
+#    cask, wireshark became wireshark-app. Needs network.
+./script/check-tokens
+
+# 3. Regenerate the tool inventory. docs/TOOLS.md is generated FROM those purpose
+#    comments and ./script/test fails while it is stale.
+./script/tools --write
+
+# 4. Validate, then apply.
+./script/test
+./script/setup
+```
+
+`./script/setup` shows a `chezmoi diff`, asks for confirmation, then applies.
+`./bootstrap install` is not needed again — it is the first-install path.
+
+### Why editing a Brewfile is enough to trigger an install
+
+`run_onchange_before_10_install-packages.sh.tmpl` re-runs only when its own
+rendered content changes, and nothing in it names an individual package — it calls
+`script/render-brewfile` and `brew bundle`. A Brewfile edit would therefore change
+nothing about the hook, and the new package would never install.
+
+The hook carries a line that closes that gap:
+
+```
+# profile digest: {{ output (joinPath $repo "script/profile-digest") | trim }}
+```
+
+`script/profile-digest` hashes every `profiles/*.Brewfile` into one value at render
+time, so any fragment change — an addition, a removal, or an edit to an
+alternative — alters the rendered script and chezmoi re-runs it. Do not delete that
+comment; without it, adding a package silently does nothing.
+
+### What the apply does and does not do
+
+It **installs what is missing**. It does **not upgrade what is present**: the hook
+sets `HOMEBREW_BUNDLE_NO_UPGRADE=1` and passes `--no-upgrade`, so an existing
+package stays at its current version and upgrades remain a reviewed decision
+through "Package updates" above.
+
+A package that fails to install is reported but does not abort the apply. This is
+deliberate — the hook runs `before`, and a non-zero exit once left a machine with
+195 packages and no configuration files at all. `./script/verify` keeps failing
+until the package is resolved, so nothing is swallowed.
+
+Adding a whole new profile is more than a Brewfile edit: register it in
+`VALID_PROFILES` in `script/lib/profiles.sh` and in the choices in
+`chezmoi/.chezmoi.toml.tmpl` (`tests/profiles.sh` enforces the correspondence),
+then select it, which means `chezmoi init` rather than an apply.
+
 ## Package reconciliation
+
+This is the removal half of "Adding a package" above, and it is deliberately not
+symmetric with it.
 
 Removing an entry from a profile changes the declared state but does not
 automatically uninstall the existing package. This separation prevents a
