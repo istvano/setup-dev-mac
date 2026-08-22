@@ -1499,6 +1499,49 @@ Clusters stay out. A `k3d.yaml` belongs in the project repository so its shape i
 version-controlled rather than tribal knowledge, and because cluster CIDRs and
 ingress ports are project decisions.
 
+### Performance: what is tuned, and what a flag cannot fix
+
+OrbStack is the paid alternative and it is faster. The gap is worth naming honestly,
+because most of it is closable and one part of it is not.
+
+Set, and each for a measured reason rather than a default:
+
+| Setting | Why |
+|---|---|
+| `--vm-type=vz` | Virtualization.framework rather than QEMU. The largest single difference. |
+| `--mount-type=virtiofs` | The largest filesystem difference. Verified by read-back, because Colima silently discards the flag on an existing profile — a past defect had the flag saying virtiofs while the guest mounted `fuse.sshfs`. |
+| `--vz-rosetta` | Amd64 images otherwise run under QEMU user-mode emulation, several times slower. Now DEFAULT — see below. |
+| one narrow mount | `~/workspace` only. Every bind mount is a virtiofs path to traverse, so mounting `$HOME` taxes every lookup in every container. |
+| persistent buildx builder | Image build is the most frequent operation and the weakest on a VM-backed runtime. |
+| 45% RAM / `ncpu-2` / 300 GiB | Derived from the machine rather than configured. |
+
+**Rosetta became a default, and that needed the rule read precisely.** `AGENTS.md`
+forbids automatic Rosetta *installation*. Using Rosetta that the operator installed is
+not the same act, so the flag defaults on while the installation stays a decision:
+`script/container-substrate` refuses to build and prints the one command to run. It
+never runs `softwareupdate --install-rosetta` itself, and `tests/vm.sh` keeps the two
+apart by asserting the default is on and refuting `--agree-to-license`, the flag whose
+only purpose is an unattended install.
+
+Refusing was chosen over dropping the flag with a warning. A degraded start would leave
+the profile translating nothing, every amd64 image slow for a reason nobody remembers,
+and the declared configuration different from what runs — the same class of defect the
+virtiofs read-back exists to catch.
+
+**The part no flag fixes is where files live.** virtiofs is the fastest host mount
+available and it still crosses the host/guest boundary on every operation, which is
+precisely what a dependency tree or a build cache does thousands of times. A named
+volume lives inside the VM's disk and never crosses it. Source code on a bind mount so
+the editor sees it; everything the container generates in a named volume. That choice
+moves throughput more than any Colima setting, and `docs/OPERATIONS.md` carries the
+compose example.
+
+**None of this is measured.** The settings are the correct ones for every knob Colima
+exposes, which is not the same claim as a benchmark against OrbStack, and this
+repository has never run one — Colima has never started on the build machine at all,
+because the M1 Pro cannot nest virtualization. "Configured on the fast path" is what is
+claimed here. `TASKS.md` carries the measurement.
+
 ### Everything the substrate publishes binds to loopback
 
 A Docker port mapping without a host part binds `0.0.0.0`. `--port 5000` therefore

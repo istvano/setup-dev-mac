@@ -253,13 +253,61 @@ while IFS= read -r match; do
 That binds 0.0.0.0. Use \$REGISTRY_HOST:\$REGISTRY_PORT."
 done < <(awk '/^[[:space:]]*#/ { next } /--port/ { printf "%d: %s\n", FNR, $0 }' "$SUBSTRATE")
 
-# Rosetta must stay opt-in: AGENTS.md forbids installing it automatically, and
-# --vz-rosetta requires it.
-assert_match '^VM_ROSETTA="\$\{SUBSTRATE_VM_ROSETTA:-false\}"$' "$SUBSTRATE"
+# Rosetta is ON by default, and the rule it has to keep is narrower than it looks.
+#
+# `--vz-rosetta` is the largest performance difference this substrate can make on
+# Apple Silicon: without it an amd64-only image runs under QEMU user-mode emulation
+# inside the guest, several times slower than Rosetta translation. This machine runs
+# amd64 scanner and CI-equivalent images, so the default was wrong for the workload.
+#
+# AGENTS.md still forbids INSTALLING Rosetta automatically, and that is the
+# distinction. Using Rosetta when the operator has installed it is not the same act
+# as installing it for them, so the flag defaults on and the installation stays a
+# decision. The two assertions below are what keep those apart.
+assert_match '^VM_ROSETTA="\$\{SUBSTRATE_VM_ROSETTA:-true\}"$' "$SUBSTRATE"
+
+# Nothing here may install it automatically. The obvious assertion — refuse any mention
+# of `install-rosetta` — is wrong, and trying it is what showed why: the guard's error
+# message has to NAME that command so the operator can copy it, so a blunt refutation
+# fails on the very code that keeps the rule. Same trap as matching a workflow's prose
+# instead of its commands.
+#
+# `--agree-to-license` is the precise thing to refuse. It exists only to make the install
+# unattended, so its presence IS the automatic installation AGENTS.md forbids, while
+# naming the command in an instruction is not.
+refute_match 'agree-to-license' "$SUBSTRATE"
+
+# And a default-on flag must not be able to produce a silently broken start. Colima
+# needs Rosetta present on the host for --vz-rosetta; with the flag defaulted on, a
+# machine without it has to be told so rather than discovering it as a failed
+# `colima start`. The guard is asserted by name so it cannot be dropped while the
+# default stays on.
+assert_match 'rosetta_available' "$SUBSTRATE"
 
 # --verify must be able to fail. A verification command that always exits 0 gates
 # nothing (script/AGENTS.md).
 assert_match 'substrate check\(s\) failed' "$SUBSTRATE"
+
+# The guest rehearsal must disable Rosetta explicitly.
+#
+# script/test-install runs the substrate APPLY path inside the guest whenever the guest
+# reports kern.hv_support=1 — which is the M5 Max case, and the reason that branch
+# exists. A pristine macOS guest has no Rosetta, so with the flag defaulted on,
+# require_rosetta would refuse and fail the whole destructive test with an error that
+# reads like a repository bug on the one machine the branch was written for.
+#
+# Installing Rosetta into the guest to satisfy it is not the answer either: that is the
+# automatic installation AGENTS.md forbids, in a VM that is discarded on the next reset.
+# The guest rehearsal is about the VM, network, registry and build cache being created;
+# amd64 translation is not what it proves.
+# Anchored to the INVOCATION, not the string. The bare name matched the paragraph in
+# test-install that explains why the flag is there, so deleting the actual `remote env`
+# line left this green — the regression it exists to catch, passing off a comment. The
+# same false positive tests/chezmoi-templates.sh records for its `*fi*` glob, and the
+# reason the exercise_guest_substrate assertions above are anchored too. Verified by
+# deleting the line and watching this fail.
+assert_match '^ *remote env SUBSTRATE_VM_ROSETTA=false \./script/container-substrate$' \
+  "$TEST_INSTALL"
 
 # The substrate owns no service with data. That is the whole boundary ADR-037 draws
 # against ADR-010, and it is one careless addition away from being lost.

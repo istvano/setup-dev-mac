@@ -202,6 +202,11 @@ alongside a test guest put 22 GiB of 32 GB in use and 5 GB into swap. The networ
 registry and build cache all survive a stop/start, so stopping costs only the ~10
 second restart.
 
+**The disk defaults to 300 GiB** and is sparse, so it reserves capacity rather than
+consuming it. Raising it is the safe direction — a profile already at Colima's 100 GiB
+default grows in place on the next start, losing nothing. Declaring *less* than a
+profile already has is the dangerous one, and the script says so rather than acting.
+
 Sizing is compared against `colima list --json`, not assumed. An existing profile
 keeps what it was created with: CPU and memory apply on the next start, but a disk
 can only grow, so shrinking one means `colima delete` — which destroys every image,
@@ -232,6 +237,100 @@ With ServiceLB kept, exactly one service per cluster can own ports 80 and 443. T
 service is Traefik, and workloads are reached through Ingress — which is how
 production works, so it is parity rather than a limitation. A second `LoadBalancer`
 asking for port 80 stays `<pending>` by design.
+
+### amd64 images and Rosetta
+
+`--vz-rosetta` is enabled by default. Without it, an amd64-only image runs under QEMU
+user-mode emulation inside the guest, which is several times slower than Rosetta's
+translation — and this workstation runs amd64 scanner and CI-equivalent images
+routinely, so the flag is the largest performance difference the substrate can make.
+
+Rosetta itself is **not installed automatically** — `AGENTS.md` forbids that. If it is
+absent, `./script/container-substrate` refuses to build rather than quietly dropping
+the flag and leaving every amd64 image slow for an unremembered reason:
+
+```bash
+softwareupdate --install-rosetta        # the operator's decision, once
+```
+
+To build without amd64 translation instead, opt out explicitly:
+
+```bash
+SUBSTRATE_VM_ROSETTA=false ./script/container-substrate
+```
+
+Prefer a native arm64 image where one exists. Rosetta narrows the gap; it does not
+close it, and an `arm64` tag beats a translated `amd64` one every time.
+
+### File I/O: named volumes, not bind mounts
+
+This is the setting that matters most for throughput, and no Colima flag can fix it.
+
+`virtiofs` is the fastest host mount available and it is what the substrate uses, but a
+bind mount still crosses the host/guest boundary on every file operation. A dependency
+tree or a build cache does thousands of small reads, and that is exactly the workload
+the boundary punishes. A **named volume lives inside the VM's disk** and never crosses
+it.
+
+The rule: source code on a bind mount, so your editor sees it. Everything the container
+generates in a named volume.
+
+```yaml
+# compose.yaml — a project service, owned by the project (ADR-010)
+services:
+  api:
+    image: node:24-alpine
+    working_dir: /app
+    volumes:
+      # Source: bind-mounted, because you edit it on the host.
+      # Keep it under ~/workspace — that is the only path the substrate mounts.
+      - ~/workspace/myproject:/app
+      # Build output and dependencies: named volumes, INSIDE the VM.
+      # Each one also shadows the bind mount at that path, so the host directory
+      # is not written to and a Linux node_modules cannot collide with a macOS one.
+      - api_node_modules:/app/node_modules
+      - api_build_cache:/app/.next
+    ports:
+      # Loopback, like every other published port here.
+      - "127.0.0.1:3000:3000"
+
+  db:
+    image: postgres:18-alpine
+    volumes:
+      # Database files must never be on a bind mount: slow, and fsync semantics
+      # across virtiofs are not what Postgres expects.
+      - db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg
+    secrets:
+      - pg
+
+volumes:
+  api_node_modules:
+  api_build_cache:
+  db_data:
+
+secrets:
+  pg:
+    file: ./.secrets/pg          # git-ignored; never an inline password
+```
+
+Three things that example encodes:
+
+- **A named volume mounted over a bind-mounted subdirectory wins.** That is what makes
+  `- api_node_modules:/app/node_modules` work: the host directory stays untouched and
+  the container gets a fast, Linux-native tree.
+- **Stateful services belong to the project, not the substrate.** ADR-037 keeps
+  `script/container-substrate` to the runtime VM, one network, an image cache and a
+  build cache — nothing with data. A database in a project's `compose.yaml` is correct;
+  the same database added to the substrate is the boundary ADR-010 refuses.
+- **`~/workspace` is the only mounted path.** `SUBSTRATE_VM_MOUNT` defaults there
+  deliberately, because every bind mount is a virtiofs path to traverse and mounting
+  all of `$HOME` taxes every lookup in every container. A project outside it will not
+  be visible to a container at all.
+
+The persistent buildx builder the substrate creates (`docker buildx create --name dev`)
+keeps layer cache across restarts, so a rebuild after `colima stop` does not start cold.
 
 ### Migrating from Rancher Desktop
 

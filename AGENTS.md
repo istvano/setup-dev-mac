@@ -132,6 +132,13 @@ While editing:
   absolute paths in tracked files.
 - Do not add automatic major macOS upgrades, automatic FileVault enablement,
   automatic Rosetta installation or automatic network-service enablement.
+  "Installation" is the operative word for Rosetta: `script/container-substrate`
+  enables `--vz-rosetta` by DEFAULT, because using Rosetta when the operator has
+  installed it is a different act from installing it for them. That script never
+  runs `softwareupdate --install-rosetta`; it refuses to build the substrate and
+  says what to run. `tests/vm.sh` holds both halves apart — it asserts the
+  default is on and refutes `--agree-to-license`, the flag whose only purpose is
+  an unattended install.
 - Templates must never build repository paths from `.chezmoi.sourceDir`
   directly. `.chezmoiroot` resolves it to `<repo>/chezmoi`; use
   `dir .chezmoi.sourceDir`. `tests/chezmoi-templates.sh` enforces this.

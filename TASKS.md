@@ -402,6 +402,18 @@ real hardware yet.
 - [ ] Decide whether `docker-buildx` and `docker-compose` belong in
       `runtime-colima.Brewfile` or in a shared fragment. OrbStack bundles its own
       compose, so selecting orbstack currently gets no buildx from this repository.
+- [ ] Benchmark the substrate, on the M5 Max, and record numbers rather than settings.
+      ADR-037 claims the configuration is on the fast path for every knob Colima
+      exposes; it does NOT claim parity with OrbStack, because nothing here has
+      measured either. Colima has never even started on the build machine. Worth
+      measuring: an arm64 image build with a warm buildx cache, the same build
+      amd64 under Rosetta versus `SUBSTRATE_VM_ROSETTA=false`, and a dependency
+      install run twice — once on the `~/workspace` bind mount, once in a named
+      volume — since that pair is the claim in "File I/O" that most needs a number.
+- [ ] Confirm `--vz-rosetta` actually engages once Rosetta is installed. The flag is
+      now a default and the guard only proves Rosetta is PRESENT on the host, not
+      that Colima used it. Check inside the guest: an amd64 container should report
+      x86_64 and run at Rosetta speed rather than QEMU speed.
 - [ ] Watch Apple's `container`. It reached 1.0 and gives each container its own VM,
       which is better isolation than any Docker-compatible runtime here. It is
       excluded only because it does not implement the Docker API, so Compose and

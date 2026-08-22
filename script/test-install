@@ -471,7 +471,18 @@ does not exist even though the binary is on disk."
 
   if [[ "$guest_hv" == 1 ]]; then
     log 'The guest supports virtualization, so the substrate is created for real.'
-    remote ./script/container-substrate
+    # SUBSTRATE_VM_ROSETTA=false, and it is required rather than tidy.
+    #
+    # container-substrate enables --vz-rosetta by default (ADR-037) and refuses to build
+    # when Rosetta is absent from the host. A pristine macOS guest has no Rosetta, so
+    # without this the whole destructive test would fail here — on the M5 Max, the one
+    # machine this branch was written for, with an error that reads like a repository bug.
+    #
+    # Installing Rosetta into the guest is not the alternative: that is the automatic
+    # installation AGENTS.md forbids, in a VM discarded by the next reset. What this
+    # branch proves is that the VM, network, registry and build cache get created; amd64
+    # translation is a host concern and is not part of the claim.
+    remote env SUBSTRATE_VM_ROSETTA=false ./script/container-substrate
     remote ./script/container-substrate --verify
     # shellcheck disable=SC2016  # $PATH must expand in the guest
     remote sh -c 'export PATH=/opt/homebrew/bin:$PATH; docker run --rm hello-world' ||

@@ -74,15 +74,19 @@ detect_cpus() {
 
 VM_CPUS="${SUBSTRATE_VM_CPUS:-$(detect_cpus)}"
 VM_MEMORY_GB="${SUBSTRATE_VM_MEMORY_GB:-$(detect_memory_gb)}"
-# 100 GiB, which is also Colima's own default, so this declares what an untouched
-# profile already has and a fresh machine gets without an oversized allocation.
+# 300 GiB. Raised from 100 — Colima's own default — because the target machine has 4 TB
+# and 100 GiB is not much once images, volumes, build caches and a k3d cluster or two
+# share it.
 #
-# It is the safe direction, because a Colima disk can only GROW. Declaring 150 here
-# would force every existing 100 GiB profile to be destroyed and rebuilt to match —
-# `colima delete` takes every image, volume and cluster with it — whereas declaring
-# 100 leaves room to raise it later, per machine, with no data loss. The 128 GB target
-# should raise it; the 32 GB build machine has 514 GB free and does not need to.
-VM_DISK_GB="${SUBSTRATE_VM_DISK_GB:-100}"
+# Raising is the SAFE direction, which is why this is a default rather than advice. A
+# Colima disk can only grow: a profile already at 100 GiB grows in place on the next
+# start, with no data loss and nothing destroyed. It is the opposite change that hurts —
+# declaring LESS than a profile already has cannot shrink it, and reconciling would mean
+# `colima delete`, which takes every image, volume and cluster with it. warn_sizing_drift
+# handles both directions and says which one applies.
+#
+# The disk is sparse, so this reserves capacity rather than consuming 300 GiB up front.
+VM_DISK_GB="${SUBSTRATE_VM_DISK_GB:-300}"
 # Mount only what is needed. Every bind mount is a virtiofs path to traverse, so
 # mounting all of $HOME taxes every lookup in every container.
 VM_MOUNT="${SUBSTRATE_VM_MOUNT:-$HOME/workspace}"
@@ -90,10 +94,20 @@ VM_MOUNT="${SUBSTRATE_VM_MOUNT:-$HOME/workspace}"
 # available and it CANNOT be changed on an existing profile, so it is verified by
 # read-back rather than trusted to the flag. See vm_mount_type.
 VM_MOUNT_TYPE="${SUBSTRATE_VM_MOUNT_TYPE:-virtiofs}"
-# Rosetta is OPT-IN and off by default. AGENTS.md forbids automatic Rosetta
-# installation, and --vz-rosetta requires it. Set this only when a project needs
-# amd64-only images.
-VM_ROSETTA="${SUBSTRATE_VM_ROSETTA:-false}"
+# Rosetta is ON by default, and the distinction that allows it is narrow enough to state
+# precisely: AGENTS.md forbids automatically INSTALLING Rosetta, not using it.
+#
+# It is the largest performance difference available here. Without --vz-rosetta an
+# amd64-only image runs under QEMU user-mode emulation inside the guest — several times
+# slower than Rosetta's translation — and this workstation runs amd64 scanner and
+# CI-equivalent images routinely. Off by default optimised for a rule about installation
+# by making every amd64 container slow, which was the wrong trade.
+#
+# So the flag defaults on and the INSTALLATION stays a decision: nothing here runs
+# `softwareupdate --install-rosetta` (tests/vm.sh refutes it), and require_rosetta below
+# refuses to start rather than silently dropping the flag on a host without it.
+# SUBSTRATE_VM_ROSETTA=false opts out.
+VM_ROSETTA="${SUBSTRATE_VM_ROSETTA:-true}"
 VM_PROFILE="${SUBSTRATE_VM_PROFILE:-default}"
 
 # A pinned subnet, so a future host route covers every cluster forever. Left to
@@ -353,6 +367,42 @@ builder_exists() {
 # here: it cannot be changed after the VM is created, which is why it is verified by
 # read-back — so the drift report then disagreed with what apply had actually done.
 #
+# Is Rosetta actually present on this host?
+#
+# Asked behaviourally rather than by looking for a path. `arch -x86_64` succeeds only when
+# Rosetta can execute an x86_64 binary, which is the property --vz-rosetta depends on;
+# /Library/Apple and /usr/libexec/rosetta have both moved between releases, and a guard
+# that checks the wrong path in a future macOS would answer "absent" on a machine that has
+# it. /usr/bin/true is used because it exists as a real binary and does nothing.
+rosetta_available() {
+  arch -x86_64 /usr/bin/true >/dev/null 2>&1
+}
+
+# Refuse rather than quietly degrade.
+#
+# Dropping --vz-rosetta with a warning was the other option and it is worse: the profile
+# would come up translating nothing, every amd64 image would be slow for a reason nobody
+# remembers, and the declared configuration would not match what runs — which is the
+# failure mode this script already guards against for mount-type by reading the value back.
+#
+# This is an explicit, interactive command, so failing with the one line that fixes it is
+# cheap. Installation stays the operator's decision, as AGENTS.md requires.
+require_rosetta() {
+  [[ "$VM_ROSETTA" == true ]] || return 0
+  rosetta_available && return 0
+  die "Rosetta is enabled for this substrate but is not installed on this host.
+--vz-rosetta needs it, and installing it automatically is something AGENTS.md
+forbids, so it is left to you:
+
+  softwareupdate --install-rosetta
+
+Then re-run this command. To build the substrate without amd64 translation
+instead — every amd64 image then runs under QEMU emulation and is several times
+slower:
+
+  SUBSTRATE_VM_ROSETTA=false ./script/container-substrate"
+}
+
 # A global, because bash 3.2 cannot return an array.
 VM_START_ARGS=()
 build_vm_start_args() {
@@ -559,6 +609,10 @@ apply_builder() {
 
 do_apply() {
   require_supported_mac
+  # Before anything is created. --dry-run deliberately does NOT call this: it changes
+  # nothing, and printing the command it would run is useful on any machine, including
+  # one being surveyed before Rosetta is installed.
+  require_rosetta
   apply_vm
   apply_network
   apply_registry
