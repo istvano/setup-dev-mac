@@ -152,6 +152,33 @@ assert_match 'sysctl -n kern\.hv_support' "$TEST_INSTALL"
 # install, which is precisely the defect the paragraph above calls unforgivable.
 assert_match '^ *status="\$\{PIPESTATUS\[0\]\}"$' "$TEST_INSTALL"
 
+# --- The transcript must be private from the moment it exists.
+#
+# It was created at the default umask and chmod 600'd only AFTER the run, so it was
+# world-readable for the whole ~40 minutes and stayed that way forever if the run did
+# not reach the last line. Measured on the build machine: 10 of 24 transcripts were
+# mode 644, every one an interrupted or failed run — including a 66 KB one carrying a
+# complete install.
+#
+# That is the wrong way round for the reason SECURITY.md gives: a cask with a
+# privileged component prompts through Homebrew rather than sudo, so a password can be
+# echoed into this file. Protection applied last is missing exactly when a run dies
+# unexpectedly.
+#
+# The umask subshell creates it already private, with no window and without changing
+# the umask for anything else. `tee` then opens the existing file, and O_TRUNC does not
+# alter its mode.
+# Two lines, because shfmt splits the subshell. Both anchored: `umask 077` alone would
+# also match a comment mentioning it, and the redirect alone does not prove privacy.
+assert_match '^ *umask 077$' "$TEST_INSTALL"
+# [$] rather than \$ so shellcheck does not read the pattern as an expansion — the
+# same idiom tests/placement-policy.sh uses for its fish_add_path assertion.
+assert_match '^ *: >"[$]LOG"$' "$TEST_INSTALL"
+
+# And the late chmod must not come back as the only protection. Anchored to a
+# line-leading chmod so the assertion cannot be satisfied by prose about it.
+refute_match '^chmod 600 "[$]LOG"$' "$TEST_INSTALL"
+
 # --- seal must check both halves.
 #
 # Usable alone is not enough: a golden image that already carries Homebrew or the

@@ -684,10 +684,31 @@ command_exists tart || die "tart is not installed. Run ./script/install-tart"
 mkdir -p "$STATE_DIR"
 LOG="$STATE_DIR/test-install-$(date +%Y%m%d-%H%M%S).log"
 
+# Created PRIVATE, before anything is written to it.
+#
+# This used to be a `chmod 600 "$LOG"` after the run, which is the wrong way round. The
+# file was created at the default umask, so it stayed world-readable for the whole
+# forty-minute run — and permanently whenever the run did not reach that last line.
+# Measured here: 10 of 24 transcripts were mode 644, every one an interrupted or failed
+# run, the largest 66 KB of complete install output.
+#
+# SECURITY.md is why it matters. A cask with a privileged component prompts through
+# Homebrew rather than sudo, so NOPASSWD does not cover it and a password can be echoed
+# into this file. Protection applied last is absent exactly when a run dies unexpectedly,
+# which is when nobody is watching.
+#
+# A subshell umask rather than `umask 077` at the top of the script: this needs to change
+# the mode of ONE file, and a global umask would silently alter every other file the
+# script or its callees create. `tee` then opens the file that already exists, and O_TRUNC
+# does not touch its mode.
+(
+  umask 077
+  : >"$LOG"
+)
+
 # The transcript is captured without losing the exit status: PIPESTATUS[0] is
 # run_install_test's, not tee's. A test driver that always exits 0 gates nothing.
 run_install_test 2>&1 | tee "$LOG"
 status="${PIPESTATUS[0]}"
-chmod 600 "$LOG"
 printf '\nTranscript: %s\n' "$LOG"
 exit "$status"
