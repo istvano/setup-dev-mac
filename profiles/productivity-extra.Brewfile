@@ -46,6 +46,21 @@ cask "latest"            # Reports updates for applications Homebrew does not ma
 # ./script/update-report.
 cask "remote-desktop-manager" # Multi-protocol remote connection manager for RDP, SSH and VNC.
 
+# OpenVPN, as the upstream command line rather than a GUI client. On the host because
+# a VPN client is the host's routing table and a utun interface; a container or VM
+# would tunnel only itself.
+#
+# Not a second tool for tailscale-app's job: Tailscale speaks WireGuard to a tailnet
+# and cannot reach an OpenVPN server. The CLI rather than Tunnelblick or OpenVPN
+# Connect because both of those leave a privileged helper installed between
+# connections, and this leaves nothing: it runs as root under `sudo` for the length
+# of one connection. See ADR-049.
+#
+# The formula ships a launchd service definition. It is NOT started — AGENTS.md
+# forbids automatic network-service enablement, and a tunnel that comes up at boot is
+# exactly that. Profiles and credentials live outside this repository.
+brew "openvpn" # OpenVPN 2.x client run on demand under sudo; no helper or service left installed.
+
 # Anthropic's Claude desktop app: one application with three tabs — Chat, Cowork and
 # Code — where the Code tab IS Claude Code. On the host because it is a native GUI
 # holding an account session; there is no container form of it worth having.

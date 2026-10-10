@@ -2539,3 +2539,63 @@ documentation before the application existed on disk and got its reason wrong.
 
 The cask declares `auto_updates`, so new code arrives without `brew upgrade` and without
 appearing in `./script/update-report` — the same note as ADR-047, ADR-028 and ADR-025.
+
+## ADR-049: OpenVPN is the upstream command line, not a GUI client
+
+**Status:** accepted
+
+The workstation it replaces reached a VPN server with `openvpn` on Linux, so the
+requirement is the OpenVPN protocol specifically. `tailscale-app` does not cover it:
+Tailscale speaks WireGuard to a tailnet and cannot connect to an OpenVPN server, so
+this is a different job rather than a second tool for the same one.
+
+Three clients were considered, and the deciding question was what each leaves on the
+host between connections.
+
+| Client | Left installed while disconnected | Updates |
+|---|---|---|
+| `openvpn` formula | nothing | `brew upgrade`, visible to `./script/update-report` |
+| `tunnelblick` cask | a root launch daemon, `tunnelblickd`, plus a login item | `auto_updates`, outside both |
+| `openvpn-connect` cask | two launchd services, `org.openvpn.helper` and `org.openvpn.client`, plus a login item and its own keychain file | `brew upgrade` |
+
+A tunnel needs root whichever client makes it: creating a utun interface and changing
+routes is privileged. The difference is whether that privilege is a process started
+under `sudo` for one connection or a helper that stays resident and accepts requests
+from anything running as the user. Tunnelblick's helper has a history of local
+privilege-escalation defects, which is what a resident root helper is as attack
+surface, and the project has one maintainer. OpenVPN Connect is closed source and uses
+the OpenVPN 3 engine, which rejects options the 2.x configuration from the old
+machine may carry. The formula is the upstream project built by Homebrew and nothing
+else.
+
+It goes in `productivity-extra`, beside the other VPN client. The default selection is
+at ADR-013's ceiling, and a client for one particular server is not software every
+machine this repository builds should carry.
+
+### DNS is handled by the formula, which was not the assumption
+
+This decision was first argued on the premise that the command line leaves macOS DNS
+alone and that `up`/`down` scripts around `scutil` would have to be written and owned
+here. That was true of OpenVPN 2.6 and is not true of 2.7: the bottle ships
+`libexec/openvpn/dns-updown`, a default script that applies server-pushed DNS through
+`scutil` and restores it on disconnect, and upstream's change notes say split DNS
+should now work out of the box on macOS. So no script is added here.
+
+The default script is skipped when the configuration names its own `--up` script.
+A profile carried over from Linux usually does — `up /etc/openvpn/update-resolv-conf`
+— and on macOS that path does not exist, so the line has to be removed rather than
+ported. `docs/OPERATIONS.md` says so where the profile is installed.
+
+### What this costs
+
+- **Credentials are not stored.** There is no Keychain integration. Type them at the
+  prompt, or keep an `auth-user-pass` file out of the repository and readable only by
+  root; Bitwarden stays the system of record.
+- **Nothing reconnects it.** After sleep or a network change the tunnel may drop, and
+  traffic then leaves by the ordinary route. A GUI client would reconnect; this does
+  not, and no firewall rule here blocks traffic while it is down.
+- **The formula ships a service definition.** `sudo brew services start openvpn` would
+  bring a tunnel up at boot. It is not run and not documented as a step, because
+  AGENTS.md forbids automatic network-service enablement.
+
+No ADR-046 row is needed: OpenVPN reports nothing to its vendor.

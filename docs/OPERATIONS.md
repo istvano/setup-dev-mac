@@ -707,6 +707,61 @@ Two rules make the boundary real rather than nominal:
 - Snapshot before running anything untrusted, and revert afterwards. A VM you
   keep patching is no longer isolated from what it has run.
 
+## OpenVPN
+
+`productivity-extra` installs the OpenVPN 2.x command line (ADR-049). There is no
+menu-bar application and nothing runs until you start it.
+
+Profiles are not part of this repository. Keep them in one directory outside it,
+readable only by you:
+
+```bash
+install -d -m 700 ~/.config/openvpn
+install -m 600 /path/to/work.ovpn ~/.config/openvpn/work.ovpn
+```
+
+A profile carried over from Linux needs one edit before it works. Remove any `up`,
+`down` and `plugin` lines that point at Linux paths — `update-resolv-conf`,
+`update-systemd-resolved`, `openvpn-plugin-down-root.so` under `/usr/lib` — and the
+`script-security 2` line that existed only to permit them. OpenVPN 2.7 applies
+server-pushed DNS on macOS through its own bundled script, and it SKIPS that script
+whenever the profile names an `up` script of its own, so a leftover line both fails
+and disables the thing that would have worked.
+
+Check for a route collision before the first connection. The container substrate
+owns `172.30.0.0/16`, and a VPN that pushes an overlapping route takes the cluster
+network with it:
+
+```bash
+netstat -rn -f inet | grep -E '^(10|172|192\.168)\.'
+```
+
+Connect in a terminal you keep open, and disconnect with Ctrl-C so the DNS settings
+are restored:
+
+```bash
+sudo openvpn --config ~/.config/openvpn/work.ovpn
+```
+
+Then, from a second terminal, confirm what the tunnel changed rather than assuming:
+
+```bash
+netstat -rn -f inet | grep utun     # the pushed routes
+scutil --dns | grep -A4 'resolver'  # the pushed resolvers, if the server sends any
+```
+
+Three things this does not do, each a consequence of having no resident helper:
+
+- It does not store credentials. Type them at the prompt.
+- It does not reconnect after sleep or a network change. When the tunnel drops,
+  traffic leaves by the ordinary route and nothing here blocks it.
+- It does not start at boot. The formula ships a launchd service and
+  `brew services start openvpn` is deliberately not a step: AGENTS.md forbids
+  automatic network-service enablement.
+
+LuLu will ask about `openvpn` on the first connection. Allow it for the server's
+address and port rather than for any destination.
+
 ## Intercepting proxies
 
 `security-extra` installs Burp Suite and mitmproxy. Both read HTTPS by
