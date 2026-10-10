@@ -168,6 +168,14 @@ Grant nothing you cannot name a reason for, and re-check after installing
 anything that asks. An app that stops working when you deny it is telling you
 something useful.
 
+`productivity-extra` installs Remote Desktop Manager, which should need none of the
+five above: it renders a remote screen rather than capturing this one, and what it
+actually reaches is the network and the Keychain. Check what it asks for on first
+launch and deny anything it cannot justify. If it does request Accessibility or Input
+Monitoring — plausible for keyboard pass-through or global hotkeys — say so in its
+purpose comment in `profiles/productivity-extra.Brewfile`, because `profiles/AGENTS.md`
+requires that disclosure and the comment is where a reader meets the package.
+
 ---
 
 ## 5. BetterDisplay permissions
@@ -299,6 +307,57 @@ usage. Verified against Zed's own `docs/src/telemetry.md`.
 web UI reports usage until told otherwise in its settings. There is no file this
 repository can set for a value compiled into someone else's container.
 
-Everything else is handled: the shell configuration exports the four verified
-variables, and chezmoi hook 31 sets the three that need a command. See ADR-046
-for what was checked and what could not be.
+One more application needs the same treatment and is not an editor, so it has its
+own section below. Everything else is handled: the shell configuration exports the
+four verified variables, and chezmoi hook 31 sets the three that need a command. See
+ADR-046 for what was checked and what could not be.
+
+---
+
+## 12. Remote Desktop Manager telemetry
+
+`productivity-extra` installs Remote Desktop Manager, which ships with telemetry
+**on**. It reports usage to `telemetry2.devolutions.net`, and separately contacts
+devolutions.net at every launch to fetch news — the single toggle below stops both.
+
+**File → Settings → Advanced → Privacy → Disable telemetry.**
+
+Equivalently, by hand — **quit RDM first**, because it rewrites this file on exit and
+will clobber a live edit. Inside the `<Option>` root of
+
+```
+~/Library/Application Support/com.devolutions.remotedesktopmanager/RemoteDesktopManager.cfg
+```
+
+add:
+
+```xml
+<DisableSendingAnalytics>true</DisableSendingAnalytics>
+```
+
+Malformed XML there makes RDM fall back to its default configuration and lose the
+configured data source, so prefer the toggle unless you have a reason not to.
+
+**Not automated because** that is the only place the setting lives. A preference domain
+does exist — `defaults read com.devolutions.remotedesktopmanager` — but it holds window
+geometry, the Sparkle update feed, a launch flag and an install ID, and not this. So
+automating it would mean an apply hook rewriting an XML file the application owns and
+rewrites itself, which is a worse trade than one checkbox. See ADR-046.
+
+Verify from the network side rather than from the checkbox:
+
+```bash
+lsof -nP -iTCP -sTCP:ESTABLISHED | grep -i devolutions
+```
+
+Three things to know afterwards:
+
+- **"Reset configuration to default"**, at the bottom of the same Advanced settings
+  window, undoes this along with everything else. Re-check the toggle if you ever use
+  it.
+- **The toggle stops ongoing reporting, not the first beacon.** Telemetry is on from
+  first launch, so if RDM has already been opened it has already reported once.
+- **Updates are a separate channel.** The cask is `auto_updates` and RDM checks
+  `cdn.devolutions.net` through Sparkle regardless of this setting (ADR-047). The
+  **Advanced → Information** tab shows the active configuration path under *Option
+  path* if you ever need to confirm which file is in use.

@@ -611,6 +611,10 @@ verified from a Linux workstation and are therefore not yet proven.
       in ways only running them revealed. Install with `--profiles
       core,dev,cloud-gcp` and confirm `gcloud config get-value
       disable_usage_reporting` reads `True` afterwards.
+- [ ] Record which TCC permissions RDM actually requests on first launch. If it asks
+      for Accessibility or Input Monitoring, its purpose comment in
+      profiles/productivity-extra.Brewfile must say so (profiles/AGENTS.md), and
+      ./script/tools --write must be re-run afterwards.
 
 ## Pin hygiene
 

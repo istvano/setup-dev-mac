@@ -24,3 +24,24 @@ cask "obs"               # Free GPL alternative if a non-paid recorder is needed
 #cask "jordanbaird-ice"   # Menu-bar organiser for a crowded status area.
 cask "pearcleaner"       # Application remover. Needs broad filesystem access to find leftover support files.
 cask "latest"            # Reports updates for applications Homebrew does not manage.
+
+# Remote connections. Holds RDP, VNC and SSH session definitions in one native
+# client. On the host rather than in the VM because it needs the display, clipboard
+# and Keychain integration a remote session is made of.
+#
+# Conditionally licensed, and here rather than in paid.Brewfile because nothing
+# installed from this profile requires a licence to run: the Free edition covers
+# individual use including commercial work, and only individual use — shared vaults,
+# role-based access control and centralised management are paid tiers behind a 14-day
+# trial, from the same installer. See ADR-047.
+#
+# It embeds its own credential vault. That does not breach the mutually-exclusive
+# password-manager rule — no browser extension, no SSH agent, no CLI this repository
+# calls — but it is a second place secrets live, so Bitwarden stays the system of
+# record and this holds session entries only (ADR-047).
+#
+# Telemetry is ON by default and the opt-out is manual, as is the news fetch it shares
+# a switch with: ADR-046, docs/MANUAL-SECURITY.md section 12. The cask also carries
+# auto_updates, so versions arrive outside `brew upgrade` and outside
+# ./script/update-report.
+cask "remote-desktop-manager" # Multi-protocol remote connection manager for RDP, SSH and VNC.

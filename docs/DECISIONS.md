@@ -2180,9 +2180,60 @@ categories came out of it, and the distinction between them is the useful part.
 | VS Code | usage and crash reports | `telemetry.telemetryLevel: "off"` — MANUAL |
 | Zed | usage metrics and crash reports | `telemetry.diagnostics` + `.metrics` — MANUAL |
 | OpenHands | PostHog key baked into the image | its own settings — MANUAL |
+| Remote Desktop Manager | usage analytics to `telemetry2.devolutions.net`, plus a news fetch from devolutions.net at every launch | "Disable telemetry" in Settings → Advanced → Privacy — MANUAL |
 
 Homebrew is the one that mattered most. It runs on every install, update and
 upgrade, and what it reports is the list of what this machine has.
+
+Remote Desktop Manager is the one addition to this table since the audit, and it is
+MANUAL for a reason worth stating rather than leaving as an omission. Every opt-out
+Devolutions documents is something this repository cannot write: an in-app checkbox, a
+`RemoteDesktopManager.cfg` XML file the application also writes, a Windows-only
+`DisableAnalytics` group policy, and a `Disable-RDMTelemetry` cmdlet from a PowerShell
+module that does not ship on macOS. The macOS build keeps the setting in
+`~/Library/Application Support/com.devolutions.remotedesktopmanager/RemoteDesktopManager.cfg`
+as `<DisableSendingAnalytics>`, so writing it would mean owning an XML file the
+application owns too — the same boundary that keeps VS Code's `settings.json` out of
+scope.
+
+A preference domain does exist: `com.devolutions.remotedesktopmanager`, with a plist.
+What it holds is the useful part, because the telemetry flag is conspicuously not among
+it — window geometry, a Sparkle `SUFeedURL`, `SUHasLaunchedBefore`, and a
+`DevolutionsInstallID` GUID. So `defaults write` reaches this application's window
+positions and nothing this ADR is about. Two consequences follow from that same plist.
+The install ID is a stable per-machine correlator rather than an anonymous counter. And
+the Sparkle feed means RDM checks `cdn.devolutions.net` for updates independently of
+the telemetry switch, which the switch does not stop: in scope for the `auto_updates`
+note in ADR-047, out of scope for the rule here, since this ADR is "no tool reports our
+usage" and not "block network access".
+
+Two options were considered and declined. Devolutions documents a `Default.cfg`
+pre-seed, but it is adopted only by a prompt on the *first* launch, so it does nothing
+on a machine where RDM has already been opened — worse than nothing, as something that
+reads like automation and is not. Rewriting the live XML from hook 31 was the other,
+and a malformed edit makes RDM fall back to its default configuration and lose the
+configured data source: this ADR's own cautionary shape, a step that cannot fail
+reading exactly like a step that passed.
+
+### This row's first version got its reason wrong
+
+Recorded rather than quietly fixed, in the same register as the three defects above,
+because it is the same shape in a smaller way.
+
+The row was written before RDM was installed, from vendor documentation alone, and it
+asserted that no preference domain existed. One does. It also hedged that the Free
+edition "may" use a `RemoteDesktopManagerFree.cfg`; this install uses
+`RemoteDesktopManager.cfg`, and the hedge existed only because nothing had been looked
+at. Both claims were available to check in the thirty seconds it took after
+installation, and neither was checked before being written down.
+
+The conclusion survived the correction — the opt-out is still MANUAL — which is
+precisely why it is worth recording. A right answer reached by a wrong route reads
+exactly like a verified one, and the next person to extend this table would have
+inherited "there is no domain" as a settled fact. Scriptability is now resolved rather
+than unresolved: the element and the path are both known, so this is declined on the
+hazard of rewriting a file the application rewrites on exit, not on the absence of a
+mechanism.
 
 **Off, local, or opt-in by default — pinned shut anyway:**
 
@@ -2329,3 +2380,69 @@ Nor does it cover a tool that adds telemetry in a later release. Nothing detects
 that. `script/update-report` lists what changed before an upgrade, and a new
 analytics notice is the kind of thing that appears in release notes — which is an
 argument for reading them, not a control.
+
+## ADR-047: Remote Desktop Manager Free goes in `productivity-extra`, not `paid`
+
+**Status:** accepted
+
+`profiles/AGENTS.md` requires that "paid or conditionally licensed software must be
+isolated in the appropriate paid/alternative fragment and documented." Remote Desktop
+Manager is the first candidate where the two halves of that sentence pull apart, so the
+reading is recorded rather than left to the next reader to re-derive.
+
+`paid.Brewfile` holds software that cannot be used without buying it. CleanShot X is
+its only entry, and an unlicensed CleanShot X is not a tool.
+`remote-desktop-manager` is the opposite case: the Free edition is a complete product
+for the use here — one native client holding RDP, VNC and SSH session definitions — and
+its licence grants individual use including commercial work. Filing it under `paid`
+would tell a reader a licence must be bought before the profile is usable, which is
+false, and would couple a free tool to a fragment nobody selects unless they are paying
+for CleanShot X. The repository's own convention already points the other way: the
+commented-out `shottr` sits in `productivity-extra` precisely as the free alternative to
+the paid one, and BetterDisplay's free tier sits in `productivity` with its tier
+reasoning in a comment rather than in `paid` (ADR-007).
+
+The condition is real, and it is a USE condition rather than a feature one — which is
+what makes this different from ADR-007. BetterDisplay's free tier is missing hotkeys;
+RDM's free tier is missing *other people*. Shared vaults, role-based access control and
+centralised management are paid tiers behind a 14-day trial, and because every edition
+ships from the same installer, nothing in Homebrew distinguishes the licence state: the
+edition is decided at runtime by the licence entered. So the obligation falls on the
+operator rather than on the package manager, and neither `./script/verify` nor
+`./script/check-tokens` can detect a drift into a team feature. The purpose comment
+states the condition where a reader meets the declaration, and
+`docs/MANUAL-SECURITY.md` states it again where operator decisions live.
+
+ADR-022 does not bite. No profile declared any remote-desktop, RDP or VNC tool, so this
+adds a capability rather than a second tool for a job — and `productivity-extra` is
+already the fragment where a deliberate second tool is permitted (`iterm2`, `obs`).
+ADR-013's ceiling is untouched: the default selection sits at exactly 70 and this
+installs on request, on no default machine.
+
+### The embedded credential vault is documented, not excluded
+
+RDM carries its own credential store, and the mutual-exclusion rule in
+`profiles/AGENTS.md` names password managers. It does not apply here, and the reason is
+what that rule protects. Bitwarden and 1Password are mutually exclusive because they
+compete for the same integrations — the browser extension, the Keychain, the SSH agent —
+and because the age identity is restored from the vault on a new machine. A second tool
+holding that role would make a machine's recoverability depend on which one was
+installed.
+
+RDM's vault competes for none of that: no browser extension, no SSH agent, and no CLI
+this repository calls. It is a session store scoped to its own entries.
+
+What it does create is a second place secrets live — outside Bitwarden, outside the
+age/SOPS path, and not covered by any backup this repository configures. That is an
+operator decision, so it is written down in `docs/MANUAL-SECURITY.md` rather than
+prevented: Bitwarden stays the system of record, and RDM holds session entries only.
+
+### Two things to carry forward
+
+The cask declares `auto_updates`, so it sits outside the reviewed update flow for the
+same reason as drawio (ADR-028) and LM Studio (ADR-025): new code arrives without
+`brew upgrade` and without appearing in `./script/update-report`.
+
+Telemetry is on by default and the opt-out is manual. ADR-046 carries the row and the
+reason; `docs/MANUAL-SECURITY.md` section 12 carries the clicks. Whether a scriptable
+macOS preference exists is unresolved and tracked in `TASKS.md`.
