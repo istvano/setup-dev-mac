@@ -575,10 +575,19 @@ port and the runbook uses `thv run --proxy-port`.
 
 ### Stated limitations
 
-**Enforcement covers Claude Code only.** Codex and opencode read their own
+**Enforcement covers the Claude Code CLI only.** Codex and opencode read their own
 configuration and no allowlist mechanism for either could be confirmed from
 their documentation; this decision does not claim one.
-`script/hardening-check` asks for those two configs to be reviewed by hand and
+
+The Claude desktop app is a third, and its reason differs from the other two in a way
+worth keeping distinct: a mechanism is documented to exist, and it lives somewhere this
+repository cannot write. The desktop app's Code tab is Claude Code, but it supplies and
+locks its own sessions' MCP servers from claude.ai organisation settings rather than
+from the managed-settings tier this file deploys to (ADR-048). So the gap is not
+"unknown" as with codex and opencode; it is known, located, and out of reach from a
+file on this disk.
+
+`script/hardening-check` asks for all three configs to be reviewed by hand and
 says plainly that they are checked rather than enforced.
 
 **Without ToolHive, the only control is the allowlist, and it covers one agent.**
@@ -2247,6 +2256,20 @@ mechanism.
 Pinning a default is not redundant. A default is the vendor's choice and can be
 changed in a release; a written setting is ours and changes when we change it.
 
+**Cannot be closed from here — written down instead:**
+
+A fourth category, which the original audit did not need because nothing in scope then
+fell into it. The opening of this ADR already provides for it: "where it cannot, the
+fact is written down rather than left as an assumption."
+
+| Tool | What is known | Why nothing is set |
+|---|---|---|
+| Claude desktop app | no telemetry opt-out is documented for the first-party app; the documented controls (`disableNonessentialTelemetry` and siblings) belong to "Claude Desktop on 3P" on Bedrock/Vertex/Foundry, a product not run here | the Claude Code CLI's variables are not documented as applying to the desktop app, and setting them on the chance that they do is the "variable nothing reads" failure this ADR forbids — MANUAL, and what its Settings actually offer is tracked in `TASKS.md` |
+
+This row deliberately claims nothing. It is here so that a reader looking for the
+desktop app in this table finds an answer rather than an absence, and so that the next
+person does not assume the silence meant "checked, nothing found".
+
 **Checked, nothing found:** `mise`, `uv`, `opencode`, `k9s`, `helm`, `trivy`,
 `docker` (the CLI — Docker Desktop is not installed; Colima is the runtime),
 `obsidian` (its documentation states plainly: "We do not collect any telemetry
@@ -2444,5 +2467,75 @@ same reason as drawio (ADR-028) and LM Studio (ADR-025): new code arrives withou
 `brew upgrade` and without appearing in `./script/update-report`.
 
 Telemetry is on by default and the opt-out is manual. ADR-046 carries the row and the
-reason; `docs/MANUAL-SECURITY.md` section 12 carries the clicks. Whether a scriptable
-macOS preference exists is unresolved and tracked in `TASKS.md`.
+reason; `docs/MANUAL-SECURITY.md` section 12 carries the clicks. The setting is
+scriptable in principle — `<DisableSendingAnalytics>` in `RemoteDesktopManager.cfg` —
+and stays manual because automating it means a hook rewriting an XML file the
+application rewrites on exit.
+
+## ADR-048: The Claude desktop app is a surface, and a third ungoverned MCP client
+
+**Status:** accepted
+
+Claude Desktop is one application with three tabs — Chat, Cowork and Code — and the
+Code tab *is* Claude Code. There is no standalone "Claude Code desktop app": the
+`claude-code` cask in `dev` is CLI-only, its single artifact being a binary named
+`claude`, and the desktop app is the separate `claude` cask shipping `Claude.app`. The
+two are distributions of the same engine, which is what makes the placement question
+interesting rather than obvious.
+
+It goes in `productivity-extra`. `dev` is the thematic home — `visual-studio-code`,
+`zed`, `codex`, `claude-code` and `opencode` all sit there — but `dev` is in the
+default selection and ADR-013's ceiling is at exactly 70 with no headroom, so putting
+it there means amending that ceiling. The argument for amending it would have to be
+that a Claude GUI belongs on every machine this repository builds, and that argument
+was not made; an opt-in fragment is the honest placement for something wanted on this
+machine. Not `paid` either: the app is a free download, and ADR-047 already settled
+that `paid` means software you cannot use without buying it.
+
+### ADR-022 does not carve this out, so the reason is stated instead
+
+The existing carve-out permits five coding agents in `dev` because each reaches a
+different model provider, and "the plurality is the reason for having them". That does
+not apply here. The desktop app reaches the same provider as `claude-code`, so on the
+carve-out's own logic it is the redundant case the rule targets.
+
+What earns it a place is the surface rather than the backend. The Code tab genuinely
+overlaps the CLI and nothing pretends otherwise. Chat and Cowork do not overlap it at
+all, and they are the reason to want the application. `productivity-extra` is already
+where a deliberate second surface is permitted — `iterm2` sits there beside `core`'s
+`ghostty` under ADR-026 — so this is an existing pattern rather than a new exception.
+
+### The MCP allowlist does not reach it
+
+This is the part that must not be discovered later. `mcp/managed-settings.json` is
+installed to `/Library/Application Support/ClaudeCode/managed-settings.json` with
+`allowManagedMcpServersOnly: true`, and Anthropic documents that this tier governs
+Claude Code in the terminal, in IDE extensions and in the Agent SDK. It does **not**
+govern the desktop app's Code tab: the desktop app supplies and locks those sessions'
+MCP servers itself, governed from claude.ai organisation settings instead
+(`code.claude.com/docs/en/managed-mcp.md`). For the standard first-party app there is
+no documented local policy mechanism at all — the MDM, registry and configuration-file
+keys exist only for "Claude Desktop on 3P" on Bedrock, Vertex and Foundry, which is a
+different product this workstation does not run.
+
+So installing this adds a third MCP client the allowlist cannot reach, after `codex`
+and `opencode`. ADR-029's stated limitations now name all three, and
+`script/hardening-check` asks for all three by hand.
+
+**Nothing is added to `mcp/managed-settings.json` for the desktop app.** An allowlist
+entry that the client does not read would look like enforcement and provide none, which
+is precisely why ADR-029 rejects `serverName`. The gap is written down instead of being
+furnished with a decorative control.
+
+### Telemetry cannot be closed from here
+
+The first-party desktop app has no documented telemetry opt-out. The CLI's documented
+variables are not documented as applying to it, and ADR-046's standard is verified
+opt-outs only, so none is exported on the chance that it lands. ADR-046 carries the row
+in the form the evidence supports: undocumented, not closed, and not pretended
+otherwise. What the in-app Settings actually offer is a question for first launch and is
+tracked in `TASKS.md` — the lesson of ADR-047, where a row was written from vendor
+documentation before the application existed on disk and got its reason wrong.
+
+The cask declares `auto_updates`, so new code arrives without `brew upgrade` and without
+appearing in `./script/update-report` — the same note as ADR-047, ADR-028 and ADR-025.

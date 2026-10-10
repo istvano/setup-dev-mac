@@ -611,10 +611,30 @@ verified from a Linux workstation and are therefore not yet proven.
       in ways only running them revealed. Install with `--profiles
       core,dev,cloud-gcp` and confirm `gcloud config get-value
       disable_usage_reporting` reads `True` afterwards.
-- [ ] Record which TCC permissions RDM actually requests on first launch. If it asks
-      for Accessibility or Input Monitoring, its purpose comment in
-      profiles/productivity-extra.Brewfile must say so (profiles/AGENTS.md), and
-      ./script/tools --write must be re-run afterwards.
+- [ ] Establish what the Claude desktop app actually sends, and what its Settings
+      actually offer. ADR-046's row for it claims nothing on purpose: no opt-out is
+      documented for the first-party app, and the CLI's variables are not documented as
+      applying. Open Settings after first launch, look for a privacy or analytics
+      control, and watch the network with
+      `lsof -nP -iTCP -sTCP:ESTABLISHED | grep -i claude`. Replace the row with
+      something measured either way — "no control exists" is also a finding. Do not
+      export the CLI variables unless their effect on the desktop app is verified.
+- [ ] Verify whether ADR-046's Claude Code CLI row is complete. It addresses only the
+      opt-in OTel export via `CLAUDE_CODE_ENABLE_TELEMETRY`, but Anthropic appears to
+      document `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`,
+      `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY` and
+      `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` as separate channels — in a tool that
+      is in the DEFAULT `dev` profile, so this would be a default-machine exposure
+      rather than an opt-in one. None of those four has been verified here; confirm
+      each against primary documentation before adding any to the shells, because
+      ADR-046 permits only variables whose effect was established.
+- [ ] Record which TCC permissions RDM and the Claude desktop app actually request on
+      first launch. For the desktop app, Screen Recording, Accessibility and the
+      microphone are all plausible given its screenshot, computer-use and voice
+      features. If either asks for Accessibility, Screen Recording, Input Monitoring or
+      Full Disk Access, its purpose comment in profiles/productivity-extra.Brewfile
+      must say so (profiles/AGENTS.md), and ./script/tools --write must be re-run
+      afterwards.
 
 ## Pin hygiene
 

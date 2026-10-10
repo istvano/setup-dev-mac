@@ -176,6 +176,11 @@ Monitoring — plausible for keyboard pass-through or global hotkeys — say so 
 purpose comment in `profiles/productivity-extra.Brewfile`, because `profiles/AGENTS.md`
 requires that disclosure and the comment is where a reader meets the package.
 
+The same profile installs the Claude desktop app, and this one is more likely to ask:
+Screen Recording, Accessibility and the microphone are all plausible for its
+screenshot, computer-use and voice features. Grant only what the feature you actually
+use requires, and record what it asked for — the same disclosure rule applies.
+
 ---
 
 ## 5. BetterDisplay permissions
@@ -361,3 +366,41 @@ Three things to know afterwards:
   `cdn.devolutions.net` through Sparkle regardless of this setting (ADR-047). The
   **Advanced → Information** tab shows the active configuration path under *Option
   path* if you ever need to confirm which file is in use.
+
+---
+
+## 13. Claude desktop app: MCP servers and telemetry
+
+`productivity-extra` installs the Claude desktop app. Two things about it are yours to
+hold, because this repository cannot.
+
+**Its MCP servers are not covered by the allowlist.**
+`mcp/managed-settings.json` is deployed to
+`/Library/Application Support/ClaudeCode/managed-settings.json` and governs the Claude
+Code CLI, IDE extensions and the Agent SDK. The desktop app's Code tab is Claude Code,
+but it supplies and locks its own sessions' MCP servers from claude.ai organisation
+settings, so `allowManagedMcpServersOnly` does not constrain it. There is no documented
+local policy file for the first-party app — the MDM and configuration-file keys belong
+to "Claude Desktop on 3P" on Bedrock, Vertex and Foundry, which is not what the
+`claude` cask installs. See ADR-048.
+
+So review its connectors and extensions in the application's own Settings, and treat
+each as what ADR-029 says an MCP server is: arbitrary code with tool access to this
+machine, running as you, with your environment and your credentials. The safest posture
+is to leave them off and turn one on deliberately.
+
+`./script/hardening-check` lists this alongside codex and opencode under manual review.
+All three are checked by hand; only the CLI is enforced.
+
+**Telemetry has no documented opt-out.** Not "it is off" — undocumented. The CLI's
+variables are not documented as applying to the desktop app, so this repository exports
+nothing on the chance that they land (ADR-046). What the application's own Settings
+offer is the only lever, and it is worth looking the first time you open it:
+
+```bash
+lsof -nP -iTCP -sTCP:ESTABLISHED | grep -i claude
+```
+
+If you find a real privacy or analytics control, record what it is — ADR-046's row for
+this app currently claims nothing, and a measured answer is better than an honest
+absence.

@@ -37,7 +37,7 @@ brewfile="$tmp_dir/Brewfile"
 #
 # Without it, `brew bundle check` treats an installed-but-outdated package as an
 # unsatisfied dependency, so a correctly provisioned machine fails this check the moment
-# any one of its 122 packages has a newer version upstream. That is not drift in the
+# any one of its 123 packages has a newer version upstream. That is not drift in the
 # declared state; it is the rest of the world moving, and script/update-report already
 # has an "Outdated packages" section for it.
 #

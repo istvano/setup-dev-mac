@@ -189,8 +189,10 @@ cat <<'EOF'
   - Login Items and background items reviewed after every install
   - BetterDisplay permissions limited to required features
   - editor extensions and coding-agent tools reviewed
-  - Codex and opencode MCP configs reviewed by hand: only Claude Code
-    enforces the allowlist, so those two are checked, not enforced
+  - Codex, opencode and Claude desktop app MCP configs reviewed by hand: only
+    the Claude Code CLI enforces the allowlist, so those three are checked, not
+    enforced. The desktop app's Code tab locks its own servers from claude.ai
+    organisation settings, out of reach of managed-settings.json (ADR-048)
   - browser contexts not signed into a shared sync account
 EOF
 
