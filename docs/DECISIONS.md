@@ -2189,13 +2189,16 @@ categories came out of it, and the distinction between them is the useful part.
 | VS Code | usage and crash reports | `telemetry.telemetryLevel: "off"` — MANUAL |
 | Zed | usage metrics and crash reports | `telemetry.diagnostics` + `.metrics` — MANUAL |
 | OpenHands | PostHog key baked into the image | its own settings — MANUAL |
-| Remote Desktop Manager | usage analytics to `telemetry2.devolutions.net`, plus a news fetch from devolutions.net at every launch | "Disable telemetry" in Settings → Advanced → Privacy — MANUAL |
 
 Homebrew is the one that mattered most. It runs on every install, update and
 upgrade, and what it reports is the list of what this machine has.
 
-Remote Desktop Manager is the one addition to this table since the audit, and it is
-MANUAL for a reason worth stating rather than leaving as an omission. Every opt-out
+Remote Desktop Manager was the one addition to this table after the audit. Its row is
+gone because the package is: it was removed from `productivity-extra` on 2026-10-11
+(ADR-047, withdrawn). The account below is kept as written, because how the opt-out was
+reasoned — and got wrong the first time — outlives the tool it was about.
+
+It was MANUAL for a reason worth stating rather than leaving as an omission. Every opt-out
 Devolutions documents is something this repository cannot write: an in-app checkbox, a
 `RemoteDesktopManager.cfg` XML file the application also writes, a Windows-only
 `DisableAnalytics` group policy, and a `Disable-RDMTelemetry` cmdlet from a PowerShell
@@ -2406,7 +2409,20 @@ argument for reading them, not a control.
 
 ## ADR-047: Remote Desktop Manager Free goes in `productivity-extra`, not `paid`
 
-**Status:** accepted
+**Status:** withdrawn on 2026-10-11. The package was removed.
+
+Remote Desktop Manager was taken out of `productivity-extra` because, in use, it was
+more tool than the job needed: a vault, data sources and an edition model to learn in
+order to hold a handful of session definitions. Nothing replaces it in the profiles.
+Removing the entry does not uninstall it from a machine that already has it — `docs/OPERATIONS.md`,
+"Package reconciliation", is that step — and its vault under
+`~/Library/Application Support/com.devolutions.remotedesktopmanager` stays until deleted
+by hand.
+
+The text below is kept as accepted, not rewritten. Its reading of `paid` — software
+that cannot be used without buying it — is still what ADR-048 relies on, and that
+outlives the package. `docs/MANUAL-SECURITY.md` section 12, which it cites for the
+telemetry clicks, went with the package.
 
 `profiles/AGENTS.md` requires that "paid or conditionally licensed software must be
 isolated in the appropriate paid/alternative fragment and documented." Remote Desktop

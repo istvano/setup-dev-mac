@@ -628,13 +628,12 @@ verified from a Linux workstation and are therefore not yet proven.
       rather than an opt-in one. None of those four has been verified here; confirm
       each against primary documentation before adding any to the shells, because
       ADR-046 permits only variables whose effect was established.
-- [ ] Record which TCC permissions RDM and the Claude desktop app actually request on
-      first launch. For the desktop app, Screen Recording, Accessibility and the
-      microphone are all plausible given its screenshot, computer-use and voice
-      features. If either asks for Accessibility, Screen Recording, Input Monitoring or
-      Full Disk Access, its purpose comment in profiles/productivity-extra.Brewfile
-      must say so (profiles/AGENTS.md), and ./script/tools --write must be re-run
-      afterwards.
+- [ ] Record which TCC permissions the Claude desktop app actually requests on first
+      launch. Screen Recording, Accessibility and the microphone are all plausible
+      given its screenshot, computer-use and voice features. If it asks for
+      Accessibility, Screen Recording, Input Monitoring or Full Disk Access, its
+      purpose comment in profiles/productivity-extra.Brewfile must say so
+      (profiles/AGENTS.md), and ./script/tools --write must be re-run afterwards.
 
 ## Pin hygiene
 
