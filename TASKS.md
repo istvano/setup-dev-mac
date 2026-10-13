@@ -634,6 +634,12 @@ verified from a Linux workstation and are therefore not yet proven.
       Accessibility, Screen Recording, Input Monitoring or Full Disk Access, its
       purpose comment in profiles/productivity-extra.Brewfile must say so
       (profiles/AGENTS.md), and ./script/tools --write must be re-run afterwards.
+- [ ] Slack was added without checking its telemetry (ADR-051). Find out from primary
+      documentation and from the installed application whether the desktop client has
+      a usage-reporting opt-out, then replace the placeholder row in ADR-046 with what
+      was found. Record which TCC permissions it actually requests on first launch and
+      correct its purpose comment if that differs from Microphone, Camera and Screen
+      Recording.
 
 ## Pin hygiene
 

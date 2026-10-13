@@ -40,6 +40,34 @@ cask "latest"            # Reports updates for applications Homebrew does not ma
 # exactly that. Profiles and credentials live outside this repository.
 brew "openvpn" # OpenVPN 2.x client run on demand under sudo; no helper or service left installed.
 
+# RDP, as a command-line client. On the host because a remote session is the host's
+# display, keyboard and clipboard; a container has none of the three.
+#
+# This is what replaced remote-desktop-manager (ADR-047, withdrawn): one protocol, one
+# command, no vault and no account. Use `sdl-freerdp`, which draws through SDL and
+# needs nothing else. The formula also installs `xfreerdp`, which needs an X server
+# this repository does not install — it fails with a $DISPLAY error, by design.
+#
+# Two things ride along that are not the client: `sfreerdp-server` and
+# `freerdp-proxy`. Neither is started and no launchd service is shipped. It also
+# pulls in ffmpeg and the X11 client libraries as dependencies. See ADR-050.
+brew "freerdp" # RDP client for Windows and xrdp hosts, run as `sdl-freerdp`; stores no credentials.
+
+# Slack's desktop client. On the host because it is a GUI holding account sessions,
+# with notifications, the microphone, the camera and screen sharing for huddles.
+#
+# An EXCEPTION to ADR-028, not a reading of it. That decision rejected Figma, Miro,
+# Notion and Linear as browser applications wrapped in Electron, on the ground that
+# the isolated browser contexts already reach them — and Slack is the same kind of
+# application, reachable the same way. It is here because the operator chose the
+# desktop client over a browser tab, and ADR-051 records that as a choice rather
+# than dressing it as a distinction.
+#
+# It asks for Microphone, Camera and Screen Recording when a huddle needs them. The
+# cask carries auto_updates, so versions arrive outside `brew upgrade` and outside
+# ./script/update-report. Telemetry has no opt-out verified here (ADR-046).
+cask "slack" # Slack desktop client; an Electron-wrapped web app, installed as a stated exception to ADR-028.
+
 # Anthropic's Claude desktop app: one application with three tabs — Chat, Cowork and
 # Code — where the Code tab IS Claude Code. On the host because it is a native GUI
 # holding an account session; there is no container form of it worth having.

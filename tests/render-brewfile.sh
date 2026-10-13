@@ -82,7 +82,7 @@ grep -q 'brew "rclone"' "$TMP/Brewfile"
 # sops lives with age in core, because the age identity is created on every apply.
 grep -q 'brew "sops"' "$TMP/Brewfile"
 grep -q 'brew "xh"' "$TMP/Brewfile"
-refute_match '^(brew|cask) "(bun|httpie|mas|openvpn|procs|rectangle|wireguard-tools)"' "$TMP/Brewfile"
+refute_match '^(brew|cask) "(bun|freerdp|httpie|mas|openvpn|procs|rectangle|slack|wireguard-tools)"' "$TMP/Brewfile"
 refute_match '^(brew|cask) "(awscli|azure-cli|burp-suite|dbeaver-community|gcloud-cli)"' "$TMP/Brewfile"
 
 # Kubernetes is part of the DEFAULT selection (ADR-038), so this is asserted rather

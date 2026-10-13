@@ -173,6 +173,10 @@ Recording, Accessibility and the microphone are all plausible for its
 screenshot, computer-use and voice features. Grant only what the feature you actually
 use requires, and record what it asked for — the same disclosure rule applies.
 
+The same profile installs Slack, which asks for Microphone and Camera when a huddle
+starts and for Screen Recording when you share a screen. Grant each when a call needs
+it rather than at first launch, and leave Screen Recording off if you never share.
+
 ---
 
 ## 5. BetterDisplay permissions

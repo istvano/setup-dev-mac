@@ -762,6 +762,35 @@ Three things this does not do, each a consequence of having no resident helper:
 LuLu will ask about `openvpn` on the first connection. Allow it for the server's
 address and port rather than for any destination.
 
+## RDP
+
+`productivity-extra` installs FreeRDP (ADR-050). Use `sdl-freerdp`; the `xfreerdp`
+binary beside it needs an X server this repository does not install.
+
+```bash
+sdl-freerdp /v:host.example.com /u:username /dynamic-resolution +clipboard
+```
+
+Leave `/p:` off and type the password at the prompt. A password on the command line
+is readable by any process that can list processes, and it lands in shell history.
+
+The first connection to a host shows its certificate and asks whether to trust it.
+Check the fingerprint against the server before accepting; the answer is remembered
+under `~/.config/freerdp/`. Do not reach for `/cert:ignore` to make the question go
+away — it turns off the only check that the machine answering is the one you meant.
+
+For a host on the VPN, connect the tunnel first (see "OpenVPN" above). For a host
+reachable only through a bastion, forward the port over SSH and point the client at
+loopback:
+
+```bash
+ssh -N -L 127.0.0.1:13389:windows-host:3389 bastion
+sdl-freerdp /v:127.0.0.1:13389 /u:username
+```
+
+The bottle also contains `sfreerdp-server` and `freerdp-proxy`. Neither is used here
+and neither should be started on a laptop that joins untrusted networks.
+
 ## Intercepting proxies
 
 `security-extra` installs Burp Suite and mitmproxy. Both read HTTPS by

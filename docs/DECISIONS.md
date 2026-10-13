@@ -2268,9 +2268,10 @@ fact is written down rather than left as an assumption."
 | Tool | What is known | Why nothing is set |
 |---|---|---|
 | Claude desktop app | no telemetry opt-out is documented for the first-party app; the documented controls (`disableNonessentialTelemetry` and siblings) belong to "Claude Desktop on 3P" on Bedrock/Vertex/Foundry, a product not run here | the Claude Code CLI's variables are not documented as applying to the desktop app, and setting them on the chance that they do is the "variable nothing reads" failure this ADR forbids — MANUAL, and what its Settings actually offer is tracked in `TASKS.md` |
+| Slack | not investigated beyond the cask: the desktop client is closed source and no telemetry opt-out was looked up or tested when it was added (ADR-051) | nothing is set because nothing was verified, and a guessed setting is the failure this ADR forbids — tracked in `TASKS.md` |
 
-This row deliberately claims nothing. It is here so that a reader looking for the
-desktop app in this table finds an answer rather than an absence, and so that the next
+These rows deliberately claim nothing. Each is here so that a reader looking for the
+application in this table finds an answer rather than an absence, and so that the next
 person does not assume the silence meant "checked, nothing found".
 
 **Checked, nothing found:** `mise`, `uv`, `opencode`, `k9s`, `helm`, `trivy`,
@@ -2413,8 +2414,8 @@ argument for reading them, not a control.
 
 Remote Desktop Manager was taken out of `productivity-extra` because, in use, it was
 more tool than the job needed: a vault, data sources and an edition model to learn in
-order to hold a handful of session definitions. Nothing replaces it in the profiles.
-Removing the entry does not uninstall it from a machine that already has it — `docs/OPERATIONS.md`,
+order to hold a handful of session definitions. FreeRDP replaces it for the one
+protocol that was actually wanted (ADR-050). Removing the entry does not uninstall it from a machine that already has it — `docs/OPERATIONS.md`,
 "Package reconciliation", is that step — and its vault under
 `~/Library/Application Support/com.devolutions.remotedesktopmanager` stays until deleted
 by hand.
@@ -2615,3 +2616,77 @@ ported. `docs/OPERATIONS.md` says so where the profile is installed.
   AGENTS.md forbids automatic network-service enablement.
 
 No ADR-046 row is needed: OpenVPN reports nothing to its vendor.
+
+## ADR-050: RDP is FreeRDP's command line, replacing Remote Desktop Manager
+
+**Status:** accepted
+
+Remote Desktop Manager was withdrawn (ADR-047) for being more tool than the job
+needed, and the job that remained was plain RDP. `freerdp` from homebrew/core covers
+it with nothing to configure: Apache-2.0, no account, no vault, no telemetry and no
+self-updater, so it follows `brew upgrade` and appears in `./script/update-report`.
+Each of those is a thing ADR-047 had to write a caveat for.
+
+It goes in `productivity-extra`, where the tool it replaces was. The default selection
+is at ADR-013's ceiling, and `tests/render-brewfile.sh` now refutes `freerdp` in the
+default Brewfile so it cannot drift there.
+
+The client to use is `sdl-freerdp`. The formula describes itself as an X11
+implementation and its caveat points at XQuartz, which reads as though an X server
+were required; it is required only by `xfreerdp`, one of the binaries in the bottle.
+`sdl-freerdp` draws through SDL3 and runs without one. XQuartz is therefore not added,
+and `xfreerdp` is left failing with a `$DISPLAY` error rather than made to work by
+installing a second display server.
+
+### What this costs
+
+- **Size.** Nineteen direct dependencies, among them `ffmpeg` and ten X11 client
+  libraries, for one client. That is the heaviest dependency tree in the profile.
+- **Server binaries arrive with the client.** `sfreerdp-server` and `freerdp-proxy`
+  are in the same bottle. Nothing starts them and the formula ships no launchd
+  service, but they are on `PATH`.
+- **No session list.** A connection is a command line. Hosts worth remembering go in
+  a shell alias or a `.rdp` file outside the repository, not in a tool.
+- **Credentials are typed.** `/p:` on the command line is visible to every process
+  that can list processes, so the runbook leaves it off and lets the client prompt.
+
+The Microsoft client, the `windows-app` cask, was the alternative. It is closed
+source, and was not evaluated further once the open client did the
+job; it was not installed, so nothing here is a claim about how it behaves.
+
+## ADR-051: Slack's desktop client is an exception to ADR-028, by choice
+
+**Status:** accepted. An exception to ADR-028, which stands.
+
+ADR-028 rejected Figma, Miro, Notion and Linear with one sentence: each is a browser
+application wrapped in Electron, and the isolated browser contexts from ADR-014
+already reach them without adding a runtime to the trusted computing base. Slack's
+desktop client is that sentence's fifth example. It is the web application in an
+Electron shell, and `app.slack.com` in the `work` browser context does the same job.
+
+It is installed anyway, in `productivity-extra`, because the operator asked for the
+desktop client after being shown that conflict. No property of Slack is claimed that
+would have let it pass ADR-028 on the merits. The honest record is that the rule was
+weighed against a preference for a separate application over a browser tab, and the
+preference won for this one tool.
+
+That makes this narrower than ADR-048, which it resembles. The Claude desktop app was
+admitted for a surface the CLI does not have. Slack is admitted without one, so this
+decision is not precedent: the next Electron-wrapped web application still meets
+ADR-028 and needs its own argument.
+
+### What this costs
+
+- **A second browser engine holding work sessions.** The client bundles its own
+  Chromium, patched on Slack's schedule rather than the browser's, and it holds the
+  workspace tokens outside the `work` browser context that ADR-014 isolates.
+- **Updates outside the reviewed flow.** The cask declares `auto_updates`, the same
+  note as ADR-025, ADR-028 and ADR-048.
+- **Telemetry is not closed.** Nothing was verified, so ADR-046 carries a row that
+  says so and `TASKS.md` carries the follow-up.
+- **Permissions.** Microphone, Camera and Screen Recording, requested when a huddle
+  needs them; `docs/MANUAL-SECURITY.md` section 4 says to grant them then and not
+  before.
+
+`tests/render-brewfile.sh` refutes `slack` in the default Brewfile, so the exception
+stays opt-in.
