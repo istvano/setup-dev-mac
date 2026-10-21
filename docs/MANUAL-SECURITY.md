@@ -177,6 +177,10 @@ The same profile installs Slack, which asks for Microphone and Camera when a hud
 starts and for Screen Recording when you share a screen. Grant each when a call needs
 it rather than at first launch, and leave Screen Recording off if you never share.
 
+It also installs the ChatGPT desktop app, and this is the one Accessibility grant on
+this machine to refuse by default. Section 13 explains why: the feature it unlocks
+reads terminal scrollback. The app works without it.
+
 ---
 
 ## 5. BetterDisplay permissions
@@ -350,3 +354,48 @@ lsof -nP -iTCP -sTCP:ESTABLISHED | grep -i claude
 If you find a real privacy or analytics control, record what it is — ADR-046's row for
 this app currently claims nothing, and a measured answer is better than an honest
 absence.
+
+---
+
+## 13. ChatGPT desktop app: keep "Work with Apps" off
+
+`productivity-extra` installs the ChatGPT desktop app as a stated exception to ADR-028
+(ADR-052). One setting in it matters more than the rest.
+
+**"Work with Apps" requires Accessibility, and it reads your terminal.** Specifically:
+the last 200 lines of any open pane in Terminal, iTerm2 or Warp, plus content from
+open editors. That content becomes part of chat history, which means it leaves this
+machine.
+
+Two hundred lines of scrollback on this workstation is not a neutral sample. It
+routinely holds `bw get` output, the active cluster context, cloud CLI sessions, age
+and SOPS operations, and GPG key identifiers — the exact material the rest of this
+document exists to protect.
+
+**The declared posture is that it stays off.** Installing the app grants nothing: the
+feature needs both an in-app toggle (Settings → Work with Apps) and an Accessibility
+grant in **System Settings → Privacy & Security → Accessibility**. Leaving either one
+alone is sufficient. To be certain, confirm ChatGPT holds no Accessibility grant:
+
+```bash
+# Should list ChatGPT nowhere. The TCC database is protected, so read this in
+# System Settings rather than by querying it.
+open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+```
+
+If you ever do want it, connect editors only and never a terminal — the app lets you
+choose per application under *Manage Apps*, and terminals are context sources rather
+than edit targets, so excluding them costs you nothing you would otherwise use.
+
+**Its MCP connectors are not governed from here either.** They arrive through
+Developer Mode, which OpenAI labels beta, "powerful but dangerous", and unverified by
+them. `./script/hardening-check` lists this app alongside codex, opencode and the
+Claude desktop app under manual review; four clients are checked by hand and only the
+Claude Code CLI is enforced.
+
+**Telemetry is half closeable.** Turn off **Settings → Data Controls → "Improve the
+model for everyone"** to stop conversation content being used for training. Note that
+this is an *account* setting and syncs to every device, so a rebuilt machine inherits
+whatever the account already says rather than a fresh default — it is worth confirming
+once rather than assuming the install set it. Usage diagnostics are a separate channel
+with no documented control; ADR-046 records that rather than claiming otherwise.

@@ -136,7 +136,7 @@ Host packages are defined by composable Brewfile fragments:
 - `mcp`: the official MCP inspector, for reviewing a server before trusting it
 - `local-llm`: LM Studio, the one permitted local inference runtime (ADR-025)
 - `productivity-extra`: optional browsers, VPN and RDP clients, media, Slack, the
-  Claude desktop app and desktop utilities
+  Claude and ChatGPT desktop apps and desktop utilities
 - `paid`: non-alternative paid additions
 
 The default profiles are `core,dev,security,productivity,backup,kubernetes`, which

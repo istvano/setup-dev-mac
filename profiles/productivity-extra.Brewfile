@@ -91,3 +91,41 @@ cask "slack" # Slack desktop client; an Electron-wrapped web app, installed as a
 # reads is worse than none (ADR-046). The cask also carries auto_updates, so versions
 # arrive outside `brew upgrade` and outside ./script/update-report.
 cask "claude" # Anthropic's Claude desktop app: Chat, Cowork and the Code tab in a GUI.
+
+# OpenAI's ChatGPT desktop app — the current one, which merged Chat, Work and Codex.
+# Not `chatgpt-classic`, the superseded native app kept alive under its own token, and
+# not `chatgpt-atlas`: that is their browser, discontinued upstream on 2026-08-26 and
+# DISABLED in Homebrew, so it would fail ./script/check-tokens.
+#
+# A SECOND EXCEPTION to ADR-028, on the same footing as slack above and no better.
+# Electron was confirmed from the installed bundle rather than from reporting:
+# ElectronAsarIntegrity in Info.plist, `Codex Framework.framework`, app.asar.unpacked,
+# bundle id com.openai.codex, 1.7 GB, updated by Sparkle. So the isolated browser
+# contexts reach chatgpt.com the same way ADR-028 says they do, and nothing about this
+# app passes that rule on the merits. It is here because the operator chose it after
+# being shown the conflict. See ADR-052.
+#
+# REQUIRES ACCESSIBILITY for "Work with Apps", which reads the last 200 lines of any
+# open terminal pane (Terminal, iTerm2, Warp) plus editor content, and that content
+# becomes chat history and leaves the machine. On a workstation holding credentials,
+# client work and security tooling, terminal scrollback is among the most sensitive
+# things on it. Installing grants none of this — the feature needs an in-app toggle AND
+# a System Settings grant — and the declared posture is that it stays OFF here. See
+# docs/MANUAL-SECURITY.md section 13.
+#
+# Two things ride along inside the bundle. `codex-cli` is codex 0.163.0-alpha.11, a
+# PRERELEASE of the stable 0.163.0 that dev declares as a cask; it is not on PATH, so
+# it wins no race, but Sparkle updates it outside the reviewed flow. `cua_node` is a
+# vendored node v24.21.0 with corepack for the computer-use component — mise pins node
+# 24, so the major agrees and ADR-021 is not breached, but it is a runtime nobody here
+# manages.
+#
+# A fourth MCP client the allowlist does not reach, after codex, opencode and the
+# Claude desktop app: connectors arrive through Developer Mode, which OpenAI documents
+# as beta, "powerful but dangerous", and unverified by them (ADR-029).
+#
+# Telemetry has two channels. Training on content CAN be turned off — Settings > Data
+# Controls > "Improve the model for everyone" — but that is an ACCOUNT setting syncing
+# across devices, not something this repository can write. Usage diagnostics have no
+# documented opt-out (ADR-046).
+cask "chatgpt" # OpenAI's ChatGPT desktop app; an Electron-wrapped web app, installed as a stated exception to ADR-028.

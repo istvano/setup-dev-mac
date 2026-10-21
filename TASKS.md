@@ -634,6 +634,24 @@ verified from a Linux workstation and are therefore not yet proven.
       Accessibility, Screen Recording, Input Monitoring or Full Disk Access, its
       purpose comment in profiles/productivity-extra.Brewfile must say so
       (profiles/AGENTS.md), and ./script/tools --write must be re-run afterwards.
+- [ ] Find out whether the ChatGPT desktop app's usage diagnostics can be turned off
+      at all. The model-training half is closeable and recorded as such; the
+      diagnostics half has no documented control, so ADR-046 carries a row that claims
+      nothing. Check the application's own Settings and watch the network with
+      `lsof -nP -iTCP -sTCP:ESTABLISHED | grep -iE "chatgpt|openai"`, then replace the
+      row with what was found. Also confirm the account-level "Improve the model for
+      everyone" toggle is actually off — it syncs across devices, so this machine's
+      install did not set it and a rebuild will not either.
+- [ ] Record which TCC permissions the ChatGPT desktop app requests on first launch,
+      and confirm it holds no Accessibility grant. "Work with Apps" reads the last 200
+      lines of open terminal panes, and the declared posture (ADR-052,
+      docs/MANUAL-SECURITY.md section 13) is that it stays off — but nothing enforces
+      that, so it is worth eyeballing after any major app update that might re-prompt.
+- [ ] Decide whether the Codex prerelease inside the ChatGPT bundle needs a control.
+      It is `0.163.0-alpha.11` against the stable `0.163.0` that `dev` declares, it is
+      not on PATH, and Sparkle updates it outside `./script/update-report` (ADR-052).
+      Today that is recorded and tolerated. If `script/update-report` ever grows a
+      notion of vendored tools, this is the first case.
 - [ ] Slack was added without checking its telemetry (ADR-051). Find out from primary
       documentation and from the installed application whether the desktop client has
       a usage-reporting opt-out, then replace the placeholder row in ADR-046 with what

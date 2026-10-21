@@ -587,7 +587,12 @@ from the managed-settings tier this file deploys to (ADR-048). So the gap is not
 "unknown" as with codex and opencode; it is known, located, and out of reach from a
 file on this disk.
 
-`script/hardening-check` asks for all three configs to be reviewed by hand and
+The ChatGPT desktop app is a fourth (ADR-052). Its connectors arrive through Developer
+Mode, which OpenAI documents as beta, "powerful but dangerous", and explicitly not
+verified by them — so this one is not merely ungoverned from here, it is a surface
+whose own vendor says to be careful with it.
+
+`script/hardening-check` asks for all four configs to be reviewed by hand and
 says plainly that they are checked rather than enforced.
 
 **Without ToolHive, the only control is the allowlist, and it covers one agent.**
@@ -2189,9 +2194,18 @@ categories came out of it, and the distinction between them is the useful part.
 | VS Code | usage and crash reports | `telemetry.telemetryLevel: "off"` — MANUAL |
 | Zed | usage metrics and crash reports | `telemetry.diagnostics` + `.metrics` — MANUAL |
 | OpenHands | PostHog key baked into the image | its own settings — MANUAL |
+| ChatGPT desktop app | conversation content used to train models, on the individual plans | Settings → Data Controls → "Improve the model for everyone" off — MANUAL, and an ACCOUNT setting, see below |
 
 Homebrew is the one that mattered most. It runs on every install, update and
 upgrade, and what it reports is the list of what this machine has.
+
+The ChatGPT row is the first in this table whose control is not per-machine. "Improve
+the model for everyone" syncs across every device on the account, so it is neither a
+file this repository can write nor a setting that a fresh install of this workstation
+would re-apply — a rebuilt machine inherits whatever the account already says. It is
+listed as closed because the opt-out is documented and effective, not because anything
+here closes it. Its *usage diagnostics* are a separate channel with no documented
+control at all, and they appear in the fourth category below.
 
 Remote Desktop Manager was the one addition to this table after the audit. Its row is
 gone because the package is: it was removed from `productivity-extra` on 2026-10-11
@@ -2269,6 +2283,7 @@ fact is written down rather than left as an assumption."
 |---|---|---|
 | Claude desktop app | no telemetry opt-out is documented for the first-party app; the documented controls (`disableNonessentialTelemetry` and siblings) belong to "Claude Desktop on 3P" on Bedrock/Vertex/Foundry, a product not run here | the Claude Code CLI's variables are not documented as applying to the desktop app, and setting them on the chance that they do is the "variable nothing reads" failure this ADR forbids — MANUAL, and what its Settings actually offer is tracked in `TASKS.md` |
 | Slack | not investigated beyond the cask: the desktop client is closed source and no telemetry opt-out was looked up or tested when it was added (ADR-051) | nothing is set because nothing was verified, and a guessed setting is the failure this ADR forbids — tracked in `TASKS.md` |
+| ChatGPT desktop app | usage diagnostics, as distinct from the training opt-out in the first table: no control for them is documented anywhere | nothing is set because nothing was found; the model-training half IS closeable and is recorded above, so this row covers only the half that is not — tracked in `TASKS.md` |
 
 These rows deliberately claim nothing. Each is here so that a reader looking for the
 application in this table finds an answer rather than an absence, and so that the next
@@ -2690,3 +2705,70 @@ ADR-028 and needs its own argument.
 
 `tests/render-brewfile.sh` refutes `slack` in the default Brewfile, so the exception
 stays opt-in.
+
+## ADR-052: ChatGPT's desktop client is a second exception to ADR-028, by choice
+
+**Status:** accepted. A second exception to ADR-028, which stands.
+
+ADR-051 ended by saying it was not precedent: "the next Electron-wrapped web
+application still meets ADR-028 and needs its own argument." This is that next
+application, and the argument is the same one — a preference, recorded as a preference.
+
+**Electron was measured, not assumed.** The installed bundle carries
+`ElectronAsarIntegrity` in its `Info.plist`, a `Codex Framework.framework` beside
+`Sparkle.framework`, and `app.asar.unpacked` in Resources; the bundle identifier is
+`com.openai.codex` and the application is 1.7 GB. OpenAI moved the main app to
+Electron and kept the former native Swift client as `chatgpt-classic`. This matters
+because the first version of this evaluation was going to rest on the app being
+native — which it was, until July 2026. Reporting said so; the bundle settled it.
+
+So `chatgpt.com` in the `personal` browser context from ADR-014 does the same job, and
+no property of this application is claimed that would let it pass ADR-028 on the
+merits. The operator was shown the conflict, together with the measurements below, and
+chose the desktop client anyway. That is the whole justification and it is not dressed
+as anything else.
+
+`chatgpt-classic` was the obvious counter-offer and was declined: it is native and
+would pass ADR-028 cleanly, but OpenAI has superseded it, so it is a dependency on an
+application whose feature and security maintenance has an announced end.
+
+### What this costs
+
+- **A third bundled Chromium holding an account session**, patched on OpenAI's
+  schedule rather than the browser's, with the account token outside the browser
+  isolation ADR-014 exists to provide. Identical in kind to ADR-051's first cost.
+- **A prerelease of a tool already declared.** `codex-cli` inside the bundle is
+  `0.163.0-alpha.11`; `dev` declares the `codex` cask at the stable `0.163.0`. The
+  bundled copy is not on `PATH`, so it wins no resolution race, but Sparkle updates it
+  outside `brew upgrade` and outside `./script/update-report`. An alpha arriving on a
+  vendor's updater is unreviewed code in the sense ADR-045 means it.
+- **A vendored language runtime.** `cua_node` is node `v24.21.0` with `corepack`, for
+  the computer-use component. ADR-021 is about two managers disagreeing over one
+  version on `PATH`; mise pins node `24`, the major agrees, and this runtime is inside
+  a bundle rather than on `PATH`. Not a breach, and not nothing.
+- **Accessibility, if "Work with Apps" is ever enabled.** That feature reads the last
+  200 lines of open terminal panes and editor content, which becomes chat history and
+  leaves the machine. On this workstation terminal scrollback routinely holds vault
+  reads, cluster context and cloud sessions. Installing grants nothing — an in-app
+  toggle and a System Settings grant are both required — and the declared posture is
+  that it stays off. `docs/MANUAL-SECURITY.md` section 13 carries it.
+- **A fourth MCP client the allowlist cannot reach**, after codex, opencode and the
+  Claude desktop app. Connectors arrive through Developer Mode, which OpenAI itself
+  labels beta, "powerful but dangerous", and unverified by them. ADR-029's stated
+  limitations now name four.
+- **Telemetry is only half closeable.** Training on content has a documented opt-out,
+  but it is an account setting that syncs across devices rather than a per-machine one,
+  so it is not something this repository can write. Usage diagnostics have no
+  documented opt-out at all. ADR-046 carries both halves.
+
+`tests/render-brewfile.sh` refutes `chatgpt` in the default Brewfile, so this
+exception stays opt-in, exactly as ADR-051's does.
+
+### Why this is still not precedent
+
+Two exceptions are a pattern forming, and the honest thing is to say so rather than let
+a third arrive unremarked. ADR-028's reasoning has not weakened: every Electron-wrapped
+web application is still reachable through an isolated browser context at no cost to
+the trusted computing base. What has happened twice now is that the operator preferred
+a separate application for a specific tool and said so. A third candidate still has to
+make that case explicitly, and "there are already two" is not the case.

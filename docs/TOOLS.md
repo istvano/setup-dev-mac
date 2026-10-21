@@ -240,7 +240,7 @@ Selected explicitly with `--profiles`. Nothing here is installed by default.
 | `duckdb` | In-process analytical SQL database CLI. | formula |
 | `dbeaver-community` | Native GUI client for inspecting project databases. | cask |
 
-### `productivity-extra` — 12 package(s)
+### `productivity-extra` — 13 package(s)
 
 | Tool | What it is for | Kind |
 |---|---|---|
@@ -256,6 +256,7 @@ Selected explicitly with `--profiles`. Nothing here is installed by default.
 | `freerdp` | RDP client for Windows and xrdp hosts, run as `sdl-freerdp`; stores no credentials. | formula |
 | `slack` | Slack desktop client; an Electron-wrapped web app, installed as a stated exception to ADR-028. | cask |
 | `claude` | Anthropic's Claude desktop app: Chat, Cowork and the Code tab in a GUI. | cask |
+| `chatgpt` | OpenAI's ChatGPT desktop app; an Electron-wrapped web app, installed as a stated exception to ADR-028. | cask |
 
 ### `paid` — 1 package(s)
 
@@ -303,7 +304,7 @@ Chosen instead of the defaults above, never alongside them.
 | | Packages |
 |---|---|
 | Default selection | 70 |
-| Everything declared | 125 |
+| Everything declared | 126 |
 
 Language runtimes are not here: Node, Go, Java, Rust and pnpm come from mise
 and Python from uv, so they are declared in `chezmoi/dot_config/mise/`
