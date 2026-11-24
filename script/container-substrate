@@ -367,16 +367,8 @@ builder_exists() {
 # here: it cannot be changed after the VM is created, which is why it is verified by
 # read-back — so the drift report then disagreed with what apply had actually done.
 #
-# Is Rosetta actually present on this host?
-#
-# Asked behaviourally rather than by looking for a path. `arch -x86_64` succeeds only when
-# Rosetta can execute an x86_64 binary, which is the property --vz-rosetta depends on;
-# /Library/Apple and /usr/libexec/rosetta have both moved between releases, and a guard
-# that checks the wrong path in a future macOS would answer "absent" on a machine that has
-# it. /usr/bin/true is used because it exists as a real binary and does nothing.
-rosetta_available() {
-  arch -x86_64 /usr/bin/true >/dev/null 2>&1
-}
+# Whether Rosetta is present is answered by rosetta_available in script/lib/common.sh,
+# shared with script/install-rosetta so the two cannot disagree about "installed".
 
 # Refuse rather than quietly degrade.
 #
@@ -392,9 +384,10 @@ require_rosetta() {
   rosetta_available && return 0
   die "Rosetta is enabled for this substrate but is not installed on this host.
 --vz-rosetta needs it, and installing it automatically is something AGENTS.md
-forbids, so it is left to you:
+forbids, so it is left to you. The repository's opt-in installer shows Apple's
+licence and verifies the result (ADR-054):
 
-  softwareupdate --install-rosetta
+  ./script/install-rosetta
 
 Then re-run this command. To build the substrate without amd64 translation
 instead — every amd64 image then runs under QEMU emulation and is several times

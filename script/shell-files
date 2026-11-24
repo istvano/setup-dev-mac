@@ -11,6 +11,23 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# --zsh selects zsh scripts instead, from the same walk, so there is still one selector.
+# They are user tools under chezmoi (conn), not repository scripts: shellcheck cannot
+# parse zsh, so tests/shell-syntax.sh checks them with `zsh -n` instead.
+SHEBANG='^#!.*(bash|/sh)([[:space:]]|$)'
+KIND='shell scripts'
+case "${1-}" in
+  '') ;;
+  --zsh)
+    SHEBANG='^#!.*[/ ]zsh([[:space:]]|$)'
+    KIND='zsh scripts'
+    ;;
+  *)
+    printf 'Unknown option: %s\n' "$1" >&2
+    exit 1
+    ;;
+esac
+
 count=0
 while IFS= read -r file; do
   case "$file" in
@@ -27,13 +44,13 @@ done < <(
     -not -path '*/.git/*' \
     -not -name '*.tmpl' \
     -not -name '*.backup.*' \
-    -exec sh -c 'head -n 1 "$1" | grep -qE "^#!.*(bash|/sh)([[:space:]]|$)"' _ {} \; \
+    -exec sh -c 'head -n 1 "$1" | grep -qE "$2"' _ {} "$SHEBANG" \; \
     -print | sort
 )
 
 # A selector that matches nothing must fail loudly rather than let every
 # downstream check pass vacuously.
 if ((count == 0)); then
-  printf 'No shell scripts discovered under %s; the selector is broken.\n' "$ROOT" >&2
+  printf 'No %s discovered under %s; the selector is broken.\n' "$KIND" "$ROOT" >&2
   exit 1
 fi

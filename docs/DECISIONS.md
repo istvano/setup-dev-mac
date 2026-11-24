@@ -116,6 +116,9 @@ FileVault automatically, export recovery keys or install Rosetta automatically.
 These exclusions preserve explicit trust and execution boundaries and therefore
 belong in the decision record rather than the operational backlog.
 
+ADR-054 adds an opt-in Rosetta installer and leaves this exclusion standing: nothing
+runs it, and it never accepts Apple's licence on the operator's behalf.
+
 ## ADR-013: Keep the default profile small and specialist capabilities opt-in
 
 **Status:** accepted, amended by ADR-038.
@@ -296,7 +299,7 @@ Removed, with the replacement that already covers the use case:
 
 | Removed | Replacement |
 |---|---|
-| `htop` | `btop`, which shows the same process view plus CPU, memory, disk and network |
+| `htop` | `btop`, which shows the same process view plus CPU, memory, disk and network. htop is available opt-in in `productivity-extra` (ADR-053); the default keeps btop alone |
 | `tree` | `eza --tree`, already aliased as `lt` in `dot_zshrc.tmpl` |
 | `difftastic` | `git-delta`, already wired in as Git's pager and `diffFilter` |
 | `wget` | the system `curl`, which the bootstrap and every repository script already use |
@@ -2772,3 +2775,125 @@ web application is still reachable through an isolated browser context at no cos
 the trusted computing base. What has happened twice now is that the operator preferred
 a separate application for a specific tool and said so. A third candidate still has to
 make that case explicitly, and "there are already two" is not the case.
+
+## ADR-053: htop, Midnight Commander and upstream rsync join `productivity-extra`
+
+**Status:** accepted. ADR-022 and the default-profile ceiling both stand.
+
+All three were already on this machine, installed by hand with `brew install`, and a
+drift audit against the rendered Brewfile found them. They are declared now so the
+repository describes the machine again, rather than removed to make the audit quiet.
+All three are GPL (htop 2.0-or-later; mc and rsync 3.0-or-later), free, native arm64
+formulae in `homebrew/core`, with no daemon, no port and no telemetry.
+
+**Placement: host.** Each one inspects or moves host state: host processes, the host
+filesystem and outbound ssh. In a container they would see only the container.
+
+**Profile: `productivity-extra`, not `core`.** The default Brewfile was at its
+70-entry ceiling, and `tests/render-brewfile.sh` says that raising it takes an
+argument about what belongs on the host by default, not a need for room. `core` was
+considered and declined by the operator. All three are conveniences that this machine
+wants, not things every default install needs. The default and its ceiling are
+unchanged.
+
+### htop is a second tool for btop's job, by choice
+
+ADR-022 removed `htop` from the default because `btop` shows the same process view and
+more. That still holds: the default keeps btop alone, and the test that refutes htop
+in the default Brewfile is unchanged. ADR-022 governs only the default, so htop is
+allowed in an opt-in profile, as `iterm2` sits beside `ghostty`. No capability is
+claimed for htop that btop lacks. The case is familiarity: htop is the process viewer
+on every Linux host this workstation reaches over ssh, so its keys work the same on
+both ends.
+
+### Midnight Commander
+
+A two-pane terminal file manager, with a built-in sftp and shell link to remote hosts.
+Nothing declared covers that job. `eza`, `fd` and `zoxide` list, find and navigate, and
+`trash` deletes safely, but none of them copies or moves interactively between two
+trees. It also installs `mcedit` and `mcdiff`. `neovim` stays the editor; nothing is
+configured to use those two.
+
+### Upstream rsync
+
+`/usr/bin/rsync` on current macOS is **openrsync**, which reports protocol 29. Checked
+on this machine, it rejects `--mkpath`, `--info=progress2` and `-X` (extended
+attributes). Homebrew's rsync is 3.x and comes first on `PATH`. It replaces a weaker
+system tool rather than duplicating a declared one.
+
+That is the strongest by-default argument of the three, and it was still not enough
+to raise the ceiling. A default install keeps openrsync. `script/sync-to-mac` already
+treats rsync as optional and avoids `--mkpath` for that reason, so nothing in the
+repository depends on this profile.
+
+## ADR-054: Rosetta is optional, installed by one explicit command
+
+**Status:** accepted. Refines ADR-012 and the Rosetta note in ADR-037; neither is weakened.
+
+Rosetta used to have no home in the repository. The only instruction was a line in a
+runbook and in `script/container-substrate`'s error message, so it was installed by
+hand and nothing verified the result. It is now optional, installed by
+`./script/install-rosetta` (also `just rosetta`).
+
+The rule that matters is still AGENTS.md's: no **automatic** Rosetta installation.
+Optional and automatic are different things, and these four properties keep them
+apart. `tests/rosetta.sh` asserts each one:
+
+- **Nothing calls it.** `bootstrap`, `script/setup`, `script/test-install` and every
+  chezmoi hook must not even mention it. There is no profile flag and no chezmoi data
+  key, because either would turn an operator's act into an apply side effect.
+- **No `--agree-to-license`.** That flag exists only to make the install unattended.
+  `softwareupdate` shows Apple's licence and the operator accepts it. `ASSUME_YES` does
+  not apply, because the question is Apple's, not the repository's.
+- **A terminal is required.** Without one the licence prompt would wait on input
+  nobody can give, the hang `confirm` in `script/lib/common.sh` was written to prevent.
+- **The result is verified.** Success means an x86_64 binary runs (`arch -x86_64
+  /usr/bin/true`), not that `softwareupdate` exited 0. That check, `rosetta_available`,
+  moved from `script/container-substrate` into `script/lib/common.sh`, so the installer
+  and the substrate guard cannot define "installed" differently.
+
+The substrate's refusal message now names this command instead of the raw
+`softwareupdate` invocation. `--check` reports presence without installing anything.
+
+`script/hardening-check` still asks for a review whenever Rosetta is running. Making it
+easy to install does not make it free: it lets x86_64 code run on the host, which is
+the attack surface ADR-036 keeps out by refusing any `/usr/local` fallback.
+
+## ADR-055: Xcode and Apple's Developer app stay manual
+
+**Status:** accepted.
+
+Both are on this machine, installed by hand from the App Store, and the same drift
+audit as ADR-053 found them. Unlike ADR-053's packages, they are **not** declared.
+Installing them stays a deliberate manual step.
+
+- **The repository needs only the Command Line Tools.** `require_developer_tools`
+  asks `xcode-select -p`, which either one satisfies, and nothing here builds against
+  an Xcode SDK. Full Xcode is for macOS and iOS application work, which is a project
+  decision and not a workstation baseline.
+- **Declaring them needs `mas`, and `mas` needs an App Store session.** It cannot sign
+  in on its own, so an unattended bootstrap would either stall or skip silently, and
+  the repository would gain a third package channel to install, pin and report on, for
+  two applications.
+- **Xcode is a heavy dependency to install implicitly.** It is a multi-gigabyte
+  download, it has a licence of its own (`sudo xcodebuild -license`), and on first
+  launch it adds components and simulators.
+
+### What installing Xcode changes
+
+On this machine `xcode-select -p` reports `/Applications/Xcode.app/Contents/Developer`,
+not `/Library/Developer/CommandLineTools`. `git`, `clang` and the `python3` stub in
+`/usr/bin` therefore run from Xcode, and they refuse to run until Xcode's licence is
+accepted. If Xcode is ever removed, switch back first, or every `/usr/bin` developer
+tool fails:
+
+```bash
+sudo xcode-select --switch /Library/Developer/CommandLineTools
+```
+
+Apple's Developer app holds documentation and WWDC sessions and installs no toolchain.
+It is recorded here only so a future audit knows to expect it.
+
+`brew bundle cleanup` cannot see App Store applications at all, so neither app shows up
+in package reconciliation. The audit in `docs/OPERATIONS.md` that does see them lists
+both as expected manual installs.

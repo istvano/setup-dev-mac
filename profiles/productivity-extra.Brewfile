@@ -53,6 +53,17 @@ brew "openvpn" # OpenVPN 2.x client run on demand under sudo; no helper or servi
 # pulls in ffmpeg and the X11 client libraries as dependencies. See ADR-050.
 brew "freerdp" # RDP client for Windows and xrdp hosts, run as `sdl-freerdp`; stores no credentials.
 
+# Terminal conveniences, opt-in rather than in core (ADR-053). On the host because each
+# one inspects or moves host state: processes, the filesystem and outbound ssh.
+#
+# htop is a second tool for btop's job. ADR-022 forbids that in the DEFAULT profile,
+# which keeps btop alone; here it is permitted, as iterm2 is beside ghostty above.
+# rsync is here for the same reason as the other two: the default is capped at 70
+# entries and none of the three carries a by-default argument strong enough to raise it.
+brew "htop"               # Interactive process viewer whose keys match every Linux host reached by ssh.
+brew "midnight-commander" # Two-pane terminal file manager (mc), with built-in sftp to remote hosts.
+brew "rsync"              # Upstream rsync 3.x; /usr/bin/rsync is openrsync, without --mkpath or -X.
+
 # Slack's desktop client. On the host because it is a GUI holding account sessions,
 # with notifications, the microphone, the camera and screen sharing for huddles.
 #

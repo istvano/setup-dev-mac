@@ -154,7 +154,7 @@ gitSigningMethod = "ssh"
 gitSigningKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEYFORVALIDATIONONLY"
 workGitDir = "~/work"
 workGitEmail = "work@example.invalid"
-profiles = ["core", "dev", "security", "security-extra", "productivity", "productivity-extra"]
+profiles = ["core", "dev", "security", "security-extra", "productivity", "productivity-extra", "local-llm"]
 shell = "fish"
 runtime = "rancher"
 passwordManager = "1password"
@@ -337,6 +337,48 @@ for CONFIG in "${CONFIGS[@]}"; do
       }
     fi
   done
+
+  # LM Studio's ~/.lmstudio/bin must be on PATH in BOTH shells exactly when local-llm
+  # is selected. The app writes its own PATH block once and never again, so the
+  # declared entry is the only one that survives an apply.
+  for shell_config in dot_zshrc.tmpl dot_config/fish/config.fish.tmpl; do
+    # Code lines only: the explanatory comment names the directory too, so counting it
+    # let a deleted PATH line pass. Verified by deleting the line and watching this fail.
+    lms_mentions="$(render <"$ROOT/chezmoi/$shell_config" |
+      grep -v '^[[:space:]]*#' | grep -c '\.lmstudio/bin' || true)"
+    if grep -qE '^profiles = .*"local-llm"' "$CONFIG"; then
+      ((lms_mentions > 0)) || {
+        echo "local-llm is selected but $shell_config does not add ~/.lmstudio/bin," >&2
+        echo "so lms is off PATH once an apply removes LM Studio's own block." >&2
+        exit 1
+      }
+    else
+      ((lms_mentions == 0)) || {
+        echo "local-llm is not selected but $shell_config adds ~/.lmstudio/bin." >&2
+        exit 1
+      }
+    fi
+  done
+
+  # Colima's ssh_config is included exactly when Colima is the runtime, and BEFORE
+  # `Host *`. Without the line, every `colima start` prepends its own and the file
+  # drifts on every apply; below `Host *`, the VM's settings would lose to the
+  # defaults (first value wins).
+  ssh_rendered="$(render <"$ROOT/chezmoi/private_dot_ssh/config.tmpl")"
+  colima_line="$(grep -n -x 'Include ~/.colima/ssh_config' <<<"$ssh_rendered" | cut -d: -f1 || true)"
+  if [[ "$selected_runtime" == colima ]]; then
+    host_all_line="$(grep -n -x 'Host \*' <<<"$ssh_rendered" | head -n 1 | cut -d: -f1)"
+    [[ -n "$colima_line" && "$colima_line" -lt "$host_all_line" ]] || {
+      echo "runtime=colima but ~/.ssh/config does not include ~/.colima/ssh_config" >&2
+      echo "before 'Host *'. Colima would prepend its own Include on every start." >&2
+      exit 1
+    }
+  else
+    [[ -z "$colima_line" ]] || {
+      echo "runtime=$selected_runtime but ~/.ssh/config still includes Colima's ssh_config." >&2
+      exit 1
+    }
+  fi
 
   # The Ghostty command line must render to a real absolute path.
   #

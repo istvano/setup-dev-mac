@@ -10,7 +10,7 @@
 # Ghostty starting, an unresolvable font falls back silently — the terminal opens
 # in a default face and nothing says why. NL means no ligatures.
 font-family = JetBrainsMono Nerd Font Mono
-font-size = 14
+font-size = 16
 
 # Theme names are Ghostty's own, exactly as `ghostty +list-themes` prints them:
 # capitalised, space-separated. They were written here in the lowercase-hyphenated
@@ -31,19 +31,41 @@ window-save-state = never
 # `10000` here as though it were a line count: a 10 KB buffer against the 10 MB
 # default, roughly a hundred lines rather than ten thousand.
 #
-# `scrollback-limit-lines` would say what is meant, but it does not exist on the
-# Ghostty this repository installs. Ghostty 1.4 adds it and renames this key to
-# `scrollback-limit-bytes`; `cask "ghostty"` is 1.3.1, which knows neither, and
-# rejects an unknown key with a config error. The byte key survives the 1.4
-# rename through a compatibility alias, so it is the one spelling correct on
-# both.
+# Ghostty 1.4 renamed this key to `scrollback-limit-bytes` and added
+# `scrollback-limit-lines`, which says what is meant. This spelling was chosen while
+# `cask "ghostty"` was 1.3.1, which knows neither new key and rejects an unknown
+# one with a config error. The cask is now 1.4.0, and the old key still works
+# through a compatibility alias. Moving to the new keys is open in TASKS.md.
 #
 # Ghostty never writes scrollback to disk, so this is purely about memory. It is
 # not a privacy control, and an earlier comment here wrongly claimed it was.
 # tests/placement-policy.sh asserts the value is plausible for its units.
 scrollback-limit = 52428800
 
+# SECURITY DECISION: middle-click paste is on, copy-on-select is off.
+#
+# Decision. A middle click pastes the system clipboard, but selecting text does NOT
+# copy it; only an explicit Cmd+C does. The operator wanted the middle-click habit and
+# tried `copy-on-select = clipboard` first, then chose to keep only the paste half.
+#
+# Why copy-on-select stays off. Terminal output here routinely includes secrets: vault
+# and Bitwarden reads, cloud session tokens, kubeconfig contents. With copy-on-select,
+# a selection made only to read or highlight output lands on the system clipboard with
+# no deliberate copy. From there any application running as this user can read it, a
+# clipboard-history tool records it, and Universal Clipboard hands it to other Apple
+# devices on the same Apple Account while Handoff is on, which is the macOS default.
+# macOS has no separate selection clipboard (Ghostty's `primary` modes do nothing on
+# macOS), so select-then-middle-click cannot exist without that exposure.
+#
+# Risk accepted. A stray middle click pastes the last thing copied into whatever is
+# under the pointer, which in a terminal can be a shell prompt. clipboard-paste-protection
+# (below) asks before a paste that could run commands. clipboard-read = ask stops
+# terminal programs from reading the clipboard silently through OSC 52.
+#
+# Revert: remove middle-click-action to restore Ghostty's default, which does nothing
+# on macOS.
 copy-on-select = false
+middle-click-action = clipboard-paste
 confirm-close-surface = true
 
 # Ghostty can detect the shell, but naming it means the selection in
@@ -81,7 +103,7 @@ shell-integration-features = cursor,sudo,title,ssh-env,ssh-terminfo
 auto-update = check
 
 macos-option-as-alt = true
-macos-titlebar-style = tabs
+macos-titlebar-style = native
 clipboard-read = ask
 clipboard-write = allow
 clipboard-paste-protection = true

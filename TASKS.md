@@ -186,6 +186,12 @@ comment pretending to be a test.
       so a chezmoi-managed copy is a file the tool also writes — the conflict ADR-037
       records for Rancher Desktop. Decide whether to manage it with a `modify_` script that
       preserves gh's own keys, or to leave it alone deliberately and record that.
+- [ ] **Ghostty's scrollback key predates 1.4.** `chezmoi/dot_config/ghostty/config.tmpl`
+      sets `scrollback-limit`, chosen when the cask was 1.3.1. The cask is now 1.4.0, which
+      renamed it `scrollback-limit-bytes` (the old name survives as an alias) and added
+      `scrollback-limit-lines`. Move to the new key, and update the units assertion in
+      `tests/placement-policy.sh` in the same change, then confirm with
+      `ghostty +validate-config`.
 - [x] **`bat`'s Catppuccin theme was investigated and is fine.** A review flagged the missing
       `themes/` directory and absent `bat cache --build` as a silent-fallback bug. It is not:
       `bat --list-themes` in a provisioned guest lists all four Catppuccin variants, built in

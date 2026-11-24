@@ -77,7 +77,7 @@ set, writes the reviewed choices to chezmoi data and applies the source state.
 It applies the declared macOS defaults and enables the application firewall with
 stealth mode; both are reversible and both can be declined with
 `--no-macos-defaults` and `--no-hardening`. It does not enable FileVault, install
-Rosetta, modify Touch ID PAM, enable network services or install a major macOS
+Rosetta (optional, via `./script/install-rosetta`; ADR-054), modify Touch ID PAM, enable network services or install a major macOS
 upgrade — those stay opt-in because each is either irreversible or can reboot.
 
 Add only the specialist profiles required by current work. For example:
@@ -245,13 +245,19 @@ user-mode emulation inside the guest, which is several times slower than Rosetta
 translation — and this workstation runs amd64 scanner and CI-equivalent images
 routinely, so the flag is the largest performance difference the substrate can make.
 
-Rosetta itself is **not installed automatically** — `AGENTS.md` forbids that. If it is
-absent, `./script/container-substrate` refuses to build rather than quietly dropping
-the flag and leaving every amd64 image slow for an unremembered reason:
+Rosetta itself is **optional and not installed automatically**. `AGENTS.md` forbids
+an automatic install. If it is absent, `./script/container-substrate` refuses to build
+rather than quietly dropping the flag and leaving every amd64 image slow for an
+unremembered reason. Install it yourself, once (ADR-054):
 
 ```bash
-softwareupdate --install-rosetta        # the operator's decision, once
+./script/install-rosetta --check        # is it installed? exit 1 when not
+./script/install-rosetta                # shows Apple's licence; you accept it
 ```
+
+`just rosetta` is the same command. The script needs a terminal, never accepts the
+licence for you, and confirms that an x86_64 binary actually runs before it reports
+success. Nothing in bootstrap or chezmoi calls it.
 
 To build without amd64 translation instead, opt out explicitly:
 
@@ -706,6 +712,27 @@ Two rules make the boundary real rather than nominal:
   VM. Share a single scratch directory if something must cross.
 - Snapshot before running anything untrusted, and revert afterwards. A VM you
   keep patching is no longer isolated from what it has run.
+
+## SSH hosts
+
+`conn` (in `~/.local/bin`, managed by chezmoi) is an fzf picker over the `Host` aliases
+in `~/.ssh/config.d`. That directory is included by the managed `~/.ssh/config` and is
+deliberately unmanaged, so private hostnames stay out of the repository.
+
+```bash
+conn                 # pick a host, then ssh to it
+conn sftp            # same picker, sftp instead
+conn web             # connect straight away when exactly one alias matches "web"
+conn -n scp          # print the scp command rather than running it
+```
+
+In the picker, Enter uses the chosen mode, Ctrl-F switches to sftp and Ctrl-S to scp.
+scp prompts for both sides, with the remote side already filled in. Each row is
+resolved through `ssh -G`, so it shows the user, host and port ssh will actually use.
+
+It is a zsh script on purpose: the prefilled scp prompts use `vared`, which bash 3.2
+lacks. `/bin/zsh` ships with macOS, so it works under either interactive shell.
+`tests/shell-syntax.sh` checks it with `zsh -n`, because shellcheck cannot parse zsh.
 
 ## OpenVPN
 
@@ -1442,6 +1469,50 @@ brew bundle cleanup --force --file=/tmp/workstation.Brewfile
 
 Do not add forced cleanup to bootstrap, chezmoi hooks or routine update
 automation.
+
+### Finding manual installs
+
+`brew bundle cleanup` covers only Homebrew. To find software installed by hand,
+compare `/Applications` against the casks and check App Store receipts. Also look
+at the non-Homebrew channels: `mise ls` against the declared config, `uv tool list`,
+`~/.local/bin` against `chezmoi managed`, `pkgutil --pkgs` for non-Apple receipts,
+and `systemextensionsctl list`.
+
+Some manual installs are expected, and are decided rather than drift:
+
+| Item | Why it is manual |
+|---|---|
+| Xcode (App Store) | Only the Command Line Tools are required; see ADR-055 before removing it |
+| Developer (App Store) | Apple documentation and WWDC sessions; no toolchain (ADR-055) |
+| Rosetta 2 | Optional, installed only by `./script/install-rosetta` (ADR-054) |
+| GarageBand, iMovie, Keynote, Numbers, Pages | Apple's bundled applications |
+
+Anything else found this way should either be declared in a profile with a purpose
+comment ("Adding a package") or removed.
+
+### A cask reports "It seems there is already an App at …"
+
+This happens when the app was installed outside Homebrew, or when a self-updating app
+left the cask's Caskroom entry without a version directory. `brew bundle check` then
+reports the cask as missing, `./script/verify` stops on it, and `brew reinstall` refuses
+to overwrite the app.
+
+`brew reinstall --cask --adopt <cask>` looks like the fix, and fails with a wall of
+`chgrp: ... Operation not permitted`. Adopting means changing the bundle's file group,
+and macOS's App Management protection blocks a terminal from modifying another
+vendor's signed app. The failure leaves the app intact. Granting the terminal App
+Management would let anything running in it modify every installed app, which is too
+broad to grant for a one-off fix.
+
+What works, without extra permissions:
+
+1. Quit the app, including any menu-bar item.
+2. Drag it from `/Applications` to the Trash in Finder.
+3. `brew install --cask <cask>`. It is `install`, not `reinstall`, because Homebrew
+   now considers the cask uninstalled.
+
+Application data in `~/Library/Application Support` is untouched, so the app keeps
+its sign-ins and settings.
 
 ## Hardening and recovery
 

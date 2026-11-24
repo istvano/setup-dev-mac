@@ -168,6 +168,20 @@ nested_virtualization_supported() {
   [[ "$(sysctl -n hw.optional.arm.FEAT_NV 2>/dev/null || echo 0)" == "1" ]]
 }
 
+# Is Rosetta 2 present on this host?
+#
+# Asked behaviourally rather than by looking for a path. `arch -x86_64` succeeds only when
+# Rosetta can execute an x86_64 binary, which is the property every caller depends on;
+# /Library/Apple and /usr/libexec/rosetta have both moved between releases, and a guard
+# that checks the wrong path in a future macOS would answer "absent" on a machine that has
+# it. /usr/bin/true is used because it exists as a real binary and does nothing.
+#
+# Here rather than in script/container-substrate because script/install-rosetta asks the
+# same question (ADR-054), and two definitions of "installed" could disagree.
+rosetta_available() {
+  arch -x86_64 /usr/bin/true >/dev/null 2>&1
+}
+
 # Asks, and fails CLOSED when it cannot ask.
 #
 # The TTY check is not cosmetic. Without it, `read` blocks forever whenever stdin is

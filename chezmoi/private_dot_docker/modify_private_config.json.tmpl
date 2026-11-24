@@ -54,4 +54,11 @@ if ! jq -e . >/dev/null 2>&1 <<<"$current"; then
   exit 0
 fi
 
-jq --arg store osxkeychain '.credsStore = $store' <<<"$current"
+# Written in Docker's own format: tab-indented and with no trailing newline, which is how
+# the Docker CLI saves this file (Go's json.MarshalIndent with a tab). jq's default of
+# two spaces and a newline made `chezmoi diff` report the file on every run after Docker
+# had touched it, and the content never actually differed. That noise hid real drift.
+# --tab sets the indent, and -j omits the newline. -j also implies raw output, which
+# changes nothing for an object. Key order is preserved, so the result is
+# byte-identical to what Docker writes.
+jq --tab -j --arg store osxkeychain '.credsStore = $store' <<<"$current"

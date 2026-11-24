@@ -9,6 +9,24 @@
 # Per-host settings live here and are not managed by the repository, so
 # machine-specific hostnames never reach version control.
 Include ~/.ssh/config.d/*
+{{- if eq .runtime "colima" }}
+
+# Colima's generated host entry, so `ssh colima` reaches the runtime VM (ADR-037).
+#
+# Declared because Colima writes it otherwise. On every `colima start` with
+# sshConfig: true (its default), Colima PREPENDS `Include <absolute path>` to this
+# file unless an Include already names its file (app/app.go, generateSSHConfig,
+# v0.10.3). Left undeclared, every apply removed that line and every start put it
+# back, so this file always read as modified outside chezmoi. Colima expands `~/`
+# when it checks, so this line satisfies it and Colima stops writing here.
+#
+# Before `Host *` for the same first-value-wins reason as config.d above. The
+# generated entry is scoped to `Host colima` and pins the VM's host key in its own
+# known_hosts with StrictHostKeyChecking yes, so it weakens nothing for other hosts.
+# A missing file is not an error for Include, so a machine that has never started
+# Colima is unaffected.
+Include ~/.colima/ssh_config
+{{- end }}
 
 Host *
   # Keys are added to the agent on first use and unlocked from the Keychain.

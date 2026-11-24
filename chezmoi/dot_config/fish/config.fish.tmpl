@@ -62,6 +62,16 @@ fish_add_path -ga $HOME/.rd/bin
 # shells differ here on purpose.
 fish_add_path -ga $HOME/.krew/bin
 {{- end }}
+{{- if has "local-llm" .profiles }}
+# LM Studio's `lms` CLI, for the reasons given in dot_zshrc.tmpl: the app writes its PATH
+# block once, on first launch, and never again. Whether it writes a fish block too is
+# unverified; `lms bootstrap` can, and either way this file is managed by chezmoi, so a
+# declared entry is the only stable home.
+#
+# fish_add_path skips a missing directory, and the app creates ~/.lmstudio/bin on first
+# launch. A shell opened before that launch will not have it; open a new one.
+fish_add_path -ga $HOME/.lmstudio/bin
+{{- end }}
 
 # Rust comes from mise, which shims cargo and rustc; no Homebrew keg on PATH.
 

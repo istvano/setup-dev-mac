@@ -1,0 +1,76 @@
+#!/bin/zsh
+# conn — fzf picker over the Host aliases in ~/.ssh/config.d.
+#
+#   conn [-n] [ssh|sftp|scp] [query]
+#
+# Enter runs the chosen mode (ssh by default); Ctrl-F forces sftp, Ctrl-S scp.
+# A query that matches exactly one host connects without showing the list.
+# -n prints the command instead of running it.
+#
+# Managed by chezmoi from chezmoi/dot_local/bin/executable_conn; edit it there.
+# zsh rather than the repository's bash 3.2 on purpose: the scp prompts prefill the
+# remote side with `vared`, which bash 3.2 has no equivalent for. /bin/zsh ships with
+# macOS, so this works whichever interactive shell is selected (ADR-031).
+# Host aliases come from ~/.ssh/config.d, which the managed ~/.ssh/config includes and
+# which stays unmanaged so private hostnames never reach the repository.
+
+setopt no_unset pipe_fail
+
+dry=0
+if [[ ${1:-} == -n ]]; then dry=1; shift; fi
+
+mode=ssh
+case ${1:-} in
+  ssh|sftp|scp) mode=$1; shift ;;
+  -h|--help) sed -n '2,8s/^# \{0,1\}//p' "$0"; exit 0 ;;
+esac
+query=${*:-}
+
+names=(${(f)"$(awk 'tolower($1) == "host" { for (i = 2; i <= NF; i++) if ($i !~ /[*?!]/) print $i }' \
+  ~/.ssh/config.d/*(N.) /dev/null)"})
+if (( ! ${#names} )); then
+  print -u2 "conn: no Host aliases found in ~/.ssh/config.d"
+  exit 1
+fi
+
+# Resolve through ssh itself so the list always matches what ssh would do.
+rows=()
+for a in $names; do
+  rows+=("$(ssh -G "$a" 2>/dev/null | awk -v a="$a" '
+    $1 == "user" { u = $2 } $1 == "hostname" { h = $2 } $1 == "port" { p = $2 }
+    END { printf "%-20s %s@%s:%s", a, u, h, p }')")
+done
+
+out=$(print -l -- $rows | fzf \
+  --query="$query" --select-1 --exit-0 \
+  --expect=ctrl-f,ctrl-s \
+  --height=60% --reverse \
+  --prompt="$mode> " \
+  --header="enter: $mode   ctrl-f: sftp   ctrl-s: scp" \
+  --preview='ssh -G {1} 2>/dev/null | grep -E "^(hostname|user|port|identityfile) "' \
+  --preview-window=down,6) || exit $?
+
+key=${out%%$'\n'*}
+host=${${out#*$'\n'}%% *}
+[[ -n $host ]] || exit 1
+
+case $key in
+  ctrl-f) mode=sftp ;;
+  ctrl-s) mode=scp ;;
+esac
+
+if [[ $mode == scp ]]; then
+  # Keep the "host:" prefix on whichever side is remote; clear it for a local path.
+  src="$host:"
+  vared -p "scp from: " src || exit 1
+  if [[ $src == $host:* ]]; then dst="./"; else dst="$host:"; fi
+  vared -p "scp to:   " dst || exit 1
+  [[ -n $src && -n $dst ]] || exit 1
+  cmd=(scp -r -- "${src/#\~/$HOME}" "${dst/#\~/$HOME}")
+else
+  cmd=($mode "$host")
+fi
+
+print -r -- "+ ${(j: :)${(@q-)cmd}}"
+(( dry )) && exit 0
+exec $cmd

@@ -138,7 +138,9 @@ While editing:
   runs `softwareupdate --install-rosetta`; it refuses to build the substrate and
   says what to run. `tests/vm.sh` holds both halves apart — it asserts the
   default is on and refutes `--agree-to-license`, the flag whose only purpose is
-  an unattended install.
+  an unattended install. Rosetta is OPTIONAL through `script/install-rosetta`
+  (ADR-054): the operator runs it, it shows Apple's licence, and nothing else may
+  call it or install Rosetta itself. `tests/rosetta.sh` enforces that.
 - Templates must never build repository paths from `.chezmoi.sourceDir`
   directly. `.chezmoiroot` resolves it to `<repo>/chezmoi`; use
   `dir .chezmoi.sourceDir`. `tests/chezmoi-templates.sh` enforces this.

@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Install Rosetta 2, when the operator asks for it (ADR-054).
+#
+# Rosetta is OPTIONAL and is never installed automatically. AGENTS.md and ADR-012 forbid
+# that, and this script keeps the rule rather than bending it:
+#
+#   - Nothing calls it. bootstrap, script/setup, the chezmoi hooks and script/test-install
+#     do not run it, and tests/rosetta.sh asserts that they never mention it.
+#   - It never passes --agree-to-license. That flag exists only to make the install
+#     unattended, which is the automatic installation the rule is about. Apple's licence
+#     is shown and accepted by the person running this, every time.
+#   - It refuses without a terminal, so a pipeline or an editor task cannot run it and
+#     leave the licence prompt waiting on input nobody will give. ASSUME_YES does not
+#     apply: the licence is Apple's question, not this script's.
+#
+# Why have it at all: the container substrate enables --vz-rosetta by default
+# (ADR-037) and refuses to build when Rosetta is absent, and some amd64-only tools need
+# it on the host too. The command was already documented; this makes it one reviewed
+# entry point that also verifies the result, instead of a line copied from a runbook.
+#
+#   install-rosetta           install Rosetta if it is absent
+#   install-rosetta --check   exit 0 when Rosetta is present, 1 when it is not
+set -Eeuo pipefail
+IFS=$'\n\t'
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: install-rosetta [--check]
+
+Installs Rosetta 2 after you accept Apple's licence at the prompt.
+Optional: nothing in the repository runs this for you (ADR-054).
+
+  --check   report whether Rosetta is installed; exit 1 when it is not
+EOF
+}
+
+MODE=install
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --check)
+      MODE=check
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *) die "Unknown option: $1" ;;
+  esac
+done
+
+require_supported_mac
+
+if rosetta_available; then
+  success "Rosetta is installed."
+  exit 0
+fi
+
+if [[ "$MODE" == check ]]; then
+  warn "Rosetta is not installed. Install it with: ./script/install-rosetta"
+  exit 1
+fi
+
+[[ -t 0 ]] || die "Rosetta's licence has to be accepted interactively, and stdin is not a
+terminal. Run ./script/install-rosetta from a terminal."
+
+log "Installing Rosetta 2. softwareupdate will show Apple's licence and ask you to accept it."
+# No --agree-to-license, deliberately; see the header. tests/rosetta.sh refutes it.
+softwareupdate --install-rosetta ||
+  die "softwareupdate did not install Rosetta. Nothing else was changed."
+
+# softwareupdate's exit status is not the property callers depend on; translation
+# working is. Checked the same way script/container-substrate checks it.
+rosetta_available ||
+  die "softwareupdate finished, but an x86_64 binary still cannot run. Check
+System Settings > General > Software Update, then retry."
+success "Rosetta is installed and translating x86_64 binaries."

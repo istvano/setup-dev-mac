@@ -48,6 +48,10 @@ substrate-status:
 substrate-verify:
   ./script/container-substrate --verify
 
+# Optional: install Rosetta 2 after accepting Apple's licence. Never run for you (ADR-054).
+rosetta:
+  ./script/install-rosetta
+
 # --- Containerised agent tools (ADR-043) ------------------------------------
 
 # Run OpenHands Agent Canvas from the digest pinned in agent-tools/openhands.lock.

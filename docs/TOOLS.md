@@ -240,7 +240,7 @@ Selected explicitly with `--profiles`. Nothing here is installed by default.
 | `duckdb` | In-process analytical SQL database CLI. | formula |
 | `dbeaver-community` | Native GUI client for inspecting project databases. | cask |
 
-### `productivity-extra` — 13 package(s)
+### `productivity-extra` — 16 package(s)
 
 | Tool | What it is for | Kind |
 |---|---|---|
@@ -254,6 +254,9 @@ Selected explicitly with `--profiles`. Nothing here is installed by default.
 | `latest` | Reports updates for applications Homebrew does not manage. | cask |
 | `openvpn` | OpenVPN 2.x client run on demand under sudo; no helper or service left installed. | formula |
 | `freerdp` | RDP client for Windows and xrdp hosts, run as `sdl-freerdp`; stores no credentials. | formula |
+| `htop` | Interactive process viewer whose keys match every Linux host reached by ssh. | formula |
+| `midnight-commander` | Two-pane terminal file manager (mc), with built-in sftp to remote hosts. | formula |
+| `rsync` | Upstream rsync 3.x; /usr/bin/rsync is openrsync, without --mkpath or -X. | formula |
 | `slack` | Slack desktop client; an Electron-wrapped web app, installed as a stated exception to ADR-028. | cask |
 | `claude` | Anthropic's Claude desktop app: Chat, Cowork and the Code tab in a GUI. | cask |
 | `chatgpt` | OpenAI's ChatGPT desktop app; an Electron-wrapped web app, installed as a stated exception to ADR-028. | cask |
@@ -304,7 +307,7 @@ Chosen instead of the defaults above, never alongside them.
 | | Packages |
 |---|---|
 | Default selection | 70 |
-| Everything declared | 126 |
+| Everything declared | 129 |
 
 Language runtimes are not here: Node, Go, Java, Rust and pnpm come from mise
 and Python from uv, so they are declared in `chezmoi/dot_config/mise/`

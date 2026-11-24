@@ -319,8 +319,9 @@ honours. Always preview first:
 ./script/macos-defaults --verify
 ```
 
-Gatekeeper quarantine, automatic FileVault and Rosetta are deliberately out of
-scope. See [ADR-016](docs/DECISIONS.md).
+Gatekeeper quarantine, automatic FileVault and automatic Rosetta are deliberately
+out of scope. See [ADR-016](docs/DECISIONS.md). Rosetta is optional through
+`./script/install-rosetta`, which you run yourself (ADR-054).
 
 ## Commit signing
 

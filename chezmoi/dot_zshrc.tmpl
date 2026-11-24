@@ -53,6 +53,20 @@ fi
 # would leave the current session unable to run the plugin it just installed.
 [[ ":$PATH:" == *":$HOME/.krew/bin:"* ]] || export PATH="$PATH:$HOME/.krew/bin"
 {{- end }}
+{{- if has "local-llm" .profiles }}
+
+# LM Studio's `lms` CLI, which the app installs into ~/.lmstudio/bin (ADR-025).
+#
+# Declared here because LM Studio will not put it back. On first launch the app appends
+# its own PATH block to ~/.zshrc and records developer.attemptedInstallLmsCliOnStartup in
+# ~/.lmstudio/settings.json. After that it never writes the block again: removing it and
+# relaunching the app was tested, and the block stayed gone. So the next chezmoi apply
+# would have deleted the app's block for good and silently taken `lms` off PATH.
+#
+# APPENDED, like ~/.krew/bin, and not guarded on the directory existing: the app creates
+# it on first launch, which is usually after this shell started.
+[[ ":$PATH:" == *":$HOME/.lmstudio/bin:"* ]] || export PATH="$PATH:$HOME/.lmstudio/bin"
+{{- end }}
 
 # Rust comes from mise, which shims cargo and rustc; no Homebrew keg on PATH.
 

@@ -294,6 +294,13 @@ policy check until you run `just mcp-policy`.
 - **The MCP policy** — `just mcp-policy` installs the allowlist to `/Library`. Read
   [`mcp/README.md`](../mcp/README.md) first: it governs which MCP servers may run at all.
 - **Backups** — `restic` and `rclone` are installed but no repository exists yet.
+- **Rosetta 2** — `./script/install-rosetta` (or `just rosetta`) shows Apple's licence and
+  verifies the install. Optional, and never run for you; the container substrate refuses
+  to build without it unless you opt out (ADR-054).
+- **Xcode and Apple's Developer app** — install them from the App Store by hand if you need
+  them. The repository needs only the Command Line Tools. Installing Xcode moves
+  `xcode-select` onto it, so accept its licence (`sudo xcodebuild -license`), and switch back
+  before you ever delete it (ADR-055).
 
 ---
 
