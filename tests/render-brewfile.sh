@@ -153,7 +153,7 @@ default_count="$(grep -E -c '^(brew|cask) "' "$TMP/Brewfile")"
   --firewall little-snitch \
   --output "$TMP/optional.Brewfile" >/dev/null
 grep -q 'brew "awscli"' "$TMP/optional.Brewfile"
-grep -q 'brew "azure-cli"' "$TMP/optional.Brewfile"
+grep -q 'cask "azure-cli"' "$TMP/optional.Brewfile"
 grep -q 'cask "gcloud-cli"' "$TMP/optional.Brewfile"
 grep -q 'brew "kubernetes-cli"' "$TMP/optional.Brewfile"
 grep -q 'cask "burp-suite"' "$TMP/optional.Brewfile"
