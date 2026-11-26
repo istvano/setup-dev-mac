@@ -1891,7 +1891,8 @@ a hardened guest from a run that asked for the opposite.
 `java`, `maven`, `gradle` and `kotlin` are declared in
 `chezmoi/dot_config/mise/config.toml.tmpl` alongside node, go, pnpm, python and rust.
 Two JDKs are pinned — `temurin-21` first and therefore default, `temurin-17` because
-Couchbase SDK and connector work still spans it. `tests/render-brewfile.sh` refutes
+Couchbase SDK and connector work still spans it. Superseded in part: ADR-056 made
+`temurin-25` first and default. `tests/render-brewfile.sh` refutes
 Homebrew-installed `maven`, `gradle`, `kotlin`, `openjdk` and `sdkman-cli`.
 
 SDKMAN was the preferred tool and was declined on three specific grounds, not on taste.
@@ -2897,3 +2898,35 @@ It is recorded here only so a future audit knows to expect it.
 `brew bundle cleanup` cannot see App Store applications at all, so neither app shows up
 in package reconciliation. The audit in `docs/OPERATIONS.md` that does see them lists
 both as expected manual installs.
+
+## ADR-056: Parity with setup-dev-linux-wsl: Java 25, git shortcuts, proxy helpers
+
+**Status:** accepted. Amends ADR-042.
+
+The operator uses this repository and `setup-dev-linux-wsl` side by side and decided on
+2026-11-26 that three behaviours should not differ between them.
+
+**Java 25 is the default JDK.** `mise` takes the first `java` entry as the default, so
+`chezmoi/dot_config/mise/config.toml.tmpl` now reads
+`["temurin-25", "temurin-21", "temurin-17"]`. ADR-042 had put 21 first and appended 25 so no
+project moved major version unasked; that caution is withdrawn deliberately, and a project
+that needs 21 or 17 pins it with `mise use java@temurin-21`. `tests/placement-policy.sh`
+asserts the order.
+
+**Git shortcuts under oh-my-zsh's names.** 21 aliases live in
+`chezmoi/dot_config/zsh/git-aliases.zsh`, sourced by `~/.zshrc`, and as `abbr -a` entries in
+`config.fish.tmpl`. They are separate files rather than inline in `dot_zshrc.tmpl` so a
+test can source them without rendering the template. fish uses abbreviations so history and
+completion see the real command. oh-my-zsh itself is not installed.
+
+**`proxyon` / `proxyoff`.** `proxy.zsh`, `functions/proxy{on,off}.fish` and
+`~/.local/bin/proxy-settings` are ported unchanged in behaviour. The private settings file is
+`~/.config/proxy/proxy.local.json` (or `$PROXY_SETTINGS`), the same path and format as on
+Linux, and is never tracked. `proxy-settings` validates it (regular file, owner, mode,
+size, exactly four string keys, URL schemes) and prints NUL-separated values that the
+functions never evaluate; the first `proxyon` snapshots prior state for `proxyoff`. It
+reads `jq`, already in `core`, and handles both GNU and BSD `stat`.
+
+`tests/shell-helpers.sh` covers the reader's refusals, the zsh and fish round trips and
+that the zsh and fish git sets are identical. fish is therefore needed by the test; CI
+installs it, and `REQUIRE_LINTERS=1` makes its absence a failure.

@@ -22,6 +22,9 @@ provides.
    REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1 ./script/test
    ```
 
+   `REQUIRE_LINTERS=1` also requires fish (`brew install fish`), which
+   `tests/shell-helpers.sh` runs for the `proxyon` / `proxyoff` round trip.
+
 3. Preview the default choices:
 
    ```bash
@@ -571,6 +574,31 @@ On an already-installed machine, edit `shell` in
 `~/.config/chezmoi/chezmoi.toml` and run `./script/setup`. Chezmoi then installs
 the other fragment, writes or removes `~/.config/fish`, and re-renders the
 Ghostty configuration.
+
+### Git shortcuts and proxy helpers
+
+Both shells carry the same helpers (ADR-056). The git shortcuts use oh-my-zsh's names
+(`g`, `ga`, `gaa`, `gb`, `gc`, `gcmsg`, `gco`, `gcb`, `gsw`, `gd`, `gds`, `gf`, `gl`, `gp`,
+`gpf`, `glog`, `grb`, `grbi`, `gst`, `gsta`, `gstp`): aliases in
+`~/.config/zsh/git-aliases.zsh`, abbreviations in `config.fish`. Run `alias` (zsh) or
+`abbr` (fish) to list them.
+
+`proxyon` sets `http_proxy`, `https_proxy`, `all_proxy` and `no_proxy` (lower and upper
+case) from a private file; `proxyoff` restores exactly what was there before. The file is
+`~/.config/proxy/proxy.local.json` (or `$PROXY_SETTINGS`), never managed by chezmoi, and the
+same format works on every machine:
+
+```json
+{"http_proxy": "http://proxy.example:3128", "https_proxy": "http://proxy.example:3128",
+ "all_proxy": "", "no_proxy": "localhost,127.0.0.1"}
+```
+
+```bash
+install -m 600 /dev/null ~/.config/proxy/proxy.local.json   # then edit it
+```
+
+`proxy-settings` (in `~/.local/bin`) refuses a file that is a symlink, not owned by you,
+readable by group or others, or malformed. It needs `jq`, which the `core` profile installs.
 
 ### The login shell is not changed
 
@@ -1302,7 +1330,8 @@ because that is not what their pin means:
   Comparing it to the newest release would warn every run about a version the
   policy forbids.
 - **Java** against Adoptium's newest LTS. The pins are ordered, and the first is
-  the default; adding a newer LTS at the end changes no project's JDK.
+  the default (Temurin 25, ADR-056), so a new LTS becomes the default only by an
+  edit that puts it first.
 
 The actions check asks two questions, and the second matters more: whether the
 pinned version is still current, and whether the pinned SHA actually resolves to

@@ -145,7 +145,7 @@ install 70 packages with zsh, or 69 with fish — which is the ceiling
 argue for raising it (ADR-013). Kubernetes is in the default because
 this workstation exists for Docker and Kubernetes development, so a default that
 cannot do it is incomplete rather than lean (ADR-038). The default carries one tool per job (ADR-022) and no language
-runtime from Homebrew: Node, Go, pnpm, Rust, Python and the JVM set — two JDKs plus Maven,
+runtime from Homebrew: Node, Go, pnpm, Rust, Python and the JVM set — three JDKs (Temurin 25 default) plus Maven,
 Gradle and Kotlin — all come from mise (ADR-021, ADR-042), and any other
 language is one `mise use -g <lang>` away. Specialist profiles are opt-in. Container runtimes, password managers and outbound firewalls use
 separate mutually exclusive fragments.
@@ -276,6 +276,10 @@ reports the difference on every apply and changes nothing.
 Both configurations activate the same tools — mise, direnv, starship, zoxide,
 fzf and Atuin — and neither installs a plugin manager. `~/.config/fish` is only
 written when fish is selected.
+
+Both also carry the same git shortcuts (`gst`, `gco`, `gcmsg` and the rest of the oh-my-zsh
+names, as zsh aliases and fish abbreviations) and `proxyon` / `proxyoff`, which set and
+restore the proxy variables from a private `~/.config/proxy/proxy.local.json` (ADR-056).
 
 ## Shell history
 

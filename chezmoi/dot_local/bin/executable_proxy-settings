@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# proxy-settings — print the private proxy settings for proxyon, or fail closed.
+#
+#   proxy-settings [file]   default: $PROXY_SETTINGS, else ~/.config/proxy/proxy.local.json
+#
+# Used by the proxyon shell function (zsh and fish); you rarely run it yourself.
+#
+# Managed by chezmoi from chezmoi/dot_local/bin/executable_proxy-settings; edit it there.
+# The settings file is private and never managed: a regular file (not a symlink), owned
+# by you, no group or other access, at most 64 KiB, holding exactly the four string keys
+# http_proxy, https_proxy, all_proxy and no_proxy. Non-empty proxy URLs use http, https,
+# socks5 or socks5h and name a host; control characters and duplicate or unknown keys are
+# refused. On success it prints the four values in that order, NUL-separated, then "OK".
+# Values are data: nothing here or in proxyon evaluates them. Ported from
+# setup-dev-linux-wsl, whose version is itself a port of setup-dev-linux's
+# proxy-settings.py, without that Python dependency.
+set -Eeuo pipefail
+
+KEYS=(http_proxy https_proxy all_proxy no_proxy)
+file="${1:-${PROXY_SETTINGS:-$HOME/.config/proxy/proxy.local.json}}"
+
+fail() {
+  printf 'proxy-settings: %s\n' "$*" >&2
+  exit 1
+}
+
+case "${1:-}" in -h | --help)
+  sed -n '2,6s/^# \{0,1\}//p' "$0"
+  exit 0
+  ;;
+esac
+
+command -v jq >/dev/null 2>&1 || fail 'jq is required (core profile).'
+[[ -e "$file" ]] || fail "no settings file at $file."
+[[ ! -L "$file" && -f "$file" ]] || fail "$file must be a regular file, not a symlink."
+
+# GNU stat (Linux) first, BSD stat (macOS, where the tests also run) second.
+if meta="$(stat -c '%u %a %s' -- "$file" 2>/dev/null)"; then :; else meta="$(stat -f '%u %Lp %z' -- "$file")"; fi
+read -r owner mode size <<<"$meta"
+[[ "$owner" == "$(id -u)" ]] || fail "$file must be owned by you."
+((8#$mode & 8#077)) && fail "$file must not be readable by group or others (chmod 600)."
+((size <= 65536)) || fail "$file is larger than 64 KiB."
+
+jq -e 'type == "object"' "$file" >/dev/null 2>&1 || fail "$file is not a JSON object."
+# jq keeps the last of duplicate keys silently, so count the top-level keys as streamed.
+count="$(jq -c --stream 'select(length == 2 and (.[0] | length) == 1) | .[0][0]' "$file" | wc -l)"
+if ! jq -e '(keys | sort) == ["all_proxy", "http_proxy", "https_proxy", "no_proxy"] and all(.[]; type == "string")' \
+  "$file" >/dev/null 2>&1 || ((count != 4)); then
+  fail "$file must hold exactly the string keys ${KEYS[*]}."
+fi
+
+values=()
+for key in "${KEYS[@]}"; do
+  value="$(jq -r --arg k "$key" '.[$k]' "$file")"
+  [[ "$value" =~ [[:cntrl:]] ]] && fail "$key contains a control character."
+  if [[ "$key" != no_proxy && -n "$value" ]]; then
+    [[ "$value" =~ ^(https?|socks5h?)://([^/:@[:space:]]+@)?([^/:@[:space:]]+)(:([0-9]{1,5}))?/?$ ]] ||
+      fail "$key must be an http, https, socks5 or socks5h URL with a host."
+    port="${BASH_REMATCH[5]}"
+    [[ -z "$port" ]] || ((10#$port >= 1 && 10#$port <= 65535)) || fail "$key has an invalid port."
+  fi
+  values+=("$value")
+done
+
+printf '%s\0' "${values[@]}"
+printf 'OK'

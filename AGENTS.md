@@ -225,6 +225,10 @@ Three of those five report the word "OK" as they skip, which is why a green loca
 reads as more coverage than it is. Note also that no profile declares any Python: the
 one satisfying `tomllib` today arrives as a transitive dependency of `yamllint`.
 
+`tests/shell-helpers.sh` also needs fish for the proxyon/proxyoff round trip: without it
+the test prints a SKIP to stderr, and under `REQUIRE_LINTERS=1` it fails. Install fish
+(`brew install fish`) before running the gate.
+
 Shell scripts are discovered by shebang via `script/shell-files`, never by
 filename extension. Selecting by extension previously skipped every
 extensionless script in `script/`, which hid three install-breaking defects.

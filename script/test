@@ -27,6 +27,7 @@ TESTS=(
   browser-profiles
   agent-tools
   agents
+  shell-helpers
 )
 
 for test in "${TESTS[@]}"; do
