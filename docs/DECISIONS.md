@@ -1890,8 +1890,9 @@ a hardened guest from a run that asked for the opposite.
 
 `java`, `maven`, `gradle` and `kotlin` are declared in
 `chezmoi/dot_config/mise/config.toml.tmpl` alongside node, go, pnpm, python and rust.
-Two JDKs are pinned (ADR-056 later made 25 the default, first) — `temurin-21` first and therefore default, `temurin-17` because
-Couchbase SDK and connector work still spans it. `tests/render-brewfile.sh` refutes
+Two JDKs are pinned — `temurin-21` first and therefore default, `temurin-17` because
+Couchbase SDK and connector work still spans it. Superseded in part: ADR-056 made
+`temurin-25` first and default. `tests/render-brewfile.sh` refutes
 Homebrew-installed `maven`, `gradle`, `kotlin`, `openjdk` and `sdkman-cli`.
 
 SDKMAN was the preferred tool and was declined on three specific grounds, not on taste.

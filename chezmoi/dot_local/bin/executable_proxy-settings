@@ -12,7 +12,8 @@
 # socks5 or socks5h and name a host; control characters and duplicate or unknown keys are
 # refused. On success it prints the four values in that order, NUL-separated, then "OK".
 # Values are data: nothing here or in proxyon evaluates them. Ported from
-# setup-dev-linux (proxy-settings.py), without its Python dependency.
+# setup-dev-linux-wsl, whose version is itself a port of setup-dev-linux's
+# proxy-settings.py, without that Python dependency.
 set -Eeuo pipefail
 
 KEYS=(http_proxy https_proxy all_proxy no_proxy)

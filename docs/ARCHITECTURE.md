@@ -94,6 +94,11 @@ Owns high-risk or Linux-specific work:
 
 ## Configuration flow
 
+Shell helpers (ADR-056) are separate files: `~/.config/zsh/git-aliases.zsh` and
+`~/.config/zsh/proxy.zsh` are sourced by `~/.zshrc`, the fish equivalents are
+`~/.config/fish/functions/proxy{on,off}.fish` plus abbreviations in `config.fish`, and
+`~/.local/bin/proxy-settings` validates the private proxy file for both.
+
 Hooks run in filename order, and the numbers are the ordering mechanism rather than
 decoration — hook 12 precedes 15 because cloning over ssh and signing commits both depend on
 a key existing.

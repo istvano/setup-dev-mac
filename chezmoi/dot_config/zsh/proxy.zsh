@@ -6,7 +6,8 @@
 # them. proxyon exports http_proxy, https_proxy, all_proxy and no_proxy in lower and upper
 # case. The first proxyon saves the previous values, unset state and export attributes;
 # proxyoff restores exactly that, and repeating either is harmless. Ported from
-# setup-dev-linux (operator decision, ADR-056).
+# setup-dev-linux-wsl (operator decision, ADR-056), whose version is itself a port of
+# setup-dev-linux.
 
 proxyon() {
   emulate -L zsh

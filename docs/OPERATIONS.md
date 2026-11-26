@@ -22,6 +22,9 @@ provides.
    REQUIRE_LINTERS=1 REQUIRE_CHEZMOI=1 ./script/test
    ```
 
+   `REQUIRE_LINTERS=1` also requires fish (`brew install fish`), which
+   `tests/shell-helpers.sh` runs for the `proxyon` / `proxyoff` round trip.
+
 3. Preview the default choices:
 
    ```bash
