@@ -211,6 +211,31 @@ if status is-interactive
     end
     type -q bat; and alias cat 'bat --paging=never'
 
+    # Git shortcuts under oh-my-zsh's names, as abbreviations: they expand on the
+    # command line, so history and `git` completions see the real command. The zsh set is
+    # ~/.config/zsh/git-aliases.zsh; tests/shell-helpers.sh keeps them equal (ADR-056).
+    abbr -a g 'git'
+    abbr -a ga 'git add'
+    abbr -a gaa 'git add --all'
+    abbr -a gb 'git branch'
+    abbr -a gc 'git commit --verbose'
+    abbr -a gcmsg 'git commit --message'
+    abbr -a gco 'git checkout'
+    abbr -a gcb 'git checkout -b'
+    abbr -a gsw 'git switch'
+    abbr -a gd 'git diff'
+    abbr -a gds 'git diff --staged'
+    abbr -a gf 'git fetch'
+    abbr -a gl 'git pull'
+    abbr -a gp 'git push'
+    abbr -a gpf 'git push --force-with-lease'
+    abbr -a glog 'git log --oneline --decorate --graph'
+    abbr -a grb 'git rebase'
+    abbr -a grbi 'git rebase --interactive'
+    abbr -a gst 'git status'
+    abbr -a gsta 'git stash push'
+    abbr -a gstp 'git stash pop'
+
     # `rm` is deliberately not aliased to trash. Redefining it builds a habit
     # that does not transfer to another machine, a container, or anything run
     # under sudo, where the same keystrokes delete irreversibly. Call trash by

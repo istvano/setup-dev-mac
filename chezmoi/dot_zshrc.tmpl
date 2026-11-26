@@ -187,6 +187,15 @@ if command -v eza >/dev/null 2>&1; then
 fi
 command -v bat >/dev/null 2>&1 && alias cat='bat --paging=never'
 
+# Git shortcuts (oh-my-zsh names) and the proxyon/proxyoff helpers live in their own files
+# under ~/.config/zsh, so tests/shell-helpers.sh can source and exercise each one without
+# rendering this template. Each is sourced only when readable (ADR-056).
+for _zsh_part in git-aliases proxy; do
+  [[ -r "${XDG_CONFIG_HOME:-$HOME/.config}/zsh/$_zsh_part.zsh" ]] &&
+    source "${XDG_CONFIG_HOME:-$HOME/.config}/zsh/$_zsh_part.zsh"
+done
+unset _zsh_part
+
 # `rm` is deliberately not aliased to trash. Redefining it builds a habit that
 # does not transfer to another machine, a container, or anything run under sudo,
 # where the same keystrokes delete irreversibly. Call trash by name.
