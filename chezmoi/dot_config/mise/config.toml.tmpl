@@ -37,16 +37,13 @@ python = "3.14"
 # made Rancher Desktop expensive enough to drop in ADR-037. mise covers the same ground,
 # so the JVM is not a special case needing a second manager. See the ADR-021 amendment.
 #
-# Three JDKs: 21 is the default because it is first, 17 is present because Couchbase SDK and
-# connector work still spans it. `mise use java@temurin-17` in a project switches it, which
-# is the per-project selection SDKMAN users expect.
-#
-# 25 is the newest LTS and is APPENDED, deliberately. mise takes the first entry as the
-# default, so putting 25 first would move every project that has not asked for a JDK onto a
-# new major without an edit anywhere in that project. Listing it last makes it available to
-# `mise use java@temurin-25` and changes nothing else. Promoting it is a one-line edit when
-# the work has actually been tried on it.
-java = ["temurin-21", "temurin-17", "temurin-25"]
+# Three JDKs: 25 is the default because it is first (mise takes the first entry), 21 is the
+# previous LTS and 17 is present because Couchbase SDK and connector work still spans it.
+# `mise use java@temurin-21` or `java@temurin-17` in a project switches it, which is the
+# per-project selection SDKMAN users expect. The order matches setup-dev-linux-wsl so both
+# machines resolve the same default JDK (ADR-056, which reverses the 21-first order that
+# ADR-042 set).
+java = ["temurin-25", "temurin-21", "temurin-17"]
 maven = "3.9"
 gradle = "9"
 kotlin = "2.4"

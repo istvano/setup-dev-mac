@@ -617,6 +617,10 @@ assert_match 'bootstrap_args\+=\(--no-hardening\)' "$ROOT/script/test-install"
 # writes by default, so it arrives from a convenience command rather than a decision.
 refute_match '^[^#]*=[[:space:]]*"latest"' "$ROOT/chezmoi/dot_config/mise/config.toml.tmpl"
 
+# Temurin 25 is the default JDK: mise takes the first entry, and ADR-056 moved the Mac to
+# the same order as setup-dev-linux-wsl.
+assert_match '^java = \["temurin-25", "temurin-21", "temurin-17"\]$' "$ROOT/chezmoi/dot_config/mise/config.toml.tmpl"
+
 # Cline's CLI comes from npm through mise, never from Homebrew: the formula is
 # deprecated upstream, which script/check-tokens fails on, and it depends on a Homebrew
 # node beside mise's. See ADR-044.
