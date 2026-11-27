@@ -460,7 +460,7 @@ configuration fault, and the checks below have to move to the host.
 ```bash
 ghostty +validate-config          # DO THIS FIRST — the only real check
 ghostty +show-config | grep -E 'scrollback|shell-integration|^command|font-family|theme'
-ghostty +list-themes | grep -i catppuccin
+ghostty +list-themes | grep -i solarized
 ghostty +list-fonts | grep -i nerd
 ```
 
@@ -470,8 +470,8 @@ mistyped *key* — but it does not resolve a theme, so it happily echoed a theme
 name that stopped Ghostty starting. `+validate-config` resolves it and reports
 `theme "…" not found`.
 
-Theme names are Ghostty's own spelling: `+list-themes` prints `Catppuccin Mocha`,
-capitalised and space-separated, not `catppuccin-mocha`.
+Theme names are Ghostty's own spelling: `+list-themes` prints `iTerm2 Solarized Light`,
+capitalised and space-separated, not `iterm2-solarized-light`.
 
 ## VS Code extensions
 

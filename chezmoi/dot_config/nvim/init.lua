@@ -56,7 +56,7 @@ opt.scrolloff = 5
 opt.sidescrolloff = 8
 
 -- True colour, which Ghostty supports. Without it the terminal's 256-colour approximation
--- is used and the Catppuccin palette configured for Ghostty is visibly wrong inside nvim.
+-- is used and the Solarized Light palette configured for Ghostty is visibly wrong inside nvim.
 opt.termguicolors = true
 
 -- Show the effect of :s as it is typed, in a split. Built in since 0.6 and off by default.
