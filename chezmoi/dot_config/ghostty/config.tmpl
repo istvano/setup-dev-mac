@@ -20,7 +20,10 @@ font-size = 16
 # `+show-config` does NOT catch this. It echoes the parsed value without
 # resolving the theme, and reported the broken spelling as configured. Only
 # `ghostty +validate-config` resolves it.
-theme = dark:Catppuccin Mocha,light:Catppuccin Latte
+theme = iTerm2 Solarized Light
+# Solarized Light on every machine, fixed rather than following the OS appearance (ADR-057).
+# bold-is-bright stays at Ghostty's default of false: Solarized's bright slots are base tones
+# and brightWhite matches the background, so promoting bold text to them would hide it.
 window-padding-x = 8
 window-padding-y = 6
 window-save-state = never

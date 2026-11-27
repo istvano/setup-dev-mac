@@ -179,7 +179,7 @@ comment pretending to be a test.
       reachable cluster, so a config authored here could not be validated before shipping —
       and an invalid one breaks k9s at startup. Do it on a machine with a cluster: let k9s
       generate its defaults, then bring the diff back. The settings worth having are a
-      read-only default for production contexts, and a skin matching the Catppuccin palette
+      read-only default for production contexts, and a skin matching the Solarized Light palette
       the rest of the machine uses.
 - [ ] **`gh` has no configuration** (no editor, pager, protocol or aliases). Same reason to
       be careful for a different cause: `gh config set` rewrites `~/.config/gh/config.yml`,
@@ -550,12 +550,12 @@ remains cannot be settled from documentation alone.
       Ghostty's `theme =` applies to Ghostty and nothing else, so the built-in
       terminal shows whatever profile it was left on — verified as the stock `Basic`
       on the build machine, with only the six Apple profiles present. Import a
-      `.terminal` profile (Catppuccin publishes them), then Terminal > Settings >
+      `.terminal` profile (Solarized publishes them), then Terminal > Settings >
       Profiles > select > Default.
 
       Two things to know before bothering. **Terminal.app has no truecolor**, only
-      256 colours, so a Catppuccin profile fixes the 16 ANSI colours and the
-      shell prompt while `bat` (pinned to `--theme="Catppuccin Mocha"`), delta,
+      256 colours, so a Solarized Light profile fixes the 16 ANSI colours and the
+      shell prompt while `bat` (pinned to `--theme="Solarized (light)"`), delta,
       eza and starship keep emitting hex and get approximated. Close, not
       matching, and worst exactly where colour carries meaning — diffs and syntax
       highlighting. That is Terminal.app, not something a profile fixes.

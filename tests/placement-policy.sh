@@ -144,7 +144,7 @@ assert_match '^command = \{\{ template "brew-prefix" \. \}\}/bin/fish --login$' 
 
 # Ghostty theme names use its own spelling, which is not this repository's.
 #
-# `ghostty +list-themes` prints "Catppuccin Mocha" — capitalised, space
+# `ghostty +list-themes` prints "iTerm2 Solarized Light" — capitalised, space
 # separated. Written lowercase-hyphenated, Ghostty refuses to start. This asserts
 # the shape only; the machine-specific check is `ghostty +validate-config`, which
 # needs Ghostty installed and is in docs/TESTING.md.
@@ -156,7 +156,7 @@ theme_line="$(grep -m1 '^theme = ' "$ghostty" || true)"
 if [[ "$theme_line" =~ [a-z]+-[a-z]+ ]]; then
   echo "ghostty/config.tmpl uses a hyphenated theme name:" >&2
   echo "  $theme_line" >&2
-  echo 'Ghostty names themes as +list-themes prints them, e.g. "Catppuccin Mocha".' >&2
+  echo 'Ghostty names themes as +list-themes prints them, e.g. "iTerm2 Solarized Light".' >&2
   echo 'A name it cannot resolve stops Ghostty starting entirely.' >&2
   exit 1
 fi

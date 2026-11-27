@@ -2930,3 +2930,20 @@ reads `jq`, already in `core`, and handles both GNU and BSD `stat`.
 `tests/shell-helpers.sh` covers the reader's refusals, the zsh and fish round trips and
 that the zsh and fish git sets are identical. fish is therefore needed by the test; CI
 installs it, and `REQUIRE_LINTERS=1` makes its absence a failure.
+
+## ADR-057: The terminal palette is Solarized Light on every machine
+
+**Status:** accepted. Supersedes the Catppuccin palette choice recorded earlier.
+
+The operator decided on 2026-11-27 that the terminal is Solarized Light on every machine,
+this one and the Windows and WSL setups alike. The theme is fixed. It does not follow the OS
+appearance, so the earlier Ghostty `dark:`/`light:` pair is gone.
+
+- Ghostty: `theme = iTerm2 Solarized Light`, the name `ghostty +list-themes` prints.
+  `ghostty +validate-config` is the check, since a bad name stops Ghostty starting.
+- bat: `--theme="Solarized (light)"`, built in; no theme file or cache build.
+- delta and nvim detect the light background themselves; nothing is configured for them.
+- `bold-is-bright` stays at Ghostty's default, false. Solarized's bright slots are base
+  tones and brightWhite matches the background, so brightening bold text would hide it.
+
+Earlier ADR text that mentions Catppuccin is history and is left as written.
